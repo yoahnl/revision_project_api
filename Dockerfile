@@ -20,11 +20,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=8080
 
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json prisma.config.ts ./
 RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 
 EXPOSE 8080
-CMD ["node", "dist/src/main.js"]
+CMD ["sh", "-c", "if [ \"$RUN_PRISMA_MIGRATIONS\" = \"true\" ]; then ./node_modules/.bin/prisma migrate deploy; fi && node dist/src/main.js"]

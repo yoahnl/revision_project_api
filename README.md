@@ -60,5 +60,6 @@ Variables requises en production :
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
 - `GOOGLE_GENAI_API_KEY`
 - `GENKIT_MODEL` optionnel, defaut `googleai/gemini-2.5-flash`
+- `RUN_PRISMA_MIGRATIONS=true` pour appliquer `prisma migrate deploy` au demarrage Dokploy
 
 Le conteneur ecoute sur `PORT=8080` par defaut.
