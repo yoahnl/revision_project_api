@@ -31,7 +31,10 @@ type QuestionCreatePayload = {
   data: {
     sessionId: string;
     knowledgeUnitId: string;
+    prompt: string;
+    choices: Array<{ id: string; label: string }>;
     correctChoiceId: string;
+    explanation: string;
   };
 };
 
@@ -150,19 +153,47 @@ describe('PrismaActivitiesRepository', () => {
     ...input,
   });
 
-  it('persists a deterministic diagnostic quiz after verifying ownership', async () => {
+  it('persists the generated diagnostic quiz after verifying ownership', async () => {
     const { prisma, repository } = createRepository();
     prisma.knowledgeUnit.findFirst.mockResolvedValue({
       id: 'unit-1',
       subjectId: 'subject-1',
     });
     prisma.activitySession.create.mockResolvedValue(sessionRecord());
-    prisma.question.create.mockResolvedValue(questionRecord());
+    prisma.question.create.mockResolvedValue(
+      questionRecord({
+        prompt:
+          'Quel principe limite le pouvoir constituant derive dans la Constitution de 1958 ?',
+        choices: [
+          { id: 'a', label: 'La forme republicaine du gouvernement' },
+          { id: 'b', label: 'La superiorite du pouvoir reglementaire' },
+        ],
+        correctChoiceId: 'a',
+        explanation:
+          'La Constitution interdit de reviser la forme republicaine du gouvernement.',
+      }),
+    );
 
     const activity = await repository.createDiagnosticQuiz({
       studentId: 'student-1',
       subjectId: 'subject-1',
       knowledgeUnitId: 'unit-1',
+      quiz: {
+        title: 'Diagnostic constitutionnel',
+        questions: [
+          {
+            prompt:
+              'Quel principe limite le pouvoir constituant derive dans la Constitution de 1958 ?',
+            choices: [
+              { id: 'a', label: 'La forme republicaine du gouvernement' },
+              { id: 'b', label: 'La superiorite du pouvoir reglementaire' },
+            ],
+            correctChoiceId: 'a',
+            explanation:
+              'La Constitution interdit de reviser la forme republicaine du gouvernement.',
+          },
+        ],
+      },
     });
 
     expect(prisma.knowledgeUnit.findFirst).toHaveBeenCalledWith({
@@ -189,11 +220,20 @@ describe('PrismaActivitiesRepository', () => {
     expect(questionCreatePayload?.data).toMatchObject({
       sessionId: 'session-1',
       knowledgeUnitId: 'unit-1',
+      prompt:
+        'Quel principe limite le pouvoir constituant derive dans la Constitution de 1958 ?',
+      choices: [
+        { id: 'a', label: 'La forme republicaine du gouvernement' },
+        { id: 'b', label: 'La superiorite du pouvoir reglementaire' },
+      ],
       correctChoiceId: 'a',
+      explanation:
+        'La Constitution interdit de reviser la forme republicaine du gouvernement.',
     });
     expect(activity).toMatchObject({
       sessionId: 'session-1',
       type: 'diagnostic_quiz',
+      title: 'Diagnostic constitutionnel',
       questions: [{ id: 'question-1' }],
     });
   });
@@ -207,6 +247,22 @@ describe('PrismaActivitiesRepository', () => {
         studentId: 'student-1',
         subjectId: 'subject-2',
         knowledgeUnitId: 'unit-1',
+        quiz: {
+          title: 'Diagnostic constitutionnel',
+          questions: [
+            {
+              prompt:
+                'Quelle est la norme supreme dans la hierarchie interne ?',
+              choices: [
+                { id: 'a', label: 'La Constitution' },
+                { id: 'b', label: 'Le reglement' },
+              ],
+              correctChoiceId: 'a',
+              explanation:
+                'La Constitution se situe au sommet de la hierarchie interne.',
+            },
+          ],
+        },
       }),
     ).rejects.toThrow('Knowledge unit does not belong to student subject');
 

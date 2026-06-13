@@ -5,7 +5,15 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../../app.module';
 import { REVISION_REPOSITORY } from '../revision/application/revision.repository';
-import { ACTIVITIES_REPOSITORY } from './application/activities.repository';
+import {
+  ACTIVITIES_REPOSITORY,
+  type DiagnosticQuizActivity,
+} from './application/activities.repository';
+import {
+  DIAGNOSTIC_QUIZ_GENERATOR,
+  type GeneratedDiagnosticQuiz,
+} from './application/diagnostic-quiz-generator';
+import { KnowledgeUnit } from '../revision/domain/knowledge-unit.entity';
 import { TOKEN_VERIFIER } from '../auth/application/token-verifier';
 import { FirebaseAuthGuard } from '../auth/interfaces/firebase-auth.guard';
 import { PrismaService } from '../../shared/infrastructure/prisma/prisma.service';
@@ -28,42 +36,97 @@ type NextActivityResponseBody = {
   questions: unknown[];
 };
 
+type CreateDiagnosticQuizInput = {
+  studentId: string;
+  subjectId: string;
+  knowledgeUnitId: string;
+  quiz: GeneratedDiagnosticQuiz;
+};
+
 describe('ActivitiesModule', () => {
   let app: INestApplication<App>;
   let activitiesRepository: {
-    createDiagnosticQuiz: jest.Mock;
+    createDiagnosticQuiz: jest.Mock<
+      Promise<DiagnosticQuizActivity>,
+      [CreateDiagnosticQuizInput]
+    >;
     submitResult: jest.Mock;
   };
+  let diagnosticQuizGenerator: {
+    generate: jest.Mock<
+      Promise<GeneratedDiagnosticQuiz>,
+      [{ knowledgeUnit: KnowledgeUnit }]
+    >;
+  };
   let revisionRepository: {
+    findKnowledgeUnits: jest.Mock;
     findMasteryStates: jest.Mock;
     upsertMastery: jest.Mock;
   };
 
   beforeEach(async () => {
     activitiesRepository = {
-      createDiagnosticQuiz: jest.fn().mockResolvedValue({
-        sessionId: 'session-1',
-        type: 'diagnostic_quiz',
-        title: 'Diagnostic rapide',
-        questions: [
-          {
-            id: 'question-1',
-            prompt:
-              'Quelle structure est principalement responsable de la contraction cardiaque ?',
-            choices: [
-              { id: 'a', label: 'Myocarde' },
-              { id: 'b', label: 'Pericarde' },
-            ],
-          },
-        ],
-      }),
+      createDiagnosticQuiz: jest.fn<
+        Promise<DiagnosticQuizActivity>,
+        [CreateDiagnosticQuizInput]
+      >((input) =>
+        Promise.resolve({
+          sessionId: 'session-1',
+          type: 'diagnostic_quiz',
+          title: input.quiz.title,
+          questions: input.quiz.questions.map(
+            (
+              question: {
+                prompt: string;
+                choices: Array<{ id: string; label: string }>;
+              },
+              index: number,
+            ) => ({
+              id: `question-${index + 1}`,
+              prompt: question.prompt,
+              choices: question.choices,
+            }),
+          ),
+        }),
+      ),
       submitResult: jest.fn().mockResolvedValue({
         correctAnswers: 1,
         totalQuestions: 1,
         knowledgeUnitId: 'unit-1',
       }),
     };
+    diagnosticQuizGenerator = {
+      generate: jest
+        .fn<
+          Promise<GeneratedDiagnosticQuiz>,
+          [{ knowledgeUnit: KnowledgeUnit }]
+        >()
+        .mockResolvedValue({
+          title: 'Diagnostic constitutionnel',
+          questions: [
+            {
+              prompt:
+                'Quelle limite materielle encadre la revision constitutionnelle en France ?',
+              choices: [
+                { id: 'a', label: 'La forme republicaine du gouvernement' },
+                { id: 'b', label: 'La suppression du Parlement' },
+              ],
+              correctChoiceId: 'a',
+              explanation:
+                'La forme republicaine du gouvernement ne peut pas faire l objet d une revision.',
+            },
+          ],
+        }),
+    };
     revisionRepository = {
+      findKnowledgeUnits: jest.fn().mockResolvedValue([
+        new KnowledgeUnit({
+          id: 'unit-1',
+          subjectId: 'subject-1',
+          title: 'Revision constitutionnelle',
+          summary: 'La Constitution de 1958 encadre la procedure de revision.',
+        }),
+      ]),
       findMasteryStates: jest.fn().mockResolvedValue([]),
       upsertMastery: jest.fn().mockResolvedValue({}),
     };
@@ -85,6 +148,8 @@ describe('ActivitiesModule', () => {
       .useValue({ verify: jest.fn() })
       .overrideProvider(ACTIVITIES_REPOSITORY)
       .useValue(activitiesRepository)
+      .overrideProvider(DIAGNOSTIC_QUIZ_GENERATOR)
+      .useValue(diagnosticQuizGenerator)
       .overrideProvider(REVISION_REPOSITORY)
       .useValue(revisionRepository)
       .overrideProvider(PrismaService)
@@ -108,8 +173,14 @@ describe('ActivitiesModule', () => {
 
     expect(typeof nextBody.sessionId).toBe('string');
     expect(nextBody.type).toBe('diagnostic_quiz');
-    expect(nextBody.title).toBe('Diagnostic rapide');
+    expect(nextBody.title).toBe('Diagnostic constitutionnel');
     expect(Array.isArray(nextBody.questions)).toBe(true);
+    const [generateInput] =
+      diagnosticQuizGenerator.generate.mock.calls[0] ?? [];
+    expect(generateInput?.knowledgeUnit.id).toBe('unit-1');
+    expect(generateInput?.knowledgeUnit.title).toBe(
+      'Revision constitutionnelle',
+    );
 
     await request(app.getHttpServer())
       .post(`/activities/${nextBody.sessionId}/result`)

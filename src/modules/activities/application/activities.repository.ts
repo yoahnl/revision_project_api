@@ -1,3 +1,5 @@
+import type { GeneratedDiagnosticQuiz } from './diagnostic-quiz-generator';
+
 export interface ActivityQuestionChoice {
   id: string;
   label: string;
@@ -23,6 +25,7 @@ export interface ActivitiesRepository {
     studentId: string;
     subjectId: string;
     knowledgeUnitId: string;
+    quiz: GeneratedDiagnosticQuiz;
   }): Promise<DiagnosticQuizActivity>;
 
   submitResult(input: {

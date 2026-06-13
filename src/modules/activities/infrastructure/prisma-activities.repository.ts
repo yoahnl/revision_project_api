@@ -1,26 +1,14 @@
 import { Injectable } from '@nestjs/common';
 import { ActivityStatus, ActivityType } from '../../../generated/prisma/enums';
+import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
+import type { GeneratedDiagnosticQuiz } from '../application/diagnostic-quiz-generator';
 import type {
   ActivitiesRepository,
   ActivityQuestion,
   ActivityQuestionChoice,
   DiagnosticQuizActivity,
 } from '../application/activities.repository';
-
-const DIAGNOSTIC_QUIZ = {
-  title: 'Diagnostic rapide',
-  question: {
-    prompt:
-      'Quelle structure est principalement responsable de la contraction cardiaque ?',
-    choices: [
-      { id: 'a', label: 'Myocarde' },
-      { id: 'b', label: 'Pericarde' },
-    ],
-    correctChoiceId: 'a',
-    explanation: 'Le myocarde est le muscle cardiaque.',
-  },
-};
 
 interface QuestionRecord {
   id: string;
@@ -43,7 +31,10 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
     studentId: string;
     subjectId: string;
     knowledgeUnitId: string;
+    quiz: GeneratedDiagnosticQuiz;
   }): Promise<DiagnosticQuizActivity> {
+    assertGeneratedQuizIsPersistable(input.quiz);
+
     return this.prisma.$transaction(async (tx) => {
       const knowledgeUnit = await tx.knowledgeUnit.findFirst({
         where: {
@@ -69,22 +60,28 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
         },
       });
 
-      const question = await tx.question.create({
-        data: {
-          sessionId: session.id,
-          knowledgeUnitId: input.knowledgeUnitId,
-          prompt: DIAGNOSTIC_QUIZ.question.prompt,
-          choices: DIAGNOSTIC_QUIZ.question.choices,
-          correctChoiceId: DIAGNOSTIC_QUIZ.question.correctChoiceId,
-          explanation: DIAGNOSTIC_QUIZ.question.explanation,
-        },
-      });
+      const questions: QuestionRecord[] = [];
+
+      for (const generatedQuestion of input.quiz.questions) {
+        questions.push(
+          await tx.question.create({
+            data: {
+              sessionId: session.id,
+              knowledgeUnitId: input.knowledgeUnitId,
+              prompt: generatedQuestion.prompt,
+              choices: toQuestionChoicesJson(generatedQuestion.choices),
+              correctChoiceId: generatedQuestion.correctChoiceId,
+              explanation: generatedQuestion.explanation,
+            },
+          }),
+        );
+      }
 
       return {
         sessionId: session.id,
         type: 'diagnostic_quiz',
-        title: DIAGNOSTIC_QUIZ.title,
-        questions: [toActivityQuestion(question)],
+        title: input.quiz.title,
+        questions: questions.map(toActivityQuestion),
       };
     });
   }
@@ -142,6 +139,35 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
       };
     });
   }
+}
+
+function assertGeneratedQuizIsPersistable(quiz: GeneratedDiagnosticQuiz): void {
+  if (quiz.title.trim().length < 2 || quiz.questions.length === 0) {
+    throw new Error('Generated diagnostic quiz is invalid');
+  }
+
+  for (const question of quiz.questions) {
+    const choiceIds = new Set(question.choices.map((choice) => choice.id));
+
+    if (
+      question.prompt.trim().length === 0 ||
+      question.explanation.trim().length === 0 ||
+      question.choices.length < 2 ||
+      choiceIds.size !== question.choices.length ||
+      !choiceIds.has(question.correctChoiceId)
+    ) {
+      throw new Error('Generated diagnostic quiz is invalid');
+    }
+  }
+}
+
+function toQuestionChoicesJson(
+  choices: ActivityQuestionChoice[],
+): Prisma.InputJsonValue {
+  return choices.map((choice) => ({
+    id: choice.id,
+    label: choice.label,
+  }));
 }
 
 function scoreAnswers(
