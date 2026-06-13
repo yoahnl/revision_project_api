@@ -3,21 +3,26 @@ import {
   Body,
   Controller,
   Get,
+  UploadedFile,
   Param,
   Post,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { AuthenticatedStudent } from '../../auth/interfaces/authenticated-student';
 import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import { GetDocumentUseCase } from '../application/get-document.use-case';
 import { ListSubjectDocumentsUseCase } from '../application/list-subject-documents.use-case';
 import { RegisterDocumentUseCase } from '../application/register-document.use-case';
+import { UploadCoursePdfUseCase } from '../application/upload-course-pdf.use-case';
 import { DOCUMENT_KINDS, type DocumentKind } from '../domain/document.entity';
 
 const MAX_FILE_NAME_LENGTH = 255;
 const MAX_STORAGE_PATH_LENGTH = 512;
 const MAX_MIME_TYPE_LENGTH = 100;
+const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -32,6 +37,17 @@ class RegisterDocumentDto {
   mimeType!: string;
 }
 
+class UploadCoursePdfDto {
+  subjectId!: string;
+}
+
+type UploadedCoursePdfFile = {
+  originalname: string;
+  mimetype: string;
+  buffer?: Buffer;
+  size: number;
+};
+
 @Controller()
 @UseGuards(FirebaseAuthGuard)
 export class DocumentsController {
@@ -39,6 +55,7 @@ export class DocumentsController {
     private readonly registerDocument: RegisterDocumentUseCase,
     private readonly listSubjectDocuments: ListSubjectDocumentsUseCase,
     private readonly getDocument: GetDocumentUseCase,
+    private readonly uploadCoursePdfUseCase: UploadCoursePdfUseCase,
   ) {}
 
   @Post('documents')
@@ -59,6 +76,37 @@ export class DocumentsController {
         fileName: validatedBody.fileName,
         storagePath: validatedBody.storagePath,
         mimeType: validatedBody.mimeType,
+      })
+      .catch((error: unknown) => {
+        normalizeDocumentRegistrationError(error);
+      });
+  }
+
+  @Post('documents/course-pdf')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_DOCUMENT_BYTES },
+    }),
+  )
+  uploadCoursePdf(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Body() body: UploadCoursePdfDto,
+    @UploadedFile() file: UploadedCoursePdfFile | undefined,
+  ) {
+    const subjectId = trimRequiredString(
+      body?.subjectId,
+      'Document subjectId is required',
+    );
+    const validatedFile = validateCoursePdfFile(file);
+
+    return this.uploadCoursePdfUseCase
+      .execute({
+        studentId: student.id,
+        firebaseUid: student.firebaseUid,
+        subjectId,
+        originalFileName: validatedFile.originalFileName,
+        content: validatedFile.content,
+        mimeType: validatedFile.mimeType,
       })
       .catch((error: unknown) => {
         normalizeDocumentRegistrationError(error);
@@ -90,6 +138,54 @@ export class DocumentsController {
       documentId,
     });
   }
+}
+
+function validateCoursePdfFile(file: UploadedCoursePdfFile | undefined): {
+  originalFileName: string;
+  content: Buffer;
+  mimeType: string;
+} {
+  if (!file) {
+    throw new BadRequestException('Document file is required');
+  }
+
+  const originalFileName = trimRequiredString(
+    file.originalname,
+    'Document file name is required',
+    MAX_FILE_NAME_LENGTH,
+  );
+  validateFileName(originalFileName);
+
+  if (!originalFileName.toLowerCase().endsWith('.pdf')) {
+    throw new BadRequestException('Course documents must be PDF files');
+  }
+
+  const mimeType = trimRequiredString(
+    file.mimetype,
+    'Document mime type is required',
+    MAX_MIME_TYPE_LENGTH,
+  );
+
+  if (mimeType !== 'application/pdf') {
+    throw new BadRequestException('PDF documents must use application/pdf');
+  }
+
+  if (!file.buffer || file.buffer.length === 0 || file.size === 0) {
+    throw new BadRequestException('Document content is required');
+  }
+
+  if (
+    file.size > MAX_DOCUMENT_BYTES ||
+    file.buffer.length > MAX_DOCUMENT_BYTES
+  ) {
+    throw new BadRequestException('Document file is too large');
+  }
+
+  return {
+    originalFileName,
+    content: file.buffer,
+    mimeType,
+  };
 }
 
 function validateRegisterDocumentBody(
@@ -252,6 +348,8 @@ function normalizeDocumentRegistrationError(error: unknown): never {
       error.message === 'Document file name is required' ||
       error.message === 'Document storage path is required' ||
       error.message === 'Document mime type is required' ||
+      error.message === 'Document content is required' ||
+      error.message === 'Course documents must be PDF files' ||
       error.message === 'PDF documents must use application/pdf' ||
       error.message === 'Exam images must use an image mime type' ||
       error.message ===

@@ -5,7 +5,7 @@ import { AiModule } from '../ai/ai.module';
 import { DOCUMENT_CONTENT_READER } from '../documents/application/document-content-reader';
 import { DOCUMENT_TEXT_EXTRACTOR } from '../documents/application/document-text-extractor';
 import { DOCUMENTS_REPOSITORY } from '../documents/application/documents.repository';
-import { FirebaseStorageDocumentReader } from '../documents/infrastructure/firebase-storage-document.reader';
+import { LocalDocumentFileStorage } from '../documents/infrastructure/local-document-file-storage';
 import { PdfParseDocumentTextExtractor } from '../documents/infrastructure/pdf-parse-document-text.extractor';
 import { PrismaDocumentsRepository } from '../documents/infrastructure/prisma-documents.repository';
 import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
@@ -36,7 +36,7 @@ const documentProcessingConsumerProviders =
         },
         {
           provide: DOCUMENT_CONTENT_READER,
-          useClass: FirebaseStorageDocumentReader,
+          useClass: LocalDocumentFileStorage,
         },
         {
           provide: DOCUMENT_TEXT_EXTRACTOR,

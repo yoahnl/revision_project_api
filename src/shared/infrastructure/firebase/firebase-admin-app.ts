@@ -16,7 +16,6 @@ export function ensureFirebaseAdminApp(): void {
   if (!serviceAccountJson) {
     initializeApp({
       projectId: process.env.FIREBASE_PROJECT_ID,
-      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
     });
     return;
   }
@@ -30,7 +29,6 @@ export function ensureFirebaseAdminApp(): void {
       privateKey: serviceAccount.private_key,
     }),
     projectId: serviceAccount.project_id ?? process.env.FIREBASE_PROJECT_ID,
-    storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
   });
 }
 

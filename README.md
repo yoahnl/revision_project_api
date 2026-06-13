@@ -24,6 +24,7 @@ Services locaux attendus :
 
 - PostgreSQL sur `localhost:5432`
 - Redis sur `localhost:6379`
+- Les PDF importes sont stockes par defaut dans `storage/revision-documents`
 
 ## Verification
 
@@ -56,10 +57,12 @@ Variables requises en production :
 - `DATABASE_URL`
 - `REDIS_URL` ou `REDIS_HOST` + `REDIS_PORT`
 - `FIREBASE_PROJECT_ID=revision-app-1b799`
-- `FIREBASE_STORAGE_BUCKET=revision-app-1b799.firebasestorage.app`
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
+- `DOCUMENT_STORAGE_ROOT=/data/revision-documents`
 - `GOOGLE_GENAI_API_KEY`
 - `GENKIT_MODEL` optionnel, defaut `googleai/gemini-2.5-flash`
 - `RUN_PRISMA_MIGRATIONS=true` pour appliquer `prisma migrate deploy` au demarrage Dokploy
 
-Le conteneur ecoute sur `PORT=8080` par defaut.
+Le conteneur ecoute sur `PORT=8080` par defaut. Sur Dokploy, monter un volume
+persistant sur `/data/revision-documents`. Si l'API et le worker sont deployes
+comme deux applications separees, les deux doivent lire/ecrire le meme volume.

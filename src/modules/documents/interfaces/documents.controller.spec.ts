@@ -2,6 +2,7 @@ import { BadRequestException } from '@nestjs/common';
 import { GetDocumentUseCase } from '../application/get-document.use-case';
 import { ListSubjectDocumentsUseCase } from '../application/list-subject-documents.use-case';
 import { RegisterDocumentUseCase } from '../application/register-document.use-case';
+import { UploadCoursePdfUseCase } from '../application/upload-course-pdf.use-case';
 import { DocumentsController } from './documents.controller';
 
 describe('DocumentsController', () => {
@@ -60,15 +61,33 @@ describe('DocumentsController', () => {
       execute: executeGet,
     } as unknown as GetDocumentUseCase;
 
+    const executeUpload = jest.fn().mockResolvedValue({
+      id: 'document-1',
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      kind: 'COURSE_PDF',
+      fileName: '1710000000000-cours.pdf',
+      storagePath:
+        'students/firebase-1/subjects/subject-1/1710000000000-cours.pdf',
+      mimeType: 'application/pdf',
+      status: 'UPLOADED',
+    });
+
+    const uploadCoursePdf = {
+      execute: executeUpload,
+    } as unknown as UploadCoursePdfUseCase;
+
     return {
       controller: new DocumentsController(
         registerDocument,
         listSubjectDocuments,
         getDocument,
+        uploadCoursePdf,
       ),
       execute,
       executeList,
       executeGet,
+      executeUpload,
     };
   }
 
@@ -209,6 +228,68 @@ describe('DocumentsController', () => {
       studentId: 'student-1',
       documentId: 'document-1',
     });
+  });
+
+  it('uploads course PDFs for the current student', async () => {
+    const { controller, executeUpload } = createController();
+
+    await controller.uploadCoursePdf(
+      student,
+      { subjectId: ' subject-1 ' },
+      {
+        originalname: ' Cours 2024-2025.pdf ',
+        mimetype: 'application/pdf',
+        buffer: Buffer.from('%PDF-1.7'),
+        size: 8,
+      },
+    );
+
+    expect(executeUpload).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      firebaseUid: 'firebase-1',
+      subjectId: 'subject-1',
+      originalFileName: 'Cours 2024-2025.pdf',
+      content: Buffer.from('%PDF-1.7'),
+      mimeType: 'application/pdf',
+    });
+  });
+
+  it('rejects missing or non-PDF course uploads with 400', () => {
+    const { controller } = createController();
+
+    expect(() =>
+      controller.uploadCoursePdf(
+        student,
+        { subjectId: 'subject-1' },
+        undefined,
+      ),
+    ).toThrow(BadRequestException);
+
+    expect(() =>
+      controller.uploadCoursePdf(
+        student,
+        { subjectId: 'subject-1' },
+        {
+          originalname: 'cours.png',
+          mimetype: 'image/png',
+          buffer: Buffer.from('png'),
+          size: 3,
+        },
+      ),
+    ).toThrow(BadRequestException);
+
+    expect(() =>
+      controller.uploadCoursePdf(
+        student,
+        { subjectId: 'subject-1' },
+        {
+          originalname: 'cours.pdf',
+          mimetype: 'application/pdf',
+          buffer: Buffer.alloc(0),
+          size: 0,
+        },
+      ),
+    ).toThrow(BadRequestException);
   });
 
   it('rejects malformed storage paths with 400', () => {
