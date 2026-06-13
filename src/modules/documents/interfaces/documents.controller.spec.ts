@@ -23,6 +23,7 @@ describe('DocumentsController', () => {
       storagePath: 'students/firebase-1/subjects/subject-1/cours.pdf',
       mimeType: 'application/pdf',
       status: 'UPLOADED',
+      errorCode: null,
     });
 
     const registerDocument = {
@@ -39,6 +40,7 @@ describe('DocumentsController', () => {
         storagePath: 'students/firebase-1/subjects/subject-1/cours.pdf',
         mimeType: 'application/pdf',
         status: 'UPLOADED',
+        errorCode: null,
       },
     ]);
 
@@ -55,6 +57,7 @@ describe('DocumentsController', () => {
       storagePath: 'students/firebase-1/subjects/subject-1/cours.pdf',
       mimeType: 'application/pdf',
       status: 'UPLOADED',
+      errorCode: null,
     });
 
     const getDocument = {
@@ -71,6 +74,7 @@ describe('DocumentsController', () => {
         'students/firebase-1/subjects/subject-1/1710000000000-cours.pdf',
       mimeType: 'application/pdf',
       status: 'UPLOADED',
+      errorCode: null,
     });
 
     const uploadCoursePdf = {

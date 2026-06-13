@@ -14,6 +14,7 @@ export class RevisionDocument {
   readonly storagePath: string;
   readonly mimeType: string;
   readonly status: DocumentStatus;
+  readonly errorCode: string | null;
 
   constructor(input: {
     id: string;
@@ -24,6 +25,7 @@ export class RevisionDocument {
     storagePath: string;
     mimeType: string;
     status: DocumentStatus;
+    errorCode?: string | null;
   }) {
     if (!DOCUMENT_KINDS.includes(input.kind)) {
       throw new Error(
@@ -65,5 +67,6 @@ export class RevisionDocument {
     this.storagePath = storagePath;
     this.mimeType = mimeType;
     this.status = input.status;
+    this.errorCode = input.errorCode ?? null;
   }
 }

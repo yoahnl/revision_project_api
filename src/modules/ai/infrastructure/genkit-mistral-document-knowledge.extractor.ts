@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { googleAI } from '@genkit-ai/google-genai';
+import openAICompatible from '@genkit-ai/compat-oai';
 import { genkit } from 'genkit';
 import {
   type DocumentKnowledgeExtractor,
@@ -7,11 +7,13 @@ import {
 } from '../application/document-knowledge-extractor';
 import { ExtractedKnowledgeSchema } from './document-knowledge-output.schema';
 
-const DEFAULT_GENKIT_MODEL = 'googleai/gemini-2.5-flash';
+const MISTRAL_PLUGIN_NAME = 'mistral';
+const MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
+const DEFAULT_MISTRAL_MODEL = 'mistral-small-latest';
 const DEFAULT_TEXT_INPUT_LIMIT = 12000;
 
 @Injectable()
-export class GenkitDocumentKnowledgeExtractor implements DocumentKnowledgeExtractor {
+export class GenkitMistralDocumentKnowledgeExtractor implements DocumentKnowledgeExtractor {
   private ai?: ReturnType<typeof genkit>;
 
   async extract(input: {
@@ -38,12 +40,39 @@ export class GenkitDocumentKnowledgeExtractor implements DocumentKnowledgeExtrac
 
   private getAi(): ReturnType<typeof genkit> {
     this.ai ??= genkit({
-      plugins: [googleAI()],
-      model: process.env.GENKIT_MODEL ?? DEFAULT_GENKIT_MODEL,
+      plugins: [
+        openAICompatible({
+          name: MISTRAL_PLUGIN_NAME,
+          apiKey: resolveMistralApiKey(),
+          baseURL: MISTRAL_BASE_URL,
+        }),
+      ],
+      model: resolveMistralModel(),
     });
 
     return this.ai;
   }
+}
+
+function resolveMistralApiKey(): string {
+  const apiKey = process.env.MISTRAL_API_KEY?.trim();
+
+  if (!apiKey) {
+    throw new Error('MISTRAL_API_KEY is required');
+  }
+
+  return apiKey;
+}
+
+function resolveMistralModel(): string {
+  const configuredModel = process.env.MISTRAL_MODEL?.trim();
+  const model = configuredModel || DEFAULT_MISTRAL_MODEL;
+
+  if (model.startsWith(`${MISTRAL_PLUGIN_NAME}/`)) {
+    return model;
+  }
+
+  return `${MISTRAL_PLUGIN_NAME}/${model}`;
 }
 
 function resolveTextInputLimit(): number {

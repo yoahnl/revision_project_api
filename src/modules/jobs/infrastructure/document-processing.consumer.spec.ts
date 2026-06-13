@@ -326,5 +326,6 @@ function documentRecord(): RevisionDocumentDto {
     storagePath: 'students/firebase-1/subjects/subject-1/cours.pdf',
     mimeType: 'application/pdf',
     status: 'PROCESSING',
+    errorCode: null,
   };
 }

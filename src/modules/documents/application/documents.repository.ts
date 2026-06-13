@@ -12,6 +12,7 @@ export interface RevisionDocumentDto {
   storagePath: string;
   mimeType: string;
   status: DocumentStatus;
+  errorCode: string | null;
 }
 
 export const DOCUMENTS_REPOSITORY = Symbol('DOCUMENTS_REPOSITORY');

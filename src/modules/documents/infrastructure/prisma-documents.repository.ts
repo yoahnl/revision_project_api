@@ -17,6 +17,7 @@ type DocumentRecord = {
   storagePath: string;
   mimeType: string;
   status: DocumentStatus;
+  errorCode: string | null;
 };
 
 @Injectable()
@@ -268,6 +269,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       storagePath: document.storagePath,
       mimeType: document.mimeType,
       status: document.status,
+      errorCode: document.errorCode,
     };
   }
 }

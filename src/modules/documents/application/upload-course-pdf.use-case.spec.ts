@@ -121,6 +121,7 @@ function createDocumentsRepository(overrides?: { create?: jest.Mock }): {
         'students/firebase-1/subjects/subject-1/1710000000000-cours.pdf',
       mimeType: 'application/pdf',
       status: 'UPLOADED',
+      errorCode: null,
     });
 
   return {

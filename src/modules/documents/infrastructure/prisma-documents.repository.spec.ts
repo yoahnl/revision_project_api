@@ -9,6 +9,7 @@ type DocumentRecord = {
   storagePath: string;
   mimeType: string;
   status: 'UPLOADED' | 'PROCESSING' | 'READY' | 'FAILED';
+  errorCode?: string | null;
 };
 
 type PrismaDocumentsMock = {
@@ -218,6 +219,27 @@ describe('PrismaDocumentsRepository', () => {
     expect(document?.storagePath).toBe(
       'students/student-1/subjects/subject-1/cours.pdf',
     );
+  });
+
+  it('returns the stored processing error code for failed documents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(
+      record({
+        status: 'FAILED',
+        errorCode: 'KNOWLEDGE_EXTRACTION_FAILED',
+      }),
+    );
+
+    const document = await repository.findByIdForStudent({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+
+    expect(document).toMatchObject({
+      id: 'document-1',
+      status: 'FAILED',
+      errorCode: 'KNOWLEDGE_EXTRACTION_FAILED',
+    });
   });
 
   it('marks uploaded documents as processing and records the running job', async () => {

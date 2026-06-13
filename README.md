@@ -10,6 +10,7 @@ Dokploy avec le `Dockerfile` present a la racine.
 - BullMQ + Redis
 - Firebase Admin
 - Genkit + Google GenAI
+- Mistral AI via Genkit et `@genkit-ai/compat-oai`
 
 ## Local
 
@@ -59,10 +60,17 @@ Variables requises en production :
 - `FIREBASE_PROJECT_ID=revision-app-1b799`
 - `FIREBASE_SERVICE_ACCOUNT_JSON`
 - `DOCUMENT_STORAGE_ROOT=/data/revision-documents`
-- `GOOGLE_GENAI_API_KEY`
+- `AI_PROVIDER` optionnel : `genkit` par defaut, `mistral` pour Mistral via Genkit
+- `GOOGLE_GENAI_API_KEY` requis avec `AI_PROVIDER=genkit`
 - `GENKIT_MODEL` optionnel, defaut `googleai/gemini-2.5-flash`
+- `MISTRAL_API_KEY` requis avec `AI_PROVIDER=mistral`
+- `MISTRAL_MODEL` optionnel, defaut `mistral-small-latest`
 - `RUN_PRISMA_MIGRATIONS=true` pour appliquer `prisma migrate deploy` au demarrage Dokploy
 
 Le conteneur ecoute sur `PORT=8080` par defaut. Sur Dokploy, monter un volume
 persistant sur `/data/revision-documents`. Si l'API et le worker sont deployes
 comme deux applications separees, les deux doivent lire/ecrire le meme volume.
+
+Si `AI_PROVIDER` n'est pas configure et que seule `MISTRAL_API_KEY` est
+presente, l'API utilise automatiquement le plugin Genkit Mistral pour eviter un
+echec Google GenAI lie a une cle absente.

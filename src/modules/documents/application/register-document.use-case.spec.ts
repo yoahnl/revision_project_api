@@ -14,6 +14,7 @@ describe('RegisterDocumentUseCase', () => {
         storagePath: 'students/student-1/cours.pdf',
         mimeType: 'application/pdf',
         status: 'UPLOADED',
+        errorCode: null,
       }),
       markProcessing: jest.fn(),
       markReadyWithKnowledgeUnits: jest.fn(),
