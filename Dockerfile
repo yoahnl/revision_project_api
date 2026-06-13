@@ -27,4 +27,4 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 
 EXPOSE 8080
-CMD ["sh", "-c", "if [ \"$RUN_PRISMA_MIGRATIONS\" = \"true\" ]; then ./node_modules/.bin/prisma migrate deploy; fi && node dist/src/main.js"]
+CMD ["sh", "-c", "if [ \"$RUN_PRISMA_MIGRATIONS\" = \"true\" ]; then ./node_modules/.bin/prisma migrate deploy; fi && node -r dotenv/config dist/src/main.js"]
