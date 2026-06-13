@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
+import { configureCors } from '../src/cors';
 import { TOKEN_VERIFIER } from '../src/modules/auth/application/token-verifier';
 import { PrismaService } from '../src/shared/infrastructure/prisma/prisma.service';
 import { AppModule } from './../src/app.module';
@@ -31,6 +32,7 @@ describe('AppController (e2e)', () => {
       .compile();
 
     app = moduleFixture.createNestApplication();
+    configureCors(app);
     await app.init();
   });
 
@@ -46,6 +48,16 @@ describe('AppController (e2e)', () => {
       .get('/health')
       .expect(200)
       .expect({ status: 'ok' });
+  });
+
+  it('answers web app CORS preflight requests', () => {
+    return request(app.getHttpServer())
+      .options('/subjects')
+      .set('Origin', 'https://revision.yoahn.me')
+      .set('Access-Control-Request-Method', 'GET')
+      .set('Access-Control-Request-Headers', 'authorization,content-type')
+      .expect(204)
+      .expect('Access-Control-Allow-Origin', 'https://revision.yoahn.me');
   });
 
   afterEach(async () => {
