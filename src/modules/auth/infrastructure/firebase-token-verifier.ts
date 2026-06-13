@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
-import { getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { ensureFirebaseAdminApp } from '../../../shared/infrastructure/firebase/firebase-admin-app';
 import type {
   TokenVerifier,
   VerifiedFirebaseToken,
@@ -9,9 +9,7 @@ import type {
 @Injectable()
 export class FirebaseTokenVerifier implements TokenVerifier {
   constructor() {
-    if (getApps().length === 0) {
-      initializeApp();
-    }
+    ensureFirebaseAdminApp();
   }
 
   async verify(idToken: string): Promise<VerifiedFirebaseToken> {
