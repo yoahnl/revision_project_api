@@ -1,0 +1,197 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model StudentProfile {
+  id          String   @id @default(cuid())
+  firebaseUid String   @unique
+  email       String?
+  displayName String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  goals    RevisionGoal[]
+  subjects Subject[]
+  mastery  MasteryState[]
+  sessions ActivitySession[]
+}
+
+model RevisionGoal {
+  id            String   @id @default(cuid())
+  studentId     String
+  targetDate    DateTime
+  weeklyMinutes Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, createdAt])
+}
+
+model Subject {
+  id        String   @id @default(cuid())
+  studentId String
+  name      String
+  priority  Int      @default(3)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  student        StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  documents      Document[]
+  knowledgeUnits KnowledgeUnit[]
+  mastery        MasteryState[]
+  sessions       ActivitySession[]
+
+  @@index([studentId])
+  @@unique([id, studentId])
+}
+
+model Document {
+  id          String         @id @default(cuid())
+  studentId   String
+  subjectId   String
+  kind        DocumentKind
+  fileName    String
+  storagePath String
+  mimeType    String
+  status      DocumentStatus @default(UPLOADED)
+  errorCode   String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  subject        Subject                 @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  knowledgeUnits KnowledgeUnit[]
+  jobs           DocumentProcessingJob[]
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@unique([id, subjectId])
+}
+
+model DocumentProcessingJob {
+  id         String    @id @default(cuid())
+  documentId String
+  status     JobStatus @default(PENDING)
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model KnowledgeUnit {
+  id         String   @id @default(cuid())
+  subjectId  String
+  documentId String?
+  title      String
+  summary    String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  subject  Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  document Document?      @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
+  mastery  MasteryState[]
+  questions Question[]
+  sessions ActivitySession[]
+
+  @@index([subjectId])
+  @@unique([id, subjectId])
+}
+
+model MasteryState {
+  studentId       String
+  subjectId       String
+  knowledgeUnitId String
+  score           Float
+  lastPracticedAt DateTime?
+  updatedAt       DateTime  @updatedAt
+
+  student       StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject       Subject        @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  knowledgeUnit KnowledgeUnit   @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
+
+  @@id([studentId, knowledgeUnitId])
+  @@index([subjectId, studentId])
+  @@index([knowledgeUnitId, subjectId])
+}
+
+model ActivitySession {
+  id              String         @id @default(cuid())
+  studentId       String
+  subjectId       String
+  knowledgeUnitId String
+  type            ActivityType
+  status          ActivityStatus @default(STARTED)
+  createdAt       DateTime       @default(now())
+  completedAt     DateTime?
+
+  student       StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject       Subject        @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  knowledgeUnit KnowledgeUnit  @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  questions     Question[]
+  result        ActivityResult?
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@index([knowledgeUnitId])
+  @@unique([id, knowledgeUnitId])
+}
+
+model Question {
+  id              String @id @default(cuid())
+  sessionId       String
+  knowledgeUnitId String
+  prompt          String
+  choices         Json
+  correctChoiceId String
+  explanation     String
+
+  session       ActivitySession @relation(fields: [sessionId, knowledgeUnitId], references: [id, knowledgeUnitId], onDelete: Cascade)
+  knowledgeUnit KnowledgeUnit   @relation(fields: [knowledgeUnitId], references: [id], onDelete: Cascade)
+}
+
+model ActivityResult {
+  id             String   @id @default(cuid())
+  sessionId      String   @unique
+  correctAnswers Int
+  totalQuestions Int
+  createdAt      DateTime @default(now())
+
+  session ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+enum DocumentKind {
+  COURSE_PDF
+  EXAM_PDF
+  EXAM_IMAGE
+}
+
+enum DocumentStatus {
+  UPLOADED
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum JobStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum ActivityType {
+  DIAGNOSTIC_QUIZ
+}
+
+enum ActivityStatus {
+  STARTED
+  COMPLETED
+}
