@@ -55,8 +55,8 @@ Variables requises en production :
 
 - `DATABASE_URL`
 - `REDIS_URL` ou `REDIS_HOST` + `REDIS_PORT`
-- `FIREBASE_PROJECT_ID`
-- `FIREBASE_STORAGE_BUCKET`
+- `FIREBASE_PROJECT_ID=revision-app-1b799`
+- `FIREBASE_STORAGE_BUCKET=revision-app-1b799.firebasestorage.app`
 - `GOOGLE_GENAI_API_KEY`
 - `GENKIT_MODEL` optionnel, defaut `googleai/gemini-2.5-flash`
 
