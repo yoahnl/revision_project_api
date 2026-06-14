@@ -46,7 +46,7 @@ const documentProcessingConsumerProviders =
         },
         {
           provide: DOCUMENT_TEXT_CHUNKER,
-          useClass: DeterministicDocumentTextChunker,
+          useFactory: () => new DeterministicDocumentTextChunker(),
         },
         DocumentProcessingConsumer,
       ]
