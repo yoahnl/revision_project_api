@@ -6,9 +6,14 @@ import type {
   DiagnosticQuizGenerationChunk,
   DiagnosticQuizGenerationInput,
   DiagnosticQuizGenerator,
+  DiagnosticQuizSelectionMode,
+  DiagnosticQuizVisualType,
+  GeneratedDiagnosticQuizChartVisual,
   GeneratedDiagnosticQuiz,
   GeneratedDiagnosticQuizChoice,
+  GeneratedDiagnosticQuizDiagramVisual,
   GeneratedDiagnosticQuizQuestion,
+  GeneratedDiagnosticQuizVisual,
 } from '../application/diagnostic-quiz-generator';
 import {
   DEFAULT_DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT,
@@ -38,14 +43,22 @@ const SCHEMA_VERSION = 'diagnostic-quiz-v2';
 const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
 const EMPTY_OUTPUT_ERROR_CODE = 'GENKIT_EMPTY_OUTPUT';
 const SOURCE_INVALID_ERROR_CODE = 'DIAGNOSTIC_QUIZ_SOURCE_INVALID';
+const VISUAL_INVALID_ERROR_CODE = 'DIAGNOSTIC_QUIZ_VISUAL_INVALID';
+const MULTI_ANSWER_INVALID_ERROR_CODE = 'DIAGNOSTIC_QUIZ_MULTI_ANSWER_INVALID';
 const QUESTION_COUNT_INVALID_ERROR_CODE =
   DIAGNOSTIC_QUIZ_QUESTION_COUNT_INVALID;
 const DEFAULT_MAX_CHUNKS = 8;
 const DEFAULT_MAX_CHARS = 8000;
 const MAX_QUESTION_COUNT = DEFAULT_DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
+const MAX_VISUALS_PER_QUESTION = 2;
+const MAX_CHART_ROWS = 12;
+const MAX_CHART_KEYS = 8;
+const MAX_DIAGRAM_NODES = 12;
+const MAX_DIAGRAM_EDGES = 20;
 
 const NonEmptyStringSchema = z.string().trim().min(1);
 const DiagnosticQuizDifficultySchema = z.enum(['LOW', 'MEDIUM', 'HIGH']);
+const DiagnosticQuizSelectionModeSchema = z.enum(['single', 'multiple']);
 
 const GeneratedDiagnosticQuizChoiceSchema = z
   .object({
@@ -55,24 +68,127 @@ const GeneratedDiagnosticQuizChoiceSchema = z
   })
   .strict();
 
+const ChartValueSchema = z.union([z.string(), z.number(), z.null()]);
+
+const GeneratedDiagnosticQuizImageVisualSchema = z
+  .object({
+    type: z.literal('IMAGE'),
+    displayOrder: z.number().int().min(0).optional(),
+    imageUrl: NonEmptyStringSchema,
+    altText: NonEmptyStringSchema,
+    caption: NonEmptyStringSchema.nullish(),
+    sourceChunkIds: z.array(NonEmptyStringSchema).min(1),
+  })
+  .strict();
+
+const GeneratedDiagnosticQuizChartVisualSchema = z
+  .object({
+    type: z.literal('CHART'),
+    displayOrder: z.number().int().min(0).optional(),
+    chartType: z.enum(['bar', 'line', 'pie', 'scatter']),
+    title: NonEmptyStringSchema,
+    description: NonEmptyStringSchema.nullish(),
+    data: z
+      .array(z.record(z.string(), ChartValueSchema))
+      .min(1)
+      .max(MAX_CHART_ROWS),
+    xKey: NonEmptyStringSchema.nullish(),
+    yKeys: z.array(NonEmptyStringSchema).min(1).max(4).nullish(),
+    sourceChunkIds: z.array(NonEmptyStringSchema).min(1),
+  })
+  .strict();
+
+const GeneratedDiagnosticQuizDiagramVisualSchema = z
+  .object({
+    type: z.literal('DIAGRAM'),
+    displayOrder: z.number().int().min(0).optional(),
+    title: NonEmptyStringSchema,
+    description: NonEmptyStringSchema.nullish(),
+    nodes: z
+      .array(
+        z
+          .object({
+            id: NonEmptyStringSchema,
+            label: NonEmptyStringSchema,
+          })
+          .strict(),
+      )
+      .min(2)
+      .max(MAX_DIAGRAM_NODES),
+    edges: z
+      .array(
+        z
+          .object({
+            from: NonEmptyStringSchema,
+            to: NonEmptyStringSchema,
+            label: NonEmptyStringSchema.nullish(),
+          })
+          .strict(),
+      )
+      .max(MAX_DIAGRAM_EDGES)
+      .optional(),
+    sourceChunkIds: z.array(NonEmptyStringSchema).min(1),
+  })
+  .strict();
+
+const GeneratedDiagnosticQuizVisualSchema = z.union([
+  GeneratedDiagnosticQuizImageVisualSchema,
+  GeneratedDiagnosticQuizChartVisualSchema,
+  GeneratedDiagnosticQuizDiagramVisualSchema,
+]);
+
 const GeneratedDiagnosticQuizQuestionSchema = z
   .object({
     prompt: z.string().min(8),
     difficulty: DiagnosticQuizDifficultySchema.nullish(),
     choices: z.array(GeneratedDiagnosticQuizChoiceSchema).min(2).max(4),
-    correctChoiceId: NonEmptyStringSchema,
+    selectionMode: DiagnosticQuizSelectionModeSchema.optional(),
+    minSelections: z.number().int().min(1).nullish(),
+    maxSelections: z.number().int().min(1).nullish(),
+    correctChoiceId: NonEmptyStringSchema.nullish(),
+    correctChoiceIds: z.array(NonEmptyStringSchema).min(1).optional(),
     explanation: z.string().min(8),
     sourceChunkIds: z.array(NonEmptyStringSchema).optional(),
+    visuals: z
+      .array(GeneratedDiagnosticQuizVisualSchema)
+      .max(MAX_VISUALS_PER_QUESTION)
+      .optional(),
   })
   .strict()
   .refine(
-    (question) =>
-      new Set(question.choices.map((choice) => choice.id)).size ===
-        question.choices.length &&
-      question.choices.some((choice) => choice.id === question.correctChoiceId),
+    (question) => {
+      const choiceIds = question.choices.map((choice) => choice.id);
+      const choiceIdSet = new Set(choiceIds);
+
+      if (choiceIdSet.size !== choiceIds.length) {
+        return false;
+      }
+
+      const selectionMode = question.selectionMode ?? 'single';
+
+      if (selectionMode === 'single') {
+        return (
+          typeof question.correctChoiceId === 'string' &&
+          choiceIdSet.has(question.correctChoiceId) &&
+          question.correctChoiceIds === undefined
+        );
+      }
+
+      const correctChoiceIds = question.correctChoiceIds ?? [];
+
+      return (
+        correctChoiceIds.length > 0 &&
+        new Set(correctChoiceIds).size === correctChoiceIds.length &&
+        correctChoiceIds.every((choiceId) => choiceIdSet.has(choiceId)) &&
+        !question.correctChoiceId &&
+        (question.minSelections ?? 1) <=
+          (question.maxSelections ?? correctChoiceIds.length) &&
+        (question.maxSelections ?? correctChoiceIds.length) <=
+          question.choices.length
+      );
+    },
     {
-      message:
-        'Question choices must be unique and include the correct choice id',
+      message: 'Question choices and correction fields must be coherent',
     },
   );
 
@@ -128,6 +244,11 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           output: GeneratedDiagnosticQuizSchema.parse(output),
           chunks,
           expectedQuestionCount: input.questionCount,
+          visualsEnabled: input.visualsEnabled === true,
+          allowedVisualTypes: resolveAllowedVisualTypes(input),
+          allowedSelectionModes: resolveAllowedSelectionModes(
+            input.selectionModes,
+          ),
           metadata: {
             provider: metadata.provider,
             model: metadata.model,
@@ -171,6 +292,8 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           attempts.length > 1 &&
           isInvalidAiOutputError(error, [
             SOURCE_INVALID_ERROR_CODE,
+            VISUAL_INVALID_ERROR_CODE,
+            MULTI_ANSWER_INVALID_ERROR_CODE,
             QUESTION_COUNT_INVALID_ERROR_CODE,
             'Generated diagnostic quiz is empty',
           ])
@@ -226,18 +349,23 @@ function buildPrompt(
   chunks: DiagnosticQuizPromptChunk[],
 ): string {
   const questionCount = resolveDiagnosticQuizQuestionCount(input.questionCount);
+  const selectionModes = resolveAllowedSelectionModes(input.selectionModes);
+  const visualTypes = resolveAllowedVisualTypes(input);
   const basePrompt = [
     'Tu es un tuteur universitaire qui genere un QCM de revision en francais.',
     'Genere le QCM exclusivement a partir de l unite de connaissance et des chunks fournis.',
     'N ajoute aucun sujet externe, aucun exemple generique et aucune question hors cours.',
-    'Le QCM est mono-reponse: chaque question a un seul correctChoiceId.',
+    `Modes de selection autorises: ${selectionModes.join(', ')}.`,
+    selectionModes.includes('multiple')
+      ? 'Pour une question multiple, utilise selectionMode=multiple, correctChoiceIds, minSelections et maxSelections. N utilise pas correctChoiceId.'
+      : 'Le QCM est mono-reponse: chaque question a selectionMode=single et un seul correctChoiceId.',
     'Les distracteurs doivent etre plausibles mais faux, distincts et non ambigus.',
     'Chaque explication doit rester fondee sur le cours fourni.',
     `Genere exactement ${questionCount} questions.`,
     'Les questions doivent etre variees, non redondantes et couvrir plusieurs angles de la notion quand les sources le permettent.',
     'Si les sources ne permettent pas un QCM fiable, retourne uniquement des questions strictement justifiables par le cours.',
     'Retourne uniquement du JSON strict respectant le schema demande.',
-    'Champs attendus: title, questions, prompt, difficulty, choices, correctChoiceId, explanation, sourceChunkIds.',
+    'Champs attendus: title, questions, prompt, difficulty, choices, selectionMode, correctChoiceId ou correctChoiceIds, explanation, sourceChunkIds.',
     `Titre de l unite: ${input.knowledgeUnit.title}`,
     `Resume de l unite: ${input.knowledgeUnit.summary}`,
   ];
@@ -257,6 +385,9 @@ function buildPrompt(
     'N invente aucune source libre et ne cite jamais un chunkId absent de la liste.',
     'Si l information n est pas dans les chunks ou la notion, ne pose pas la question.',
     'Le feedback par choix est optionnel et ne sera jamais expose avant soumission.',
+    visualTypes.length > 0
+      ? `Tu peux ajouter visuals avec les types autorises suivants: ${visualTypes.join(', ')}. Chaque visual doit etre strictement justifie par sourceChunkIds.`
+      : 'Ne produis aucun champ visuals.',
     JSON.stringify(toPromptPayload(input, chunks)),
   ].join('\n\n');
 }
@@ -265,6 +396,9 @@ function normalizeGeneratedQuiz(input: {
   output: GeneratedDiagnosticQuiz;
   chunks: DiagnosticQuizPromptChunk[];
   expectedQuestionCount?: number;
+  visualsEnabled: boolean;
+  allowedVisualTypes: DiagnosticQuizVisualType[];
+  allowedSelectionModes: DiagnosticQuizSelectionMode[];
   metadata: {
     provider: string;
     model: string;
@@ -286,9 +420,14 @@ function normalizeGeneratedQuiz(input: {
 
   return {
     title: input.output.title,
-    version: 2,
+    version: shouldUseV3(input.output, input) ? 3 : 2,
     questions: input.output.questions.map((question) =>
-      normalizeSourcedQuestion(question, knownChunkIds),
+      normalizeSourcedQuestion(question, {
+        knownChunkIds,
+        visualsEnabled: input.visualsEnabled,
+        allowedVisualTypes: input.allowedVisualTypes,
+        allowedSelectionModes: input.allowedSelectionModes,
+      }),
     ),
     metadata: {
       flowName: FLOW_NAME,
@@ -303,20 +442,73 @@ function normalizeGeneratedQuiz(input: {
 
 function normalizeSourcedQuestion(
   question: GeneratedDiagnosticQuizQuestion,
-  knownChunkIds: Set<string>,
+  input: {
+    knownChunkIds: Set<string>;
+    visualsEnabled: boolean;
+    allowedVisualTypes: DiagnosticQuizVisualType[];
+    allowedSelectionModes: DiagnosticQuizSelectionMode[];
+  },
 ): GeneratedDiagnosticQuizQuestion {
-  return {
+  const selectionMode = question.selectionMode ?? 'single';
+
+  if (!input.allowedSelectionModes.includes(selectionMode)) {
+    throw new Error(MULTI_ANSWER_INVALID_ERROR_CODE);
+  }
+
+  const normalizedVisuals = normalizeVisuals(question.visuals, input);
+  const normalizedQuestion: GeneratedDiagnosticQuizQuestion = {
     prompt: question.prompt,
     ...(question.difficulty === undefined
       ? {}
       : { difficulty: question.difficulty }),
     choices: question.choices.map(normalizeChoice),
-    correctChoiceId: question.correctChoiceId,
     explanation: question.explanation,
     sourceChunkIds: normalizeSourceChunkIds(
       question.sourceChunkIds,
-      knownChunkIds,
+      input.knownChunkIds,
+      SOURCE_INVALID_ERROR_CODE,
     ),
+    ...(question.selectionMode === undefined
+      ? {}
+      : { selectionMode: question.selectionMode }),
+    ...(normalizedVisuals.length > 0 ? { visuals: normalizedVisuals } : {}),
+  };
+
+  if (selectionMode === 'multiple') {
+    return normalizeMultipleAnswerQuestion(normalizedQuestion, question);
+  }
+
+  return {
+    ...normalizedQuestion,
+    correctChoiceId: question.correctChoiceId ?? null,
+  };
+}
+
+function normalizeMultipleAnswerQuestion(
+  baseQuestion: GeneratedDiagnosticQuizQuestion,
+  question: GeneratedDiagnosticQuizQuestion,
+): GeneratedDiagnosticQuizQuestion {
+  const correctChoiceIds = dedupeStrings(question.correctChoiceIds ?? []);
+  const choiceIds = new Set(question.choices.map((choice) => choice.id));
+  const minSelections = question.minSelections ?? 1;
+  const maxSelections = question.maxSelections ?? correctChoiceIds.length;
+
+  if (
+    correctChoiceIds.length === 0 ||
+    correctChoiceIds.some((choiceId) => !choiceIds.has(choiceId)) ||
+    minSelections < 1 ||
+    maxSelections < minSelections ||
+    maxSelections > question.choices.length
+  ) {
+    throw new Error(MULTI_ANSWER_INVALID_ERROR_CODE);
+  }
+
+  return {
+    ...baseQuestion,
+    selectionMode: 'multiple',
+    correctChoiceIds,
+    minSelections,
+    maxSelections,
   };
 }
 
@@ -340,6 +532,7 @@ function normalizeChoice(
 function normalizeSourceChunkIds(
   sourceChunkIds: string[] | undefined,
   knownChunkIds: Set<string>,
+  errorCode = SOURCE_INVALID_ERROR_CODE,
 ): string[] {
   const normalized = [...new Set(sourceChunkIds ?? [])];
 
@@ -347,10 +540,184 @@ function normalizeSourceChunkIds(
     normalized.length === 0 ||
     normalized.some((chunkId) => !knownChunkIds.has(chunkId))
   ) {
-    throw new Error(SOURCE_INVALID_ERROR_CODE);
+    throw new Error(errorCode);
   }
 
   return normalized;
+}
+
+function shouldUseV3(
+  output: GeneratedDiagnosticQuiz,
+  input: {
+    visualsEnabled: boolean;
+    allowedSelectionModes: DiagnosticQuizSelectionMode[];
+  },
+): boolean {
+  return (
+    input.visualsEnabled ||
+    input.allowedSelectionModes.includes('multiple') ||
+    output.questions.some(
+      (question) =>
+        question.selectionMode === 'multiple' ||
+        (question.visuals ?? []).length > 0,
+    )
+  );
+}
+
+function resolveAllowedSelectionModes(
+  selectionModes: DiagnosticQuizSelectionMode[] | undefined,
+): DiagnosticQuizSelectionMode[] {
+  const modes = selectionModes?.length ? selectionModes : ['single'];
+  const allowed = modes.filter(
+    (mode): mode is DiagnosticQuizSelectionMode =>
+      mode === 'single' || mode === 'multiple',
+  );
+
+  return allowed.length > 0 ? dedupeStrings(allowed) : ['single'];
+}
+
+function resolveAllowedVisualTypes(
+  input: DiagnosticQuizGenerationInput,
+): DiagnosticQuizVisualType[] {
+  if (input.visualsEnabled !== true) {
+    return [];
+  }
+
+  const visualTypes = (input.visualTypes ?? []).filter(
+    (type): type is DiagnosticQuizVisualType =>
+      type === 'CHART' || type === 'DIAGRAM',
+  );
+
+  return dedupeStrings(visualTypes);
+}
+
+function dedupeStrings<T extends string>(values: T[]): T[] {
+  return Array.from(new Set(values));
+}
+
+function normalizeVisuals(
+  visuals: GeneratedDiagnosticQuizVisual[] | undefined,
+  input: {
+    knownChunkIds: Set<string>;
+    visualsEnabled: boolean;
+    allowedVisualTypes: DiagnosticQuizVisualType[];
+  },
+): GeneratedDiagnosticQuizVisual[] {
+  if (!visuals || visuals.length === 0) {
+    return [];
+  }
+
+  if (!input.visualsEnabled) {
+    throw new Error(VISUAL_INVALID_ERROR_CODE);
+  }
+
+  return visuals.map((visual, index) =>
+    normalizeVisual(visual, {
+      ...input,
+      fallbackDisplayOrder: index,
+    }),
+  );
+}
+
+function normalizeVisual(
+  visual: GeneratedDiagnosticQuizVisual,
+  input: {
+    knownChunkIds: Set<string>;
+    allowedVisualTypes: DiagnosticQuizVisualType[];
+    fallbackDisplayOrder: number;
+  },
+): GeneratedDiagnosticQuizVisual {
+  if (
+    !input.allowedVisualTypes.includes(visual.type) ||
+    visual.type === 'IMAGE'
+  ) {
+    throw new Error(VISUAL_INVALID_ERROR_CODE);
+  }
+
+  const sourceChunkIds = normalizeSourceChunkIds(
+    visual.sourceChunkIds,
+    input.knownChunkIds,
+    VISUAL_INVALID_ERROR_CODE,
+  );
+  const displayOrder = visual.displayOrder ?? input.fallbackDisplayOrder;
+
+  if (visual.type === 'CHART') {
+    return normalizeChartVisual(visual, sourceChunkIds, displayOrder);
+  }
+
+  return normalizeDiagramVisual(visual, sourceChunkIds, displayOrder);
+}
+
+function normalizeChartVisual(
+  visual: GeneratedDiagnosticQuizChartVisual,
+  sourceChunkIds: string[],
+  displayOrder: number,
+): GeneratedDiagnosticQuizChartVisual {
+  const keys = new Set<string>();
+
+  for (const row of visual.data) {
+    for (const key of Object.keys(row)) {
+      keys.add(key);
+    }
+  }
+
+  if (keys.size === 0 || keys.size > MAX_CHART_KEYS) {
+    throw new Error(VISUAL_INVALID_ERROR_CODE);
+  }
+
+  if (visual.xKey && !keys.has(visual.xKey)) {
+    throw new Error(VISUAL_INVALID_ERROR_CODE);
+  }
+
+  if (visual.yKeys?.some((key) => !keys.has(key))) {
+    throw new Error(VISUAL_INVALID_ERROR_CODE);
+  }
+
+  return {
+    type: 'CHART',
+    displayOrder,
+    chartType: visual.chartType,
+    title: visual.title,
+    ...(visual.description === undefined
+      ? {}
+      : { description: visual.description ?? null }),
+    data: visual.data,
+    ...(visual.xKey === undefined ? {} : { xKey: visual.xKey ?? null }),
+    ...(visual.yKeys === undefined ? {} : { yKeys: visual.yKeys ?? null }),
+    sourceChunkIds,
+  };
+}
+
+function normalizeDiagramVisual(
+  visual: GeneratedDiagnosticQuizDiagramVisual,
+  sourceChunkIds: string[],
+  displayOrder: number,
+): GeneratedDiagnosticQuizDiagramVisual {
+  const nodeIds = new Set(visual.nodes.map((node) => node.id));
+
+  if (nodeIds.size !== visual.nodes.length) {
+    throw new Error(VISUAL_INVALID_ERROR_CODE);
+  }
+
+  if (
+    (visual.edges ?? []).some(
+      (edge) => !nodeIds.has(edge.from) || !nodeIds.has(edge.to),
+    )
+  ) {
+    throw new Error(VISUAL_INVALID_ERROR_CODE);
+  }
+
+  return {
+    type: 'DIAGRAM',
+    displayOrder,
+    title: visual.title,
+    ...(visual.description === undefined
+      ? {}
+      : { description: visual.description ?? null }),
+    nodes: visual.nodes,
+    ...(visual.edges === undefined ? {} : { edges: visual.edges }),
+    sourceChunkIds,
+  };
 }
 
 function selectDiagnosticQuizChunks(
@@ -411,6 +778,10 @@ function toPromptPayload(
   return {
     documentId: input.documentId ?? null,
     subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
+    capabilities: {
+      selectionModes: resolveAllowedSelectionModes(input.selectionModes),
+      visualTypes: resolveAllowedVisualTypes(input),
+    },
     knowledgeUnit: {
       id: input.knowledgeUnit.id,
       title: input.knowledgeUnit.title,
@@ -542,6 +913,17 @@ function resolveDiagnosticQuizGenerationErrorCode(error: unknown): string {
 
   if (error instanceof Error && error.message === SOURCE_INVALID_ERROR_CODE) {
     return SOURCE_INVALID_ERROR_CODE;
+  }
+
+  if (error instanceof Error && error.message === VISUAL_INVALID_ERROR_CODE) {
+    return VISUAL_INVALID_ERROR_CODE;
+  }
+
+  if (
+    error instanceof Error &&
+    error.message === MULTI_ANSWER_INVALID_ERROR_CODE
+  ) {
+    return MULTI_ANSWER_INVALID_ERROR_CODE;
   }
 
   if (

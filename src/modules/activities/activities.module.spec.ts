@@ -219,6 +219,41 @@ describe('ActivitiesModule', () => {
     expect(generateInput?.questionCount).toBe(20);
   });
 
+  it('accepts bounded visual and selection capabilities for the next activity', async () => {
+    await request(app.getHttpServer())
+      .post('/activities/next')
+      .send({
+        subjectId: 'subject-1',
+        knowledgeUnitId: 'unit-1',
+        visualsEnabled: true,
+        visualTypes: ['CHART', 'DIAGRAM'],
+        selectionModes: ['single', 'multiple'],
+      })
+      .expect(201);
+
+    const [generateInput] =
+      diagnosticQuizGenerator.generate.mock.calls[0] ?? [];
+    expect(generateInput).toMatchObject({
+      visualsEnabled: true,
+      visualTypes: ['CHART', 'DIAGRAM'],
+      selectionModes: ['single', 'multiple'],
+    });
+  });
+
+  it('rejects image visual capability while document media is unsupported', async () => {
+    await request(app.getHttpServer())
+      .post('/activities/next')
+      .send({
+        subjectId: 'subject-1',
+        knowledgeUnitId: 'unit-1',
+        visualsEnabled: true,
+        visualTypes: ['IMAGE'],
+      })
+      .expect(400);
+
+    expect(diagnosticQuizGenerator.generate).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['zero', 0],
     ['negative', -1],
@@ -288,6 +323,21 @@ describe('ActivitiesModule', () => {
       .expect(400);
 
     expect(activitiesRepository.submitResult).not.toHaveBeenCalled();
+  });
+
+  it('accepts multiple choice answer payloads for result submission', async () => {
+    await request(app.getHttpServer())
+      .post('/activities/session-1/result')
+      .send({
+        answers: [{ questionId: 'question-1', choiceIds: ['a', 'c'] }],
+      })
+      .expect(201);
+
+    expect(activitiesRepository.submitResult).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'session-1',
+      answers: [{ questionId: 'question-1', choiceIds: ['a', 'c'] }],
+    });
   });
 
   it('rejects malformed activity session ids with 400', async () => {

@@ -28,7 +28,11 @@ export class SubmitActivityResultUseCase {
   async execute(input: {
     studentId: string;
     sessionId: string;
-    answers: Array<{ questionId: string; choiceId: string }>;
+    answers: Array<{
+      questionId: string;
+      choiceId?: string;
+      choiceIds?: string[];
+    }>;
   }): Promise<Omit<DiagnosticQuizSubmissionResult, 'knowledgeUnitId'>> {
     const result = await this.activitiesRepository.submitResult(input);
     const practicedAt = this.now();

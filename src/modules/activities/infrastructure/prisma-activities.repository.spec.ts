@@ -27,9 +27,14 @@ type QuestionRecord = {
   difficulty: 'LOW' | 'MEDIUM' | 'HIGH' | null;
   displayOrder: number;
   choices: Array<{ id: string; label: string; feedback?: string | null }>;
-  correctChoiceId: string;
+  selectionMode?: 'SINGLE' | 'MULTIPLE';
+  minSelections?: number | null;
+  maxSelections?: number | null;
+  correctChoiceId: string | null;
+  correctChoiceIds?: string[] | null;
   explanation: string;
   sources?: QuestionSourceRecord[];
+  visuals?: QuestionVisualRecord[];
 };
 
 type ActivityResultRecord = {
@@ -57,14 +62,47 @@ type QuestionSourceRecord = {
   chunk: DocumentChunkRecord;
 };
 
+type QuestionVisualRecord = {
+  id: string;
+  questionId: string;
+  type: 'IMAGE' | 'CHART' | 'DIAGRAM';
+  displayOrder: number;
+  payload: Record<string, unknown>;
+  sources?: QuestionVisualSourceRecord[];
+};
+
+type QuestionVisualSourceRecord = {
+  visualId: string;
+  subjectId: string;
+  chunkId: string;
+  chunk: DocumentChunkRecord;
+};
+
 type QuestionCreatePayload = {
   data: {
     sessionId: string;
     knowledgeUnitId: string;
     prompt: string;
     choices: Array<{ id: string; label: string }>;
-    correctChoiceId: string;
+    selectionMode?: 'SINGLE' | 'MULTIPLE';
+    minSelections?: number | null;
+    maxSelections?: number | null;
+    correctChoiceId?: string | null;
+    correctChoiceIds?: string[] | null;
     explanation: string;
+  };
+};
+
+type ActivitySessionCreatePayload = {
+  data: Record<string, unknown>;
+};
+
+type QuestionVisualCreatePayload = {
+  data: {
+    questionId: string;
+    type: 'IMAGE' | 'CHART' | 'DIAGRAM';
+    displayOrder: number;
+    payload: Record<string, unknown>;
   };
 };
 
@@ -91,17 +129,27 @@ type PrismaActivitiesMock = {
     findMany: jest.Mock;
   };
   activitySession: {
-    create: jest.Mock;
+    create: jest.Mock<ActivitySessionRecord, [ActivitySessionCreatePayload]>;
     findFirst: jest.Mock;
     update: jest.Mock;
   };
   question: {
-    create: jest.Mock;
+    create: jest.Mock<QuestionRecord, [QuestionCreatePayload]>;
   };
   questionSource: {
     createMany: jest.Mock;
   };
+  questionVisual: {
+    create: jest.Mock<QuestionVisualRecord, [QuestionVisualCreatePayload]>;
+  };
+  questionVisualSource: {
+    createMany: jest.Mock;
+  };
   questionAnswer: {
+    create: jest.Mock;
+    createMany: jest.Mock;
+  };
+  questionAnswerChoice: {
     createMany: jest.Mock;
   };
   activityResult: {
@@ -124,17 +172,30 @@ describe('PrismaActivitiesRepository', () => {
         findMany: jest.fn(),
       },
       activitySession: {
-        create: jest.fn(),
+        create: jest.fn<
+          ActivitySessionRecord,
+          [ActivitySessionCreatePayload]
+        >(),
         findFirst: jest.fn(),
         update: jest.fn(),
       },
       question: {
-        create: jest.fn(),
+        create: jest.fn<QuestionRecord, [QuestionCreatePayload]>(),
       },
       questionSource: {
         createMany: jest.fn(),
       },
+      questionVisual: {
+        create: jest.fn<QuestionVisualRecord, [QuestionVisualCreatePayload]>(),
+      },
+      questionVisualSource: {
+        createMany: jest.fn(),
+      },
       questionAnswer: {
+        create: jest.fn(),
+        createMany: jest.fn(),
+      },
+      questionAnswerChoice: {
         createMany: jest.fn(),
       },
       activityResult: {
@@ -539,6 +600,163 @@ describe('PrismaActivitiesRepository', () => {
     expect(publicPayload).not.toContain('Article 89');
   });
 
+  it('persists a v3 quiz with multiple answers and visual sources without leaking correction fields before submit', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findFirst.mockResolvedValue({
+      id: 'unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.documentChunk.findMany.mockResolvedValue([chunkRecord()]);
+    prisma.activitySession.create.mockResolvedValue(
+      sessionRecord({ version: 3, documentId: 'document-1' }),
+    );
+    prisma.question.create.mockResolvedValue(
+      questionRecord({
+        id: 'question-1',
+        documentId: 'document-1',
+        selectionMode: 'MULTIPLE',
+        minSelections: 1,
+        maxSelections: 2,
+        correctChoiceId: null,
+        correctChoiceIds: ['a', 'c'],
+        visuals: [
+          {
+            id: 'visual-1',
+            questionId: 'question-1',
+            type: 'CHART',
+            displayOrder: 0,
+            payload: {
+              chartType: 'bar',
+              title: 'Elements de controle',
+              data: [{ category: 'Controle', value: 2 }],
+              xKey: 'category',
+              yKeys: ['value'],
+            },
+            sources: [
+              {
+                visualId: 'visual-1',
+                subjectId: 'subject-1',
+                chunkId: 'chunk-1',
+                chunk: chunkRecord(),
+              },
+            ],
+          },
+        ],
+        sources: [
+          {
+            questionId: 'question-1',
+            subjectId: 'subject-1',
+            chunkId: 'chunk-1',
+            chunk: chunkRecord(),
+          },
+        ],
+      }),
+    );
+    prisma.questionVisual.create.mockResolvedValue({
+      id: 'visual-1',
+      questionId: 'question-1',
+      type: 'CHART',
+      displayOrder: 0,
+      payload: {
+        chartType: 'bar',
+        title: 'Elements de controle',
+        data: [{ category: 'Controle', value: 2 }],
+        xKey: 'category',
+        yKeys: ['value'],
+      },
+    });
+
+    const activity = await repository.createDiagnosticQuiz({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      documentId: 'document-1',
+      quiz: {
+        title: 'Diagnostic enrichi',
+        version: 3,
+        questions: [
+          {
+            prompt: 'Quels elements controlent le pouvoir ?',
+            selectionMode: 'multiple',
+            minSelections: 1,
+            maxSelections: 2,
+            choices: [
+              { id: 'a', label: 'Controle juridictionnel', feedback: 'Oui.' },
+              { id: 'b', label: 'Pouvoir absolu', feedback: 'Non.' },
+              { id: 'c', label: 'Separation des pouvoirs', feedback: 'Oui.' },
+            ],
+            correctChoiceIds: ['a', 'c'],
+            explanation: 'Ces elements limitent le pouvoir.',
+            sourceChunkIds: ['chunk-1'],
+            visuals: [
+              {
+                type: 'CHART',
+                displayOrder: 0,
+                chartType: 'bar',
+                title: 'Elements de controle',
+                data: [{ category: 'Controle', value: 2 }],
+                xKey: 'category',
+                yKeys: ['value'],
+                sourceChunkIds: ['chunk-1'],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const sessionCreatePayload =
+      prisma.activitySession.create.mock.calls[0]?.[0];
+    const questionCreatePayload = prisma.question.create.mock.calls[0]?.[0] as
+      | QuestionCreatePayload
+      | undefined;
+    const visualCreatePayload = prisma.questionVisual.create.mock.calls[0]?.[0];
+
+    expect(sessionCreatePayload?.data).toMatchObject({
+      version: 3,
+      documentId: 'document-1',
+    });
+    expect(questionCreatePayload?.data).toMatchObject({
+      selectionMode: 'MULTIPLE',
+      minSelections: 1,
+      maxSelections: 2,
+      correctChoiceId: null,
+      correctChoiceIds: ['a', 'c'],
+    });
+    expect(visualCreatePayload?.data).toMatchObject({
+      questionId: 'question-1',
+      type: 'CHART',
+      displayOrder: 0,
+    });
+    expect(prisma.questionVisualSource.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          visualId: 'visual-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-1',
+        },
+      ],
+    });
+    expect(activity.questions[0]).toMatchObject({
+      selectionMode: 'multiple',
+      minSelections: 1,
+      maxSelections: 2,
+      visuals: [
+        expect.objectContaining({
+          id: 'visual-1',
+          type: 'CHART',
+          sources: [{ chunkId: 'chunk-1', pageNumber: null, index: 0 }],
+        }),
+      ],
+    });
+    const publicPayload = JSON.stringify(activity);
+    expect(publicPayload).not.toContain('correctChoiceId');
+    expect(publicPayload).not.toContain('correctChoiceIds');
+    expect(publicPayload).not.toContain('explanation');
+    expect(publicPayload).not.toContain('feedback');
+    expect(publicPayload).not.toContain('Article 89');
+  });
+
   it('rejects sourced v2 quiz creation when a source chunk is unknown or cross-document', async () => {
     const { prisma, repository } = createRepository();
     prisma.knowledgeUnit.findFirst.mockResolvedValue({
@@ -776,6 +994,127 @@ describe('PrismaActivitiesRepository', () => {
         },
       ],
     });
+  });
+
+  it('submits multiple answers with all-or-nothing scoring and post-submit correction only', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.activitySession.findFirst.mockResolvedValue(
+      sessionWithQuestions({
+        version: 3,
+        documentId: 'document-1',
+        questions: [
+          questionRecord({
+            id: 'question-1',
+            documentId: 'document-1',
+            selectionMode: 'MULTIPLE',
+            minSelections: 1,
+            maxSelections: 2,
+            choices: [
+              { id: 'a', label: 'Controle', feedback: 'Oui.' },
+              { id: 'b', label: 'Pouvoir absolu', feedback: 'Non.' },
+              { id: 'c', label: 'Separation', feedback: 'Oui.' },
+            ],
+            correctChoiceId: null,
+            correctChoiceIds: ['a', 'c'],
+            explanation: 'Les deux choix corrects limitent le pouvoir.',
+            sources: [
+              {
+                questionId: 'question-1',
+                subjectId: 'subject-1',
+                chunkId: 'chunk-1',
+                chunk: chunkRecord(),
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    prisma.questionAnswer.create.mockResolvedValue({ id: 'answer-1' });
+    prisma.activityResult.create.mockResolvedValue(
+      resultRecord({ correctAnswers: 1, totalQuestions: 1, score: 1 }),
+    );
+
+    const result = await repository.submitResult({
+      studentId: 'student-1',
+      sessionId: 'session-1',
+      answers: [{ questionId: 'question-1', choiceIds: ['a', 'c'] }],
+    });
+
+    expect(prisma.questionAnswer.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'session-1',
+        questionId: 'question-1',
+        selectedChoiceId: null,
+        isCorrect: true,
+      },
+    });
+    expect(prisma.questionAnswerChoice.createMany).toHaveBeenCalledWith({
+      data: [
+        { answerId: 'answer-1', choiceId: 'a' },
+        { answerId: 'answer-1', choiceId: 'c' },
+      ],
+    });
+    expect(result).toEqual({
+      correctAnswers: 1,
+      totalQuestions: 1,
+      score: 1,
+      knowledgeUnitId: 'unit-1',
+      items: [
+        {
+          questionId: 'question-1',
+          knowledgeUnitId: 'unit-1',
+          prompt:
+            'Quelle structure est principalement responsable de la contraction cardiaque ?',
+          selectedChoiceIds: ['a', 'c'],
+          correctChoiceIds: ['a', 'c'],
+          isCorrect: true,
+          partialScore: 1,
+          explanation: 'Les deux choix corrects limitent le pouvoir.',
+          choiceFeedback: [
+            { choiceId: 'a', feedback: 'Oui.' },
+            { choiceId: 'b', feedback: 'Non.' },
+            { choiceId: 'c', feedback: 'Oui.' },
+          ],
+          sources: [
+            {
+              chunkId: 'chunk-1',
+              text: 'Article 89 encadre la revision constitutionnelle.',
+              pageNumber: null,
+              index: 0,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it('rejects duplicate choice ids for a multiple-answer question', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.activitySession.findFirst.mockResolvedValue(
+      sessionWithQuestions({
+        version: 3,
+        questions: [
+          questionRecord({
+            selectionMode: 'MULTIPLE',
+            minSelections: 1,
+            maxSelections: 2,
+            correctChoiceId: null,
+            correctChoiceIds: ['a', 'b'],
+          }),
+        ],
+      }),
+    );
+
+    await expect(
+      repository.submitResult({
+        studentId: 'student-1',
+        sessionId: 'session-1',
+        answers: [{ questionId: 'question-1', choiceIds: ['a', 'a'] }],
+      }),
+    ).rejects.toThrow('Duplicate choices are not allowed');
+
+    expect(prisma.questionAnswer.create).not.toHaveBeenCalled();
+    expect(prisma.activityResult.create).not.toHaveBeenCalled();
   });
 
   it('rejects missing answers when submitting a quiz', async () => {

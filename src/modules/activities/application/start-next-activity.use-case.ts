@@ -12,6 +12,8 @@ import {
 } from './activities.repository';
 import {
   DIAGNOSTIC_QUIZ_GENERATOR,
+  type DiagnosticQuizSelectionMode,
+  type DiagnosticQuizVisualType,
   type DiagnosticQuizGenerator,
 } from './diagnostic-quiz-generator';
 import { resolveDiagnosticQuizQuestionCount } from './diagnostic-quiz-question-count';
@@ -33,6 +35,9 @@ export class StartNextActivityUseCase {
     subjectId: string;
     knowledgeUnitId?: string;
     questionCount?: number;
+    visualsEnabled?: boolean;
+    visualTypes?: DiagnosticQuizVisualType[];
+    selectionModes?: DiagnosticQuizSelectionMode[];
   }): Promise<DiagnosticQuizActivity> {
     void this.adaptivePlanService;
     const questionCount = resolveDiagnosticQuizQuestionCount(
@@ -61,8 +66,17 @@ export class StartNextActivityUseCase {
             knowledgeUnit: generationContext.knowledgeUnit,
             chunks: generationContext.chunks,
             questionCount,
+            visualsEnabled: input.visualsEnabled,
+            visualTypes: input.visualTypes,
+            selectionModes: input.selectionModes,
           }
-        : { knowledgeUnit, questionCount },
+        : {
+            knowledgeUnit,
+            questionCount,
+            visualsEnabled: input.visualsEnabled,
+            visualTypes: input.visualTypes,
+            selectionModes: input.selectionModes,
+          },
     );
 
     return this.activitiesRepository.createDiagnosticQuiz({

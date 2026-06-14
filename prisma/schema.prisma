@@ -135,6 +135,7 @@ model DocumentChunk {
   summarySources SummarySource[]
   revisionSheetSectionSources RevisionSheetSectionSource[]
   questionSources QuestionSource[]
+  questionVisualSources QuestionVisualSource[]
 
   @@index([documentId])
   @@index([subjectId])
@@ -331,13 +332,18 @@ model Question {
   difficulty      KnowledgeUnitDifficulty?
   displayOrder    Int    @default(0)
   choices         Json
-  correctChoiceId String
+  selectionMode   QuestionSelectionMode @default(SINGLE)
+  minSelections   Int?
+  maxSelections   Int?
+  correctChoiceId String?
+  correctChoiceIds Json?
   explanation     String
 
   session       ActivitySession @relation(fields: [sessionId, knowledgeUnitId], references: [id, knowledgeUnitId], onDelete: Cascade)
   knowledgeUnit KnowledgeUnit   @relation(fields: [knowledgeUnitId], references: [id], onDelete: Cascade)
   sources       QuestionSource[]
   answers       QuestionAnswer[]
+  visuals       QuestionVisual[]
 
   @@index([sessionId])
   @@index([subjectId])
@@ -360,19 +366,59 @@ model QuestionSource {
   @@index([subjectId])
 }
 
+model QuestionVisual {
+  id           String             @id @default(cuid())
+  questionId   String
+  type         QuestionVisualType
+  displayOrder Int                @default(0)
+  payload      Json
+  createdAt    DateTime           @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  sources  QuestionVisualSource[]
+
+  @@index([questionId])
+  @@unique([questionId, displayOrder])
+}
+
+model QuestionVisualSource {
+  visualId       String
+  subjectId      String
+  chunkId        String
+  relevanceScore Float?
+  createdAt      DateTime @default(now())
+
+  visual QuestionVisual @relation(fields: [visualId], references: [id], onDelete: Cascade)
+  chunk  DocumentChunk   @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
+
+  @@id([visualId, chunkId])
+  @@index([chunkId])
+  @@index([subjectId])
+}
+
 model QuestionAnswer {
   id               String   @id @default(cuid())
   sessionId        String
   questionId       String
-  selectedChoiceId String
+  selectedChoiceId String?
   isCorrect        Boolean
   createdAt        DateTime @default(now())
 
   session  ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   question Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  selectedChoices QuestionAnswerChoice[]
 
   @@unique([sessionId, questionId])
   @@index([questionId])
+}
+
+model QuestionAnswerChoice {
+  answerId String
+  choiceId String
+
+  answer QuestionAnswer @relation(fields: [answerId], references: [id], onDelete: Cascade)
+
+  @@id([answerId, choiceId])
 }
 
 model ActivityResult {
@@ -429,4 +475,15 @@ enum ActivityType {
 enum ActivityStatus {
   STARTED
   COMPLETED
+}
+
+enum QuestionSelectionMode {
+  SINGLE
+  MULTIPLE
+}
+
+enum QuestionVisualType {
+  IMAGE
+  CHART
+  DIAGRAM
 }

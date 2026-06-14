@@ -18,20 +18,41 @@ import {
 } from '../application/diagnostic-quiz-question-count';
 import { StartNextActivityUseCase } from '../application/start-next-activity.use-case';
 import { SubmitActivityResultUseCase } from '../application/submit-activity-result.use-case';
+import type {
+  DiagnosticQuizSelectionMode,
+  DiagnosticQuizVisualType,
+} from '../application/diagnostic-quiz-generator';
 
 class StartActivityDto {
   subjectId!: string;
   knowledgeUnitId?: string;
   questionCount?: number;
+  visualsEnabled?: boolean;
+  visualTypes?: string[];
+  selectionModes?: string[];
 }
 
 class SubmitActivityDto {
-  answers!: Array<{ questionId: string; choiceId: string }>;
+  answers!: Array<{
+    questionId: string;
+    choiceId?: string;
+    choiceIds?: string[];
+  }>;
 }
 
 interface ValidatedActivityAnswer {
   questionId: string;
-  choiceId: string;
+  choiceId?: string;
+  choiceIds?: string[];
+}
+
+interface ValidatedStartActivityBody {
+  subjectId: string;
+  knowledgeUnitId?: string;
+  questionCount?: number;
+  visualsEnabled?: boolean;
+  visualTypes?: DiagnosticQuizVisualType[];
+  selectionModes?: DiagnosticQuizSelectionMode[];
 }
 
 @Controller('activities')
@@ -55,6 +76,9 @@ export class ActivitiesController {
         subjectId: validatedBody.subjectId,
         knowledgeUnitId: validatedBody.knowledgeUnitId,
         questionCount: validatedBody.questionCount,
+        visualsEnabled: validatedBody.visualsEnabled,
+        visualTypes: validatedBody.visualTypes,
+        selectionModes: validatedBody.selectionModes,
       })
       .catch((error: unknown) => {
         normalizeActivityError(error);
@@ -85,7 +109,9 @@ export class ActivitiesController {
   }
 }
 
-function validateStartActivityBody(input: StartActivityDto): StartActivityDto {
+function validateStartActivityBody(
+  input: StartActivityDto,
+): ValidatedStartActivityBody {
   return {
     subjectId: validateRequiredId(input?.subjectId, 'Subject id'),
     knowledgeUnitId:
@@ -93,6 +119,12 @@ function validateStartActivityBody(input: StartActivityDto): StartActivityDto {
         ? undefined
         : validateRequiredId(input.knowledgeUnitId, 'Knowledge unit id'),
     questionCount: validateQuestionCount(input?.questionCount),
+    visualsEnabled: validateOptionalBoolean(
+      input?.visualsEnabled,
+      'Visuals enabled',
+    ),
+    visualTypes: validateVisualTypes(input?.visualTypes),
+    selectionModes: validateSelectionModes(input?.selectionModes),
   };
 }
 
@@ -106,7 +138,20 @@ function validateSubmitActivityBody(input: SubmitActivityDto): {
   const seenQuestionIds = new Set<string>();
   const answers = input.answers.map((answer) => {
     const questionId = validateRequiredId(answer?.questionId, 'Question id');
-    const choiceId = validateRequiredId(answer?.choiceId, 'Choice id');
+    const choiceId =
+      answer?.choiceId === undefined
+        ? undefined
+        : validateRequiredId(answer.choiceId, 'Choice id');
+    const choiceIds =
+      answer?.choiceIds === undefined
+        ? undefined
+        : validateChoiceIds(answer.choiceIds);
+
+    if ((choiceId === undefined) === (choiceIds === undefined)) {
+      throw new BadRequestException(
+        'Exactly one of choiceId or choiceIds is required',
+      );
+    }
 
     if (seenQuestionIds.has(questionId)) {
       throw new BadRequestException('Duplicate answers are not allowed');
@@ -116,11 +161,104 @@ function validateSubmitActivityBody(input: SubmitActivityDto): {
 
     return {
       questionId,
-      choiceId,
+      ...(choiceId === undefined ? {} : { choiceId }),
+      ...(choiceIds === undefined ? {} : { choiceIds }),
     };
   });
 
   return { answers };
+}
+
+function validateOptionalBoolean(input: unknown, label: string) {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (typeof input !== 'boolean') {
+    throw new BadRequestException(`${label} must be a boolean`);
+  }
+
+  return input;
+}
+
+function validateVisualTypes(
+  input: unknown,
+): DiagnosticQuizVisualType[] | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    throw new BadRequestException(
+      'Diagnostic quiz visualTypes must be an array',
+    );
+  }
+
+  const visualTypes = input.map((value) => {
+    if (typeof value !== 'string') {
+      throw new BadRequestException(
+        'Diagnostic quiz visualTypes must contain strings',
+      );
+    }
+
+    const normalized = value.trim().toUpperCase();
+
+    if (normalized === 'IMAGE') {
+      throw new BadRequestException(
+        'Diagnostic quiz IMAGE visuals are not supported yet',
+      );
+    }
+
+    if (normalized !== 'CHART' && normalized !== 'DIAGRAM') {
+      throw new BadRequestException('Diagnostic quiz visual type is invalid');
+    }
+
+    return normalized;
+  });
+
+  return Array.from(new Set(visualTypes));
+}
+
+function validateSelectionModes(
+  input: unknown,
+): DiagnosticQuizSelectionMode[] | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    throw new BadRequestException(
+      'Diagnostic quiz selectionModes must be an array',
+    );
+  }
+
+  const selectionModes = input.map((value) => {
+    if (typeof value !== 'string') {
+      throw new BadRequestException(
+        'Diagnostic quiz selectionModes must contain strings',
+      );
+    }
+
+    const normalized = value.trim();
+
+    if (normalized !== 'single' && normalized !== 'multiple') {
+      throw new BadRequestException(
+        'Diagnostic quiz selection mode is invalid',
+      );
+    }
+
+    return normalized;
+  });
+
+  return Array.from(new Set(selectionModes));
+}
+
+function validateChoiceIds(input: unknown): string[] {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new BadRequestException('Choice ids must be a non-empty array');
+  }
+
+  return input.map((choiceId) => validateRequiredId(choiceId, 'Choice id'));
 }
 
 function validateRequiredId(input: unknown, label: string): string {
@@ -176,14 +314,17 @@ function normalizeActivityError(error: unknown): never {
       error.message === 'Duplicate answers are not allowed' ||
       error.message === 'Missing answers are not allowed' ||
       error.message === 'Question does not belong to activity session' ||
-      error.message === 'Choice does not belong to question'
+      error.message === 'Choice does not belong to question' ||
+      error.message === 'Answer shape does not match question selection mode' ||
+      error.message === 'Selection count is invalid for question'
     ) {
       throw new BadRequestException(error.message);
     }
 
     if (
       error.message === 'Generated diagnostic quiz is invalid' ||
-      error.message === 'Question source chunk not found'
+      error.message === 'Question source chunk not found' ||
+      error.message === 'Question visual source chunk not found'
     ) {
       throw new UnprocessableEntityException(error.message);
     }

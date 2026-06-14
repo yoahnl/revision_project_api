@@ -1,5 +1,10 @@
 import { Injectable } from '@nestjs/common';
-import { ActivityStatus, ActivityType } from '../../../generated/prisma/enums';
+import {
+  ActivityStatus,
+  ActivityType,
+  QuestionSelectionMode,
+  QuestionVisualType,
+} from '../../../generated/prisma/enums';
 import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import { KnowledgeUnit } from '../../revision/domain/knowledge-unit.entity';
@@ -7,6 +12,7 @@ import type {
   ActivitiesRepository,
   ActivityQuestion,
   ActivityQuestionCorrectionItem,
+  ActivityQuestionVisual,
   DiagnosticQuizActivity,
   DiagnosticQuizGenerationContext,
   DiagnosticQuizSubmissionResult,
@@ -15,6 +21,7 @@ import type {
   GeneratedDiagnosticQuiz,
   GeneratedDiagnosticQuizChoice,
   GeneratedDiagnosticQuizQuestion,
+  GeneratedDiagnosticQuizVisual,
 } from '../application/diagnostic-quiz-generator';
 
 type ActivityQuestionChoiceRecord = {
@@ -38,10 +45,23 @@ type QuestionRecord = {
   knowledgeUnitId: string;
   prompt: string;
   choices: unknown;
-  correctChoiceId: string;
+  selectionMode?: 'SINGLE' | 'MULTIPLE';
+  minSelections?: number | null;
+  maxSelections?: number | null;
+  correctChoiceId?: string | null;
+  correctChoiceIds?: unknown;
   explanation: string;
   difficulty?: 'LOW' | 'MEDIUM' | 'HIGH' | null;
   displayOrder?: number;
+  sources?: QuestionSourceRecord[];
+  visuals?: QuestionVisualRecord[];
+};
+
+type QuestionVisualRecord = {
+  id: string;
+  type: 'IMAGE' | 'CHART' | 'DIAGRAM';
+  displayOrder: number;
+  payload: unknown;
   sources?: QuestionSourceRecord[];
 };
 
@@ -182,7 +202,7 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
             knowledgeUnitId: input.knowledgeUnitId,
             question,
             index,
-            isV2: input.quiz.version === 2,
+            isSourcedVersion: (input.quiz.version ?? 1) > 1,
           }),
         });
         const questionSourceChunkIds = dedupeStrings(
@@ -199,12 +219,58 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
           });
         }
 
+        const visuals: QuestionVisualRecord[] = [];
+
+        for (const [visualIndex, visual] of (
+          question.visuals ?? []
+        ).entries()) {
+          const visualSourceChunkIds = dedupeStrings(visual.sourceChunkIds);
+          const createdVisual = await tx.questionVisual.create({
+            data: buildQuestionVisualCreateData({
+              questionId: createdQuestion.id,
+              visual,
+              fallbackDisplayOrder: visualIndex,
+            }),
+          });
+
+          await tx.questionVisualSource.createMany({
+            data: visualSourceChunkIds.map((chunkId) => ({
+              visualId: createdVisual.id,
+              subjectId: input.subjectId,
+              chunkId,
+            })),
+          });
+
+          visuals.push({
+            id: createdVisual.id,
+            type: createdVisual.type,
+            displayOrder: createdVisual.displayOrder,
+            payload: createdVisual.payload,
+            sources: visualSourceChunkIds
+              .map((chunkId) => sourceChunkById.get(chunkId))
+              .filter((chunk): chunk is DocumentChunkRecord => Boolean(chunk))
+              .map((chunk) => ({
+                chunkId: chunk.id,
+                chunk: {
+                  id: chunk.id,
+                  text: chunk.text,
+                  pageNumber: chunk.pageNumber,
+                  index: chunk.index,
+                },
+              })),
+          });
+        }
+
         questions.push({
           id: createdQuestion.id,
           knowledgeUnitId: createdQuestion.knowledgeUnitId,
           prompt: createdQuestion.prompt,
           choices: createdQuestion.choices,
+          selectionMode: createdQuestion.selectionMode,
+          minSelections: createdQuestion.minSelections,
+          maxSelections: createdQuestion.maxSelections,
           correctChoiceId: createdQuestion.correctChoiceId,
+          correctChoiceIds: createdQuestion.correctChoiceIds,
           explanation: createdQuestion.explanation,
           difficulty: createdQuestion.difficulty,
           displayOrder: createdQuestion.displayOrder,
@@ -220,6 +286,7 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
                 index: chunk.index,
               },
             })),
+          visuals,
         });
       }
 
@@ -242,7 +309,11 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
   async submitResult(input: {
     studentId: string;
     sessionId: string;
-    answers: Array<{ questionId: string; choiceId: string }>;
+    answers: Array<{
+      questionId: string;
+      choiceId?: string;
+      choiceIds?: string[];
+    }>;
   }): Promise<DiagnosticQuizSubmissionResult> {
     return this.prisma.$transaction(async (tx) => {
       const session = await tx.activitySession.findFirst({
@@ -277,14 +348,36 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
 
       const result = scoreDiagnosticQuizSubmission(session, input.answers);
 
-      await tx.questionAnswer.createMany({
-        data: result.items.map((item) => ({
-          sessionId: session.id,
-          questionId: item.questionId,
-          selectedChoiceId: item.selectedChoiceId,
-          isCorrect: item.isCorrect,
-        })),
-      });
+      if (result.items.every((item) => item.selectedChoiceId)) {
+        await tx.questionAnswer.createMany({
+          data: result.items.map((item) => ({
+            sessionId: session.id,
+            questionId: item.questionId,
+            selectedChoiceId: item.selectedChoiceId,
+            isCorrect: item.isCorrect,
+          })),
+        });
+      } else {
+        for (const item of result.items) {
+          const answer = await tx.questionAnswer.create({
+            data: {
+              sessionId: session.id,
+              questionId: item.questionId,
+              selectedChoiceId: item.selectedChoiceId ?? null,
+              isCorrect: item.isCorrect,
+            },
+          });
+
+          if ((item.selectedChoiceIds ?? []).length > 0) {
+            await tx.questionAnswerChoice.createMany({
+              data: (item.selectedChoiceIds ?? []).map((choiceId) => ({
+                answerId: answer.id,
+                choiceId,
+              })),
+            });
+          }
+        }
+      }
 
       await tx.activityResult.create({
         data: {
@@ -328,8 +421,8 @@ function buildActivitySessionCreateData(input: {
     status: ActivityStatus.STARTED,
   };
 
-  if (input.quiz.version === 2) {
-    data.version = 2;
+  if ((input.quiz.version ?? 1) > 1) {
+    data.version = input.quiz.version;
     data.documentId = input.documentId ?? null;
   }
 
@@ -352,18 +445,34 @@ function buildQuestionCreateData(input: {
   knowledgeUnitId: string;
   question: GeneratedDiagnosticQuizQuestion;
   index: number;
-  isV2: boolean;
+  isSourcedVersion: boolean;
 }) {
+  const selectionMode =
+    input.question.selectionMode === 'multiple'
+      ? QuestionSelectionMode.MULTIPLE
+      : QuestionSelectionMode.SINGLE;
   const data: Prisma.QuestionUncheckedCreateInput = {
     sessionId: input.sessionId,
     knowledgeUnitId: input.knowledgeUnitId,
     prompt: input.question.prompt,
     choices: toQuestionChoicesJson(input.question.choices),
-    correctChoiceId: input.question.correctChoiceId,
+    correctChoiceId:
+      selectionMode === QuestionSelectionMode.SINGLE
+        ? (input.question.correctChoiceId ?? null)
+        : null,
     explanation: input.question.explanation,
   };
 
-  if (input.isV2) {
+  if (selectionMode === QuestionSelectionMode.MULTIPLE) {
+    data.selectionMode = QuestionSelectionMode.MULTIPLE;
+    data.minSelections = input.question.minSelections ?? null;
+    data.maxSelections = input.question.maxSelections ?? null;
+    data.correctChoiceIds = toCorrectChoiceIdsJson(
+      input.question.correctChoiceIds ?? [],
+    );
+  }
+
+  if (input.isSourcedVersion) {
     data.subjectId = input.subjectId;
     data.documentId = input.documentId;
     data.difficulty = input.question.difficulty ?? null;
@@ -371,6 +480,67 @@ function buildQuestionCreateData(input: {
   }
 
   return data;
+}
+
+function buildQuestionVisualCreateData(input: {
+  questionId: string;
+  visual: GeneratedDiagnosticQuizVisual;
+  fallbackDisplayOrder: number;
+}): Prisma.QuestionVisualUncheckedCreateInput {
+  return {
+    questionId: input.questionId,
+    type: toPrismaQuestionVisualType(input.visual.type),
+    displayOrder: input.visual.displayOrder ?? input.fallbackDisplayOrder,
+    payload: toQuestionVisualPayload(input.visual),
+  };
+}
+
+function toPrismaQuestionVisualType(
+  type: GeneratedDiagnosticQuizVisual['type'],
+) {
+  if (type === 'IMAGE') {
+    return QuestionVisualType.IMAGE;
+  }
+
+  if (type === 'CHART') {
+    return QuestionVisualType.CHART;
+  }
+
+  return QuestionVisualType.DIAGRAM;
+}
+
+function toQuestionVisualPayload(
+  visual: GeneratedDiagnosticQuizVisual,
+): Prisma.InputJsonValue {
+  if (visual.type === 'IMAGE') {
+    return {
+      imageUrl: visual.imageUrl,
+      altText: visual.altText,
+      ...(visual.caption === undefined ? {} : { caption: visual.caption }),
+    };
+  }
+
+  if (visual.type === 'CHART') {
+    return {
+      chartType: visual.chartType,
+      title: visual.title,
+      ...(visual.description === undefined
+        ? {}
+        : { description: visual.description }),
+      data: visual.data,
+      ...(visual.xKey === undefined ? {} : { xKey: visual.xKey }),
+      ...(visual.yKeys === undefined ? {} : { yKeys: visual.yKeys }),
+    };
+  }
+
+  return {
+    title: visual.title,
+    ...(visual.description === undefined
+      ? {}
+      : { description: visual.description }),
+    nodes: visual.nodes,
+    ...(visual.edges === undefined ? {} : { edges: visual.edges }),
+  };
 }
 
 function assertGeneratedQuizIsPersistable(quiz: GeneratedDiagnosticQuiz): void {
@@ -388,36 +558,74 @@ function assertGeneratedQuizIsPersistable(quiz: GeneratedDiagnosticQuiz): void {
     }
 
     const choiceIds = question.choices.map((choice) => choice.id);
+    const selectionMode = question.selectionMode ?? 'single';
+
+    if (new Set(choiceIds).size !== choiceIds.length) {
+      throw new Error('Generated diagnostic quiz is invalid');
+    }
+
+    if (selectionMode === 'multiple') {
+      const correctChoiceIds = question.correctChoiceIds ?? [];
+      const minSelections = question.minSelections ?? 1;
+      const maxSelections = question.maxSelections ?? correctChoiceIds.length;
+
+      if (
+        correctChoiceIds.length === 0 ||
+        new Set(correctChoiceIds).size !== correctChoiceIds.length ||
+        correctChoiceIds.some((choiceId) => !choiceIds.includes(choiceId)) ||
+        minSelections < 1 ||
+        maxSelections < minSelections ||
+        maxSelections > choiceIds.length
+      ) {
+        throw new Error('Generated diagnostic quiz is invalid');
+      }
+    } else if (!choiceIds.includes(question.correctChoiceId ?? '')) {
+      throw new Error('Generated diagnostic quiz is invalid');
+    }
 
     if (
-      new Set(choiceIds).size !== choiceIds.length ||
-      !choiceIds.includes(question.correctChoiceId)
+      (quiz.version ?? 1) > 1 &&
+      (question.sourceChunkIds ?? []).length === 0
     ) {
       throw new Error('Generated diagnostic quiz is invalid');
     }
 
-    if (quiz.version === 2 && (question.sourceChunkIds ?? []).length === 0) {
-      throw new Error('Generated diagnostic quiz is invalid');
+    for (const visual of question.visuals ?? []) {
+      if ((visual.sourceChunkIds ?? []).length === 0) {
+        throw new Error('Generated diagnostic quiz is invalid');
+      }
     }
   }
 }
 
 function scoreDiagnosticQuizSubmission(
   session: ActivitySessionRecord,
-  answers: Array<{ questionId: string; choiceId: string }>,
+  answers: Array<{
+    questionId: string;
+    choiceId?: string;
+    choiceIds?: string[];
+  }>,
 ): DiagnosticQuizSubmissionResult {
   if (session.questions.length === 0) {
     throw new Error('Activity session has no questions');
   }
 
-  const answersByQuestionId = new Map<string, string>();
+  const answersByQuestionId = new Map<
+    string,
+    { choiceId?: string; choiceIds?: string[] }
+  >();
 
   for (const answer of answers) {
     if (answersByQuestionId.has(answer.questionId)) {
       throw new Error('Duplicate answers are not allowed');
     }
 
-    answersByQuestionId.set(answer.questionId, answer.choiceId);
+    answersByQuestionId.set(answer.questionId, {
+      ...(answer.choiceId === undefined ? {} : { choiceId: answer.choiceId }),
+      ...(answer.choiceIds === undefined
+        ? {}
+        : { choiceIds: answer.choiceIds }),
+    });
   }
 
   const items: ActivityQuestionCorrectionItem[] = [];
@@ -431,47 +639,25 @@ function scoreDiagnosticQuizSubmission(
   }
 
   for (const question of session.questions) {
-    const selectedChoiceId = answersByQuestionId.get(question.id);
+    const answer = answersByQuestionId.get(question.id);
 
-    if (!selectedChoiceId) {
+    if (!answer) {
       throw new Error('Missing answers are not allowed');
     }
 
     const choices = parseInternalQuestionChoices(question.choices);
+    const selectionMode =
+      question.selectionMode === 'MULTIPLE' ? 'multiple' : 'single';
+    const item =
+      selectionMode === 'multiple'
+        ? scoreMultipleAnswerQuestion(question, answer, choices)
+        : scoreSingleAnswerQuestion(question, answer, choices);
 
-    if (!choices.some((choice) => choice.id === selectedChoiceId)) {
-      throw new Error('Choice does not belong to question');
-    }
-
-    const isCorrect = selectedChoiceId === question.correctChoiceId;
-
-    if (isCorrect) {
+    if (item.isCorrect) {
       correctAnswers += 1;
     }
 
-    items.push({
-      questionId: question.id,
-      knowledgeUnitId: question.knowledgeUnitId,
-      prompt: question.prompt,
-      selectedChoiceId,
-      correctChoiceId: question.correctChoiceId,
-      isCorrect,
-      explanation: question.explanation,
-      choiceFeedback: choices
-        .filter((choice) => typeof choice.feedback === 'string')
-        .map((choice) => ({
-          choiceId: choice.id,
-          feedback: choice.feedback as string,
-        })),
-      sources: (question.sources ?? [])
-        .map((source) => ({
-          chunkId: source.chunkId,
-          text: source.chunk.text,
-          pageNumber: source.chunk.pageNumber,
-          index: source.chunk.index,
-        }))
-        .sort((left, right) => left.index - right.index),
-    });
+    items.push(item);
   }
 
   const totalQuestions = session.questions.length;
@@ -487,6 +673,125 @@ function scoreDiagnosticQuizSubmission(
     knowledgeUnitId: session.knowledgeUnitId,
     items,
   };
+}
+
+function scoreSingleAnswerQuestion(
+  question: QuestionRecord,
+  answer: { choiceId?: string; choiceIds?: string[] },
+  choices: ActivityQuestionChoiceRecord[],
+): ActivityQuestionCorrectionItem {
+  if (answer.choiceId === undefined || answer.choiceIds !== undefined) {
+    throw new Error('Answer shape does not match question selection mode');
+  }
+
+  if (!choices.some((choice) => choice.id === answer.choiceId)) {
+    throw new Error('Choice does not belong to question');
+  }
+
+  if (!question.correctChoiceId) {
+    throw new Error('Generated diagnostic quiz is invalid');
+  }
+
+  const isCorrect = answer.choiceId === question.correctChoiceId;
+
+  return {
+    ...buildCorrectionItemBase(question, choices),
+    selectedChoiceId: answer.choiceId,
+    correctChoiceId: question.correctChoiceId,
+    isCorrect,
+  };
+}
+
+function scoreMultipleAnswerQuestion(
+  question: QuestionRecord,
+  answer: { choiceId?: string; choiceIds?: string[] },
+  choices: ActivityQuestionChoiceRecord[],
+): ActivityQuestionCorrectionItem {
+  if (answer.choiceIds === undefined || answer.choiceId !== undefined) {
+    throw new Error('Answer shape does not match question selection mode');
+  }
+
+  const selectedChoiceIds = dedupeStrings(answer.choiceIds);
+
+  if (selectedChoiceIds.length !== answer.choiceIds.length) {
+    throw new Error('Duplicate choices are not allowed');
+  }
+
+  const minSelections = question.minSelections ?? 1;
+  const maxSelections = question.maxSelections ?? choices.length;
+
+  if (
+    selectedChoiceIds.length < minSelections ||
+    selectedChoiceIds.length > maxSelections
+  ) {
+    throw new Error('Selection count is invalid for question');
+  }
+
+  const knownChoiceIds = new Set(choices.map((choice) => choice.id));
+
+  if (selectedChoiceIds.some((choiceId) => !knownChoiceIds.has(choiceId))) {
+    throw new Error('Choice does not belong to question');
+  }
+
+  const correctChoiceIds = parseStringArray(question.correctChoiceIds);
+
+  if (correctChoiceIds.length === 0) {
+    throw new Error('Generated diagnostic quiz is invalid');
+  }
+
+  const isCorrect = areStringSetsEqual(selectedChoiceIds, correctChoiceIds);
+
+  return {
+    ...buildCorrectionItemBase(question, choices),
+    selectedChoiceIds,
+    correctChoiceIds,
+    isCorrect,
+    partialScore: isCorrect ? 1 : 0,
+  };
+}
+
+function buildCorrectionItemBase(
+  question: QuestionRecord,
+  choices: ActivityQuestionChoiceRecord[],
+) {
+  return {
+    questionId: question.id,
+    knowledgeUnitId: question.knowledgeUnitId,
+    prompt: question.prompt,
+    explanation: question.explanation,
+    choiceFeedback: choices
+      .filter((choice) => typeof choice.feedback === 'string')
+      .map((choice) => ({
+        choiceId: choice.id,
+        feedback: choice.feedback as string,
+      })),
+    sources: (question.sources ?? [])
+      .map((source) => ({
+        chunkId: source.chunkId,
+        text: source.chunk.text,
+        pageNumber: source.chunk.pageNumber,
+        index: source.chunk.index,
+      }))
+      .sort((left, right) => left.index - right.index),
+  };
+}
+
+function parseStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.filter((value): value is string => typeof value === 'string');
+}
+
+function areStringSetsEqual(left: string[], right: string[]): boolean {
+  if (left.length !== right.length) {
+    return false;
+  }
+
+  const rightValues = new Set(right);
+
+  return left.every((value) => rightValues.has(value));
 }
 
 function toDiagnosticQuizGenerationContext(
@@ -558,8 +863,127 @@ function toActivityQuestion(question: QuestionRecord): ActivityQuestion {
     knowledgeUnitId: question.knowledgeUnitId,
     prompt: question.prompt,
     difficulty: question.difficulty ?? null,
+    ...(question.selectionMode === 'MULTIPLE'
+      ? { selectionMode: toPublicSelectionMode(question.selectionMode) }
+      : {}),
+    ...(question.minSelections === undefined
+      ? {}
+      : { minSelections: question.minSelections }),
+    ...(question.maxSelections === undefined
+      ? {}
+      : { maxSelections: question.maxSelections }),
     choices: parsePublicQuestionChoices(question.choices),
     ...(sources.length > 0 ? { sources } : {}),
+    ...toPublicQuestionVisuals(question.visuals),
+  };
+}
+
+function toPublicSelectionMode(
+  selectionMode: QuestionRecord['selectionMode'],
+): 'single' | 'multiple' {
+  return selectionMode === 'MULTIPLE' ? 'multiple' : 'single';
+}
+
+function toPublicQuestionVisuals(visuals: QuestionVisualRecord[] | undefined) {
+  const publicVisuals = (visuals ?? [])
+    .map(toPublicQuestionVisual)
+    .filter(
+      (
+        visual,
+      ): visual is NonNullable<ReturnType<typeof toPublicQuestionVisual>> =>
+        Boolean(visual),
+    )
+    .sort((left, right) => left.displayOrder - right.displayOrder);
+
+  return publicVisuals.length > 0 ? { visuals: publicVisuals } : {};
+}
+
+function toPublicQuestionVisual(
+  visual: QuestionVisualRecord,
+): ActivityQuestionVisual | null {
+  const sources = (visual.sources ?? [])
+    .map((source) => ({
+      chunkId: source.chunkId,
+      pageNumber: source.chunk.pageNumber,
+      index: source.chunk.index,
+    }))
+    .sort((left, right) => left.index - right.index);
+
+  if (visual.type === 'IMAGE') {
+    const payload = parseRecord(visual.payload);
+    const imageUrl =
+      typeof payload.imageUrl === 'string' ? payload.imageUrl : '';
+    const altText = typeof payload.altText === 'string' ? payload.altText : '';
+
+    if (!imageUrl || !altText) {
+      return null;
+    }
+
+    return {
+      id: visual.id,
+      type: 'IMAGE' as const,
+      displayOrder: visual.displayOrder,
+      imageUrl,
+      altText,
+      caption:
+        typeof payload.caption === 'string' || payload.caption === null
+          ? payload.caption
+          : undefined,
+      sources,
+    };
+  }
+
+  if (visual.type === 'CHART') {
+    const payload = parseRecord(visual.payload);
+    const chartType = parseChartType(payload.chartType);
+    const title = typeof payload.title === 'string' ? payload.title : '';
+    const data = parseChartData(payload.data);
+
+    if (!chartType || !title || data.length === 0) {
+      return null;
+    }
+
+    return {
+      id: visual.id,
+      type: 'CHART' as const,
+      displayOrder: visual.displayOrder,
+      chartType,
+      title,
+      description:
+        typeof payload.description === 'string' || payload.description === null
+          ? payload.description
+          : undefined,
+      data,
+      xKey:
+        typeof payload.xKey === 'string' || payload.xKey === null
+          ? payload.xKey
+          : undefined,
+      yKeys: parseOptionalStringArray(payload.yKeys),
+      sources,
+    };
+  }
+
+  const payload = parseRecord(visual.payload);
+  const title = typeof payload.title === 'string' ? payload.title : '';
+  const nodes = parseDiagramNodes(payload.nodes);
+  const edges = parseDiagramEdges(payload.edges);
+
+  if (!title || nodes.length === 0) {
+    return null;
+  }
+
+  return {
+    id: visual.id,
+    type: 'DIAGRAM' as const,
+    displayOrder: visual.displayOrder,
+    title,
+    description:
+      typeof payload.description === 'string' || payload.description === null
+        ? payload.description
+        : undefined,
+    nodes,
+    ...(edges === undefined ? {} : { edges }),
+    sources,
   };
 }
 
@@ -571,6 +995,10 @@ function toQuestionChoicesJson(
     label: choice.label,
     ...(choice.feedback !== undefined ? { feedback: choice.feedback } : {}),
   }));
+}
+
+function toCorrectChoiceIdsJson(choiceIds: string[]): Prisma.InputJsonValue {
+  return choiceIds;
 }
 
 function parsePublicQuestionChoices(input: unknown) {
@@ -605,11 +1033,111 @@ function parseInternalQuestionChoices(
     .filter((choice) => choice.id.length > 0 && choice.label.length > 0);
 }
 
+function parseRecord(input: unknown): Record<string, unknown> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return {};
+  }
+
+  return input as Record<string, unknown>;
+}
+
+function parseChartType(
+  input: unknown,
+): 'bar' | 'line' | 'pie' | 'scatter' | null {
+  return input === 'bar' ||
+    input === 'line' ||
+    input === 'pie' ||
+    input === 'scatter'
+    ? input
+    : null;
+}
+
+function parseChartData(
+  input: unknown,
+): Array<Record<string, string | number | null>> {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map(parseRecord)
+    .map((row) =>
+      Object.fromEntries(
+        Object.entries(row).filter(
+          (entry): entry is [string, string | number | null] =>
+            typeof entry[1] === 'string' ||
+            typeof entry[1] === 'number' ||
+            entry[1] === null,
+        ),
+      ),
+    )
+    .filter((row) => Object.keys(row).length > 0);
+}
+
+function parseOptionalStringArray(input: unknown): string[] | null | undefined {
+  if (input === null) {
+    return null;
+  }
+
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+
+  const values = input.filter(
+    (value): value is string => typeof value === 'string',
+  );
+
+  return values.length === input.length ? values : undefined;
+}
+
+function parseDiagramNodes(input: unknown) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map(parseRecord)
+    .map((node) => ({
+      id: typeof node.id === 'string' ? node.id : '',
+      label: typeof node.label === 'string' ? node.label : '',
+    }))
+    .filter((node) => node.id.length > 0 && node.label.length > 0);
+}
+
+function parseDiagramEdges(input: unknown) {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+
+  return input
+    .map(parseRecord)
+    .map((edge) => ({
+      from: typeof edge.from === 'string' ? edge.from : '',
+      to: typeof edge.to === 'string' ? edge.to : '',
+      label:
+        typeof edge.label === 'string' || edge.label === null
+          ? edge.label
+          : undefined,
+    }))
+    .filter((edge) => edge.from.length > 0 && edge.to.length > 0);
+}
+
 function collectQuizSourceChunkIds(
   questions: GeneratedDiagnosticQuizQuestion[],
 ): string[] {
   return dedupeStrings(
-    questions.flatMap((question) => question.sourceChunkIds ?? []),
+    questions.flatMap((question) => [
+      ...(question.sourceChunkIds ?? []),
+      ...(question.visuals ?? []).flatMap((visual) => visual.sourceChunkIds),
+    ]),
   );
 }
 

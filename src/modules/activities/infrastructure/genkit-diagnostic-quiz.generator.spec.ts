@@ -14,9 +14,35 @@ type GenerateResult = {
       prompt: string;
       difficulty?: 'LOW' | 'MEDIUM' | 'HIGH' | null;
       choices: Array<{ id: string; label: string; feedback?: string | null }>;
-      correctChoiceId: string;
+      selectionMode?: 'single' | 'multiple';
+      minSelections?: number | null;
+      maxSelections?: number | null;
+      correctChoiceId?: string;
+      correctChoiceIds?: string[];
       explanation: string;
       sourceChunkIds?: string[];
+      visuals?: Array<
+        | {
+            type: 'CHART';
+            displayOrder?: number;
+            chartType: 'bar' | 'line' | 'pie' | 'scatter';
+            title: string;
+            description?: string | null;
+            data: Array<Record<string, string | number | null>>;
+            xKey?: string | null;
+            yKeys?: string[];
+            sourceChunkIds: string[];
+          }
+        | {
+            type: 'DIAGRAM';
+            displayOrder?: number;
+            title: string;
+            description?: string | null;
+            nodes: Array<{ id: string; label: string }>;
+            edges?: Array<{ from: string; to: string; label?: string | null }>;
+            sourceChunkIds: string[];
+          }
+      >;
     }>;
   };
 };
@@ -280,6 +306,93 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(observedPayload).not.toContain('La forme republicaine');
     expect(observedPayload).not.toContain('correct-source');
     expect(observedPayload).not.toContain('Explication sourcee');
+  });
+
+  it('generates a sourced v3 quiz with multiple answers and bounded visuals', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: generatedMediaMultiQuiz(),
+    });
+
+    const quiz = await new GenkitDiagnosticQuizGenerator().generate({
+      documentId: 'document-1',
+      subjectId: 'subject-1',
+      questionCount: 1,
+      visualsEnabled: true,
+      visualTypes: ['CHART', 'DIAGRAM'],
+      selectionModes: ['single', 'multiple'],
+      knowledgeUnit: sourcedKnowledgeUnit(),
+      chunks: [
+        {
+          id: 'chunk-source',
+          index: 1,
+          text: 'Le cours compare les pouvoirs et leurs controles.',
+          pageNumber: 2,
+        },
+      ],
+    });
+
+    const [generateInput] = mockGenerate.mock.calls[0] ?? [];
+    expect(generateInput?.prompt).toContain('selectionMode');
+    expect(generateInput?.prompt).toContain('CHART');
+    expect(generateInput?.prompt).toContain('DIAGRAM');
+    expect(generateInput?.prompt).not.toContain('IMAGE');
+    expect(quiz.version).toBe(3);
+    expect(quiz.questions[0]).toMatchObject({
+      selectionMode: 'multiple',
+      minSelections: 1,
+      maxSelections: 2,
+      correctChoiceIds: ['a', 'c'],
+      visuals: [
+        expect.objectContaining({ type: 'CHART' }),
+        expect.objectContaining({ type: 'DIAGRAM' }),
+      ],
+    });
+  });
+
+  it('rejects a visual source unknown to the selected chunks', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedMediaMultiQuiz(),
+        questions: [
+          {
+            ...generatedMediaMultiQuiz().questions[0],
+            visuals: [
+              {
+                ...generatedMediaMultiQuiz().questions[0].visuals?.[0],
+                sourceChunkIds: ['missing-chunk'],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const observer = createObserver();
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator(observer).generate({
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        questionCount: 1,
+        visualsEnabled: true,
+        visualTypes: ['CHART'],
+        selectionModes: ['multiple'],
+        knowledgeUnit: sourcedKnowledgeUnit(),
+        chunks: [
+          {
+            id: 'chunk-source',
+            index: 1,
+            text: 'Le cours compare les pouvoirs et leurs controles.',
+            pageNumber: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow('DIAGNOSTIC_QUIZ_VISUAL_INVALID');
+
+    expect(getObservedObservation(observer).errorCode).toBe(
+      'DIAGNOSTIC_QUIZ_VISUAL_INVALID',
+    );
   });
 
   it('rejects sourced v2 quiz output that references an unknown chunk', async () => {
@@ -801,6 +914,69 @@ function generatedSourcedQuiz() {
         explanation:
           'Explication sourcee: la revision ne peut pas porter atteinte a cette limite.',
         sourceChunkIds: ['chunk-source'],
+      },
+    ],
+  };
+}
+
+function generatedMediaMultiQuiz() {
+  return {
+    title: 'Diagnostic constitutionnel enrichi',
+    questions: [
+      {
+        prompt:
+          'Quels elements permettent de controler le pouvoir dans le cours ?',
+        difficulty: 'MEDIUM' as const,
+        selectionMode: 'multiple' as const,
+        minSelections: 1,
+        maxSelections: 2,
+        choices: [
+          {
+            id: 'a',
+            label: 'Le controle juridictionnel',
+            feedback: 'Ce choix est fonde par le passage source.',
+          },
+          {
+            id: 'b',
+            label: 'La suppression du Parlement',
+            feedback: 'Ce choix n est pas fonde par le cours.',
+          },
+          {
+            id: 'c',
+            label: 'La separation des pouvoirs',
+            feedback: 'Ce choix est relie au cours.',
+          },
+        ],
+        correctChoiceIds: ['a', 'c'],
+        explanation:
+          'Le controle et la separation des pouvoirs structurent la limitation du pouvoir.',
+        sourceChunkIds: ['chunk-source'],
+        visuals: [
+          {
+            type: 'CHART' as const,
+            displayOrder: 0,
+            chartType: 'bar' as const,
+            title: 'Elements de controle',
+            data: [
+              { category: 'Controle', value: 2 },
+              { category: 'Separation', value: 1 },
+            ],
+            xKey: 'category',
+            yKeys: ['value'],
+            sourceChunkIds: ['chunk-source'],
+          },
+          {
+            type: 'DIAGRAM' as const,
+            displayOrder: 1,
+            title: 'Relations institutionnelles',
+            nodes: [
+              { id: 'n1', label: 'Pouvoir' },
+              { id: 'n2', label: 'Controle' },
+            ],
+            edges: [{ from: 'n1', to: 'n2', label: 'limite' }],
+            sourceChunkIds: ['chunk-source'],
+          },
+        ],
       },
     ],
   };
