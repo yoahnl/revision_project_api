@@ -204,6 +204,12 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(generateInput?.prompt).toContain(
       'Evite les questions dont la reponse est directement recopiee dans un choix.',
     );
+    expect(generateInput?.prompt).toContain(
+      'Au moins 70% des questions doivent evaluer une comparaison, une application a un cas, une consequence, une exception ou un piege conceptuel.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Limite les questions de simple auteur, date, definition ou identification isolee a 30% maximum du QCM.',
+    );
   });
 
   it('generates the requested number of quiz questions up to twenty', async () => {

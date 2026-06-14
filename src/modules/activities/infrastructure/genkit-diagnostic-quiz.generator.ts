@@ -367,6 +367,8 @@ function buildPrompt(
     'Les questions doivent etre variees, non redondantes et couvrir plusieurs angles de la notion quand les sources le permettent.',
     'Varie les niveaux cognitifs: restitution, comprehension, comparaison, application, piege conceptuel et raisonnement source.',
     'Evite les questions dont la reponse est directement recopiee dans un choix.',
+    'Au moins 70% des questions doivent evaluer une comparaison, une application a un cas, une consequence, une exception ou un piege conceptuel.',
+    'Limite les questions de simple auteur, date, definition ou identification isolee a 30% maximum du QCM.',
     'Les distracteurs doivent representer des confusions plausibles entre notions proches, conditions, exceptions ou consequences.',
     'Ne classe jamais une simple question de restitution en difficulty=HIGH.',
     'Pour difficulty=HIGH, la question doit exiger comparaison, application, diagnostic d erreur ou raisonnement a partir d une source.',
