@@ -54,8 +54,8 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
     const chunks = selectDocumentArtifactChunks(input.chunks, {
       maxChunksEnv: 'REVISION_SHEET_GENERATION_MAX_CHUNKS',
       maxCharsEnv: 'REVISION_SHEET_GENERATION_MAX_CHARS',
-      defaultMaxChunks: 16,
-      defaultMaxChars: 16000,
+      defaultMaxChunks: 10,
+      defaultMaxChars: 10000,
     });
     const prompt = buildRevisionSheetPrompt({
       documentId: input.documentId,

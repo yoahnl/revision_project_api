@@ -54,6 +54,8 @@ export function buildDocumentSummaryPrompt(input: {
     'Utilise uniquement les chunks et notions fournis. N’utilise aucune connaissance externe.',
     'Le résumé doit être synthétique, utile pour réviser, et indiquer ses limites si nécessaire.',
     'Les sources autoritaires sont uniquement les sourceChunkIds choisis parmi les chunks fournis.',
+    'Copie exactement les ids depuis allowedSourceChunkIds pour remplir sourceChunkIds.',
+    'N utilise jamais les index, titres, pages ou ids inventés comme sourceChunkIds.',
     'Ne crée aucune citation libre et retourne uniquement du JSON conforme au schéma demandé.',
     `Document id: ${input.documentId}`,
     JSON.stringify(toPromptPayload(input)),
@@ -71,6 +73,8 @@ export function buildRevisionSheetPrompt(input: {
     'Chaque section doit être pédagogique, concise et sourcée par au moins un sourceChunkId fourni.',
     'Ajoute les points clés, erreurs fréquentes, éléments indispensables et suggestions de pratique quand le contenu le permet.',
     'Les sources autoritaires sont uniquement les sourceChunkIds choisis parmi les chunks fournis.',
+    'Copie exactement les ids depuis allowedSourceChunkIds pour remplir sourceChunkIds.',
+    'N utilise jamais les index, titres, pages ou ids inventés comme sourceChunkIds.',
     'Ne crée aucune citation libre et retourne uniquement du JSON conforme au schéma demandé.',
     `Document id: ${input.documentId}`,
     JSON.stringify(toPromptPayload(input)),
@@ -99,6 +103,7 @@ function toPromptPayload(input: {
   knowledgeUnits: DocumentArtifactKnowledgeUnit[];
 }) {
   return {
+    allowedSourceChunkIds: input.chunks.map((chunk) => chunk.id),
     chunks: input.chunks.map((chunk) => ({
       id: chunk.id,
       index: chunk.index,

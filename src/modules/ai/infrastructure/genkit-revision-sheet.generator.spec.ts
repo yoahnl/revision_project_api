@@ -401,6 +401,78 @@ describe('GenkitRevisionSheetGenerator', () => {
     expect(generateCall[0].prompt).toContain('12345678');
     expect(generateCall[0].prompt).not.toContain('DO_NOT_INCLUDE');
   });
+
+  it('lists allowed source chunk ids explicitly in the revision sheet prompt', async () => {
+    mockGenerate.mockReset();
+    mockGenerate.mockResolvedValue({
+      output: {
+        title: 'Fiche',
+        sections: [
+          {
+            title: 'Principe',
+            content: 'Contenu structuré.',
+            sourceChunkIds: ['chunk-1'],
+          },
+        ],
+        keyPoints: ['Point clé'],
+      },
+    });
+
+    await new GenkitRevisionSheetGenerator().generate({
+      documentId: 'document-1',
+      chunks: [
+        { id: 'chunk-1', index: 0, text: 'Texte 1.', pageNumber: null },
+        { id: 'chunk-2', index: 1, text: 'Texte 2.', pageNumber: null },
+      ],
+      knowledgeUnits: [],
+    });
+
+    const generateCall = mockGenerate.mock.calls[0];
+    if (!generateCall) {
+      throw new Error('Expected generate to be called');
+    }
+    expect(generateCall[0].prompt).toContain(
+      'Copie exactement les ids depuis allowedSourceChunkIds',
+    );
+    expect(generateCall[0].prompt).toContain(
+      '"allowedSourceChunkIds":["chunk-1","chunk-2"]',
+    );
+  });
+
+  it('uses compact default revision sheet chunk limits for Mistral reliability', async () => {
+    mockGenerate.mockReset();
+    mockGenerate.mockResolvedValue({
+      output: {
+        title: 'Fiche',
+        sections: [
+          {
+            title: 'Principe',
+            content: 'Contenu structuré.',
+            sourceChunkIds: ['chunk-1'],
+          },
+        ],
+        keyPoints: ['Point clé'],
+      },
+    });
+
+    await new GenkitRevisionSheetGenerator().generate({
+      documentId: 'document-1',
+      chunks: Array.from({ length: 11 }, (_value, index) => ({
+        id: `chunk-${index + 1}`,
+        index,
+        text: `CHUNK_${index + 1}_TEXT`,
+        pageNumber: null,
+      })),
+      knowledgeUnits: [],
+    });
+
+    const generateCall = mockGenerate.mock.calls[0];
+    if (!generateCall) {
+      throw new Error('Expected generate to be called');
+    }
+    expect(generateCall[0].prompt).toContain('CHUNK_10_TEXT');
+    expect(generateCall[0].prompt).not.toContain('CHUNK_11_TEXT');
+  });
 });
 
 function createObserver(): jest.Mocked<AiGenerationObserver> {
