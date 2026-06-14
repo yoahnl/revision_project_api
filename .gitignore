@@ -10,3 +10,5 @@ yarn-error.log*
 .DS_Store
 .idea
 src/generated/prisma
+/src/generate_project_overview.sh
+/src/project_overview.txt
