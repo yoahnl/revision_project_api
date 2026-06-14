@@ -134,6 +134,7 @@ model DocumentChunk {
   sources  KnowledgeUnitSource[]
   summarySources SummarySource[]
   revisionSheetSectionSources RevisionSheetSectionSource[]
+  questionSources QuestionSource[]
 
   @@index([documentId])
   @@index([subjectId])
@@ -293,6 +294,14 @@ model ActivitySession {
   studentId       String
   subjectId       String
   knowledgeUnitId String
+  version         Int            @default(1)
+  documentId      String?
+  generationFlowName      String?
+  generationProvider      String?
+  generationModel         String?
+  generationPromptVersion String?
+  generationSchemaVersion String?
+  generationInputSize     Int?
   type            ActivityType
   status          ActivityStatus @default(STARTED)
   createdAt       DateTime       @default(now())
@@ -303,9 +312,11 @@ model ActivitySession {
   knowledgeUnit KnowledgeUnit  @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
   questions     Question[]
   result        ActivityResult?
+  answers       QuestionAnswer[]
 
   @@index([studentId])
   @@index([subjectId])
+  @@index([documentId])
   @@index([knowledgeUnitId])
   @@unique([id, knowledgeUnitId])
 }
@@ -313,14 +324,55 @@ model ActivitySession {
 model Question {
   id              String @id @default(cuid())
   sessionId       String
+  subjectId       String?
+  documentId      String?
   knowledgeUnitId String
   prompt          String
+  difficulty      KnowledgeUnitDifficulty?
+  displayOrder    Int    @default(0)
   choices         Json
   correctChoiceId String
   explanation     String
 
   session       ActivitySession @relation(fields: [sessionId, knowledgeUnitId], references: [id, knowledgeUnitId], onDelete: Cascade)
   knowledgeUnit KnowledgeUnit   @relation(fields: [knowledgeUnitId], references: [id], onDelete: Cascade)
+  sources       QuestionSource[]
+  answers       QuestionAnswer[]
+
+  @@index([sessionId])
+  @@index([subjectId])
+  @@index([documentId])
+  @@unique([id, subjectId])
+}
+
+model QuestionSource {
+  questionId     String
+  subjectId      String
+  chunkId        String
+  relevanceScore Float?
+  createdAt      DateTime @default(now())
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  chunk    DocumentChunk @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
+
+  @@id([questionId, chunkId])
+  @@index([chunkId])
+  @@index([subjectId])
+}
+
+model QuestionAnswer {
+  id               String   @id @default(cuid())
+  sessionId        String
+  questionId       String
+  selectedChoiceId String
+  isCorrect        Boolean
+  createdAt        DateTime @default(now())
+
+  session  ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, questionId])
+  @@index([questionId])
 }
 
 model ActivityResult {
@@ -328,6 +380,7 @@ model ActivityResult {
   sessionId      String   @unique
   correctAnswers Int
   totalQuestions Int
+  score          Float?
   createdAt      DateTime @default(now())
 
   session ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)

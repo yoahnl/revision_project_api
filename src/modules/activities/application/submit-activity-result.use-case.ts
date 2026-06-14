@@ -7,6 +7,7 @@ import { MasteryState } from '../../revision/domain/mastery-state.entity';
 import {
   ACTIVITIES_REPOSITORY,
   type ActivitiesRepository,
+  type DiagnosticQuizSubmissionResult,
 } from './activities.repository';
 
 export const ACTIVITY_CLOCK = Symbol('ACTIVITY_CLOCK');
@@ -28,7 +29,7 @@ export class SubmitActivityResultUseCase {
     studentId: string;
     sessionId: string;
     answers: Array<{ questionId: string; choiceId: string }>;
-  }): Promise<{ correctAnswers: number; totalQuestions: number }> {
+  }): Promise<Omit<DiagnosticQuizSubmissionResult, 'knowledgeUnitId'>> {
     const result = await this.activitiesRepository.submitResult(input);
     const practicedAt = this.now();
     const masteryStates = await this.revisionRepository.findMasteryStates(
@@ -58,9 +59,9 @@ export class SubmitActivityResultUseCase {
       lastPracticedAt: nextMastery.lastPracticedAt ?? practicedAt,
     });
 
-    return {
-      correctAnswers: result.correctAnswers,
-      totalQuestions: result.totalQuestions,
-    };
+    const { knowledgeUnitId, ...publicResult } = result;
+    void knowledgeUnitId;
+
+    return publicResult;
   }
 }

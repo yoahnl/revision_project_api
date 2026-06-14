@@ -40,12 +40,14 @@ type CreateDiagnosticQuizInput = {
   studentId: string;
   subjectId: string;
   knowledgeUnitId: string;
+  documentId?: string | null;
   quiz: GeneratedDiagnosticQuiz;
 };
 
 describe('ActivitiesModule', () => {
   let app: INestApplication<App>;
   let activitiesRepository: {
+    findDiagnosticQuizGenerationContext: jest.Mock;
     createDiagnosticQuiz: jest.Mock<
       Promise<DiagnosticQuizActivity>,
       [CreateDiagnosticQuizInput]
@@ -66,6 +68,7 @@ describe('ActivitiesModule', () => {
 
   beforeEach(async () => {
     activitiesRepository = {
+      findDiagnosticQuizGenerationContext: jest.fn().mockResolvedValue(null),
       createDiagnosticQuiz: jest.fn<
         Promise<DiagnosticQuizActivity>,
         [CreateDiagnosticQuizInput]
@@ -92,7 +95,9 @@ describe('ActivitiesModule', () => {
       submitResult: jest.fn().mockResolvedValue({
         correctAnswers: 1,
         totalQuestions: 1,
+        score: 1,
         knowledgeUnitId: 'unit-1',
+        items: [],
       }),
     };
     diagnosticQuizGenerator = {
@@ -191,6 +196,8 @@ describe('ActivitiesModule', () => {
       .expect({
         correctAnswers: 1,
         totalQuestions: 1,
+        score: 1,
+        items: [],
       });
   });
 

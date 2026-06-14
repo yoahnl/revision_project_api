@@ -40,12 +40,30 @@ export class StartNextActivityUseCase {
           knowledgeUnitId,
         })
       : await this.chooseKnowledgeUnit(input);
-    const quiz = await this.diagnosticQuizGenerator.generate({ knowledgeUnit });
+    const generationContext =
+      await this.activitiesRepository.findDiagnosticQuizGenerationContext({
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        knowledgeUnitId: knowledgeUnit.id,
+      });
+    const hasSourcedContext =
+      generationContext !== null && generationContext.chunks.length > 0;
+    const quiz = await this.diagnosticQuizGenerator.generate(
+      hasSourcedContext
+        ? {
+            subjectId: input.subjectId,
+            documentId: generationContext.documentId,
+            knowledgeUnit: generationContext.knowledgeUnit,
+            chunks: generationContext.chunks,
+          }
+        : { knowledgeUnit },
+    );
 
     return this.activitiesRepository.createDiagnosticQuiz({
       studentId: input.studentId,
       subjectId: input.subjectId,
       knowledgeUnitId: knowledgeUnit.id,
+      documentId: hasSourcedContext ? generationContext.documentId : undefined,
       quiz,
     });
   }

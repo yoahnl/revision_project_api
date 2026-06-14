@@ -30,7 +30,28 @@ describe('SubmitActivityResultUseCase', () => {
     activitiesRepository.submitResult.mockResolvedValue({
       correctAnswers: 8,
       totalQuestions: 10,
+      score: 0.8,
       knowledgeUnitId: 'unit-1',
+      items: [
+        {
+          questionId: 'question-1',
+          knowledgeUnitId: 'unit-1',
+          prompt: 'Question ?',
+          selectedChoiceId: 'a',
+          correctChoiceId: 'a',
+          isCorrect: true,
+          explanation: 'Explication.',
+          choiceFeedback: [{ choiceId: 'a', feedback: 'Bien.' }],
+          sources: [
+            {
+              chunkId: 'chunk-1',
+              text: 'Extrait source.',
+              pageNumber: null,
+              index: 0,
+            },
+          ],
+        },
+      ],
     });
     revisionRepository.findMasteryStates.mockResolvedValue([
       new MasteryState({
@@ -75,13 +96,38 @@ describe('SubmitActivityResultUseCase', () => {
       score: 0.54,
       lastPracticedAt: practicedAt,
     });
-    expect(result).toEqual({ correctAnswers: 8, totalQuestions: 10 });
+    expect(result).toEqual({
+      correctAnswers: 8,
+      totalQuestions: 10,
+      score: 0.8,
+      items: [
+        {
+          questionId: 'question-1',
+          knowledgeUnitId: 'unit-1',
+          prompt: 'Question ?',
+          selectedChoiceId: 'a',
+          correctChoiceId: 'a',
+          isCorrect: true,
+          explanation: 'Explication.',
+          choiceFeedback: [{ choiceId: 'a', feedback: 'Bien.' }],
+          sources: [
+            {
+              chunkId: 'chunk-1',
+              text: 'Extrait source.',
+              pageNumber: null,
+              index: 0,
+            },
+          ],
+        },
+      ],
+    });
   });
 });
 
 function createActivitiesRepository(): MockedActivitiesRepository {
   return {
     createDiagnosticQuiz: jest.fn(),
+    findDiagnosticQuizGenerationContext: jest.fn(),
     submitResult: jest.fn(),
   };
 }

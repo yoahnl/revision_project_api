@@ -39,6 +39,74 @@ describe('StartNextActivityUseCase', () => {
       quiz: generatedQuiz(),
     });
     expect(generator.generate.mock.calls[0]?.[0]).toEqual({ knowledgeUnit });
+    expect(repository.findDiagnosticQuizGenerationContext).toHaveBeenCalledWith(
+      {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    );
+  });
+
+  it('uses sourced v2 generation context when chunks are available', async () => {
+    const repository = createActivitiesRepository();
+    const generator = createDiagnosticQuizGenerator();
+    const revisionRepository = createRevisionRepository();
+    const knowledgeUnit = new KnowledgeUnit({
+      id: 'unit-1',
+      subjectId: 'subject-1',
+      title: 'Pouvoir constituant derive',
+      summary:
+        'La revision constitutionnelle est encadree par la Constitution de 1958.',
+    });
+    revisionRepository.findKnowledgeUnits.mockResolvedValue([knowledgeUnit]);
+    repository.findDiagnosticQuizGenerationContext.mockResolvedValue({
+      documentId: 'document-1',
+      knowledgeUnit: Object.assign(knowledgeUnit, {
+        difficulty: 'MEDIUM' as const,
+        sourceChunkIds: ['chunk-1'],
+      }),
+      chunks: [
+        {
+          id: 'chunk-1',
+          index: 0,
+          text: 'Article 89 encadre la revision constitutionnelle.',
+          pageNumber: null,
+        },
+      ],
+    });
+
+    await new StartNextActivityUseCase(
+      new AdaptivePlanService(),
+      repository,
+      revisionRepository,
+      generator,
+    ).execute({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+    });
+
+    const [generationInput] = generator.generate.mock.calls[0] ?? [];
+    expect(generationInput?.subjectId).toBe('subject-1');
+    expect(generationInput?.documentId).toBe('document-1');
+    expect(generationInput?.knowledgeUnit.id).toBe('unit-1');
+    expect(generationInput?.knowledgeUnit.sourceChunkIds).toEqual(['chunk-1']);
+    expect(generationInput?.chunks).toEqual([
+      {
+        id: 'chunk-1',
+        index: 0,
+        text: 'Article 89 encadre la revision constitutionnelle.',
+        pageNumber: null,
+      },
+    ]);
+    expect(repository.createDiagnosticQuiz).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      documentId: 'document-1',
+      quiz: generatedQuiz(),
+    });
   });
 
   it('chooses the lowest mastery knowledge unit when none is provided', async () => {
@@ -168,6 +236,7 @@ function createActivitiesRepository() {
       ],
     }),
     submitResult: jest.fn(),
+    findDiagnosticQuizGenerationContext: jest.fn().mockResolvedValue(null),
   };
 }
 

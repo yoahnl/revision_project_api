@@ -6,6 +6,7 @@ import {
   NotFoundException,
   Param,
   Post,
+  UnprocessableEntityException,
   UseGuards,
 } from '@nestjs/common';
 import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
@@ -136,10 +137,18 @@ function normalizeActivityError(error: unknown): never {
       error.message === 'Knowledge unit does not belong to student subject' ||
       error.message === 'No knowledge unit available for subject' ||
       error.message === 'Duplicate answers are not allowed' ||
+      error.message === 'Missing answers are not allowed' ||
       error.message === 'Question does not belong to activity session' ||
       error.message === 'Choice does not belong to question'
     ) {
       throw new BadRequestException(error.message);
+    }
+
+    if (
+      error.message === 'Generated diagnostic quiz is invalid' ||
+      error.message === 'Question source chunk not found'
+    ) {
+      throw new UnprocessableEntityException(error.message);
     }
   }
 
