@@ -2,7 +2,9 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Param,
   Post,
   UseGuards,
@@ -10,6 +12,7 @@ import {
 import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import { CreateSubjectUseCase } from '../application/create-subject.use-case';
+import { DeleteSubjectUseCase } from '../application/delete-subject.use-case';
 import { GetSubjectUseCase } from '../application/get-subject.use-case';
 import { ListSubjectsUseCase } from '../application/list-subjects.use-case';
 
@@ -25,6 +28,7 @@ export class SubjectsController {
     private readonly createSubject: CreateSubjectUseCase,
     private readonly listSubjects: ListSubjectsUseCase,
     private readonly getSubject: GetSubjectUseCase,
+    private readonly deleteSubject: DeleteSubjectUseCase,
   ) {}
 
   @Get()
@@ -57,6 +61,23 @@ export class SubjectsController {
         normalizeSubjectValidationError(error);
       });
   }
+
+  @Delete(':id')
+  @HttpCode(204)
+  delete(@CurrentStudent() student: { id: string }, @Param('id') id: string) {
+    return this.deleteSubject.execute({
+      studentId: student.id,
+      subjectId: trimRequiredSubjectId(id),
+    });
+  }
+}
+
+function trimRequiredSubjectId(id: string): string {
+  if (typeof id !== 'string' || id.trim().length === 0) {
+    throw new BadRequestException('Subject id is required');
+  }
+
+  return id.trim();
 }
 
 function validateCreateSubjectBody(body: CreateSubjectDto): CreateSubjectDto {

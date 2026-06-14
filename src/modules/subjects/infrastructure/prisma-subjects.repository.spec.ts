@@ -17,6 +17,7 @@ describe('PrismaSubjectsRepository', () => {
         create: jest.fn(),
         findMany: jest.fn(),
         findFirst: jest.fn(),
+        deleteMany: jest.fn(),
       },
     };
 
@@ -140,5 +141,36 @@ describe('PrismaSubjectsRepository', () => {
         studentId: 'student-1',
       }),
     ).resolves.toBeNull();
+  });
+
+  it('deletes one subject owned by a student', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      repository.deleteForStudent({
+        subjectId: 'subject-1',
+        studentId: 'student-1',
+      }),
+    ).resolves.toBe(true);
+
+    expect(prisma.subject.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: 'subject-1',
+        studentId: 'student-1',
+      },
+    });
+  });
+
+  it('returns false when deleting an unknown or cross-student subject', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      repository.deleteForStudent({
+        subjectId: 'subject-2',
+        studentId: 'student-1',
+      }),
+    ).resolves.toBe(false);
   });
 });

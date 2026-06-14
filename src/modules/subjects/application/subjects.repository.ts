@@ -16,4 +16,9 @@ export interface SubjectsRepository {
     subjectId: string;
     studentId: StudentId;
   }): Promise<Subject | null>;
+
+  deleteForStudent(input: {
+    subjectId: string;
+    studentId: StudentId;
+  }): Promise<boolean>;
 }

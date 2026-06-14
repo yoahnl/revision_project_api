@@ -66,6 +66,20 @@ export class PrismaSubjectsRepository implements SubjectsRepository {
     return this.toSubject(record);
   }
 
+  async deleteForStudent(input: {
+    subjectId: string;
+    studentId: string;
+  }): Promise<boolean> {
+    const result = await this.prisma.subject.deleteMany({
+      where: {
+        id: input.subjectId,
+        studentId: input.studentId,
+      },
+    });
+
+    return result.count === 1;
+  }
+
   private toSubject(record: SubjectRecord): Subject {
     return new Subject({
       id: record.id,

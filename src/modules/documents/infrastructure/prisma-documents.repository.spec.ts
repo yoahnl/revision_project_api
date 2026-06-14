@@ -23,6 +23,7 @@ type PrismaDocumentsMock = {
     findUnique: jest.Mock;
     update: jest.Mock;
     updateMany: jest.Mock;
+    deleteMany: jest.Mock;
   };
   documentProcessingJob: {
     create: jest.Mock;
@@ -33,6 +34,7 @@ type PrismaDocumentsMock = {
     findMany: jest.Mock;
     create: jest.Mock;
     createMany: jest.Mock;
+    deleteMany: jest.Mock;
   };
   documentChunk: {
     deleteMany: jest.Mock;
@@ -61,6 +63,7 @@ describe('PrismaDocumentsRepository', () => {
         findUnique: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
+        deleteMany: jest.fn(),
       },
       documentProcessingJob: {
         create: jest.fn(),
@@ -71,6 +74,7 @@ describe('PrismaDocumentsRepository', () => {
         findMany: jest.fn(),
         create: jest.fn(),
         createMany: jest.fn(),
+        deleteMany: jest.fn(),
       },
       documentChunk: {
         deleteMany: jest.fn(),
@@ -264,6 +268,59 @@ describe('PrismaDocumentsRepository', () => {
       status: 'FAILED',
       errorCode: 'KNOWLEDGE_EXTRACTION_FAILED',
     });
+  });
+
+  it('deletes a document owned by a student after deleting document knowledge units', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record());
+    prisma.knowledgeUnit.deleteMany.mockResolvedValue({ count: 2 });
+    prisma.document.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      repository.deleteForStudent({
+        studentId: 'student-1',
+        documentId: 'document-1',
+      }),
+    ).resolves.toBe(true);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+      },
+      select: {
+        id: true,
+        subjectId: true,
+      },
+    });
+    expect(prisma.knowledgeUnit.deleteMany).toHaveBeenCalledWith({
+      where: {
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+      },
+    });
+    expect(prisma.document.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+      },
+    });
+  });
+
+  it('returns false without deleting dependents for unknown or cross-student documents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.deleteForStudent({
+        studentId: 'student-1',
+        documentId: 'document-2',
+      }),
+    ).resolves.toBe(false);
+
+    expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.document.deleteMany).not.toHaveBeenCalled();
   });
 
   it('marks uploaded documents as processing and records the running job', async () => {

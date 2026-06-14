@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { CreateSubjectUseCase } from '../application/create-subject.use-case';
+import { DeleteSubjectUseCase } from '../application/delete-subject.use-case';
 import { GetSubjectUseCase } from '../application/get-subject.use-case';
 import { ListSubjectsUseCase } from '../application/list-subjects.use-case';
 import { SubjectsController } from './subjects.controller';
@@ -36,14 +37,22 @@ describe('SubjectsController', () => {
       execute: executeGet,
     } as unknown as GetSubjectUseCase;
 
+    const executeDelete = jest.fn().mockResolvedValue(undefined);
+
+    const deleteSubject = {
+      execute: executeDelete,
+    } as unknown as DeleteSubjectUseCase;
+
     return {
       controller: new SubjectsController(
         createSubject,
         listSubjects,
         getSubject,
+        deleteSubject,
       ),
       executeCreate,
       executeGet,
+      executeDelete,
     };
   }
 
@@ -91,5 +100,22 @@ describe('SubjectsController', () => {
       studentId: 'student-1',
       subjectId: 'subject-1',
     });
+  });
+
+  it('deletes a subject owned by the current student', async () => {
+    const { controller, executeDelete } = createController();
+
+    await controller.delete(student, ' subject-1 ');
+
+    expect(executeDelete).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+    });
+  });
+
+  it('rejects empty subject ids while deleting', () => {
+    const { controller } = createController();
+
+    expect(() => controller.delete(student, '  ')).toThrow(BadRequestException);
   });
 });

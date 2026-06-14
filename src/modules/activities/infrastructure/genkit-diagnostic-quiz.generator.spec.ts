@@ -174,6 +174,38 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(quiz).toEqual(generatedQuiz());
   });
 
+  it('asks for deeper questions before labeling a question high difficulty', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: generatedQuiz(),
+    });
+
+    await new GenkitDiagnosticQuizGenerator().generate({
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-regimes',
+        subjectId: 'subject-constitutional-law',
+        title: 'Regimes parlementaire et presidentiel',
+        summary:
+          'Le regime parlementaire repose sur une responsabilite politique du gouvernement devant le Parlement, tandis que le regime presidentiel se caracterise par une separation plus stricte des pouvoirs.',
+        difficulty: 'HIGH',
+      }),
+    });
+
+    const [generateInput] = mockGenerate.mock.calls[0] ?? [];
+    expect(generateInput?.prompt).toContain(
+      'Varie les niveaux cognitifs: restitution, comprehension, comparaison, application, piege conceptuel et raisonnement source.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Ne classe jamais une simple question de restitution en difficulty=HIGH.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Pour difficulty=HIGH, la question doit exiger comparaison, application, diagnostic d erreur ou raisonnement a partir d une source.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Evite les questions dont la reponse est directement recopiee dans un choix.',
+    );
+  });
+
   it('generates the requested number of quiz questions up to twenty', async () => {
     process.env.AI_PROVIDER = 'google';
     mockGenerate.mockResolvedValue({

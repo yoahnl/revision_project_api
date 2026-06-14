@@ -1,4 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
+import { DeleteDocumentUseCase } from '../application/delete-document.use-case';
 import { GetDocumentUseCase } from '../application/get-document.use-case';
 import { ListDocumentKnowledgeUnitsUseCase } from '../application/list-document-knowledge-units.use-case';
 import { ListSubjectDocumentsUseCase } from '../application/list-subject-documents.use-case';
@@ -106,6 +107,12 @@ describe('DocumentsController', () => {
       execute: executeUpload,
     } as unknown as UploadCoursePdfUseCase;
 
+    const executeDelete = jest.fn().mockResolvedValue(undefined);
+
+    const deleteDocument = {
+      execute: executeDelete,
+    } as unknown as DeleteDocumentUseCase;
+
     return {
       controller: new DocumentsController(
         registerDocument,
@@ -113,12 +120,14 @@ describe('DocumentsController', () => {
         getDocument,
         listDocumentKnowledgeUnits,
         uploadCoursePdf,
+        deleteDocument,
       ),
       execute,
       executeList,
       executeGet,
       executeKnowledgeUnits,
       executeUpload,
+      executeDelete,
     };
   }
 
@@ -310,6 +319,23 @@ describe('DocumentsController', () => {
     expect(() => controller.listKnowledgeUnits(student, '  ')).toThrow(
       BadRequestException,
     );
+  });
+
+  it('deletes a document owned by the current student', async () => {
+    const { controller, executeDelete } = createController();
+
+    await controller.delete(student, ' document-1 ');
+
+    expect(executeDelete).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+  });
+
+  it('rejects empty document ids while deleting', () => {
+    const { controller } = createController();
+
+    expect(() => controller.delete(student, '  ')).toThrow(BadRequestException);
   });
 
   it('uploads course PDFs for the current student', async () => {
