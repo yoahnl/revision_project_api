@@ -14,6 +14,8 @@ import type {
   ActivityQuestion,
   ActivityQuestionCorrectionItem,
   ActivityQuestionVisual,
+  OpenAnswerEvaluationContext,
+  OpenAnswerEvaluationDraft,
   DiagnosticQuizActivity,
   DiagnosticQuizGenerationContext,
   DiagnosticQuizSubmissionResult,
@@ -83,11 +85,7 @@ type ActivitySessionRecord = {
 
 type OpenQuestionSourceRecord = {
   chunkId: string;
-  chunk: {
-    id: string;
-    pageNumber: number | null;
-    index: number;
-  };
+  chunk: DocumentChunkRecord;
 };
 
 type OpenQuestionRecord = {
@@ -106,6 +104,8 @@ type OpenQuestionRecord = {
 type OpenAnswerEvaluationRecord = {
   id: string;
   sessionId: string;
+  openQuestionId?: string;
+  answerText?: string;
   status: 'PENDING' | 'READY' | 'FAILED';
   score: number | null;
   maxScore: number | null;
@@ -115,11 +115,24 @@ type OpenAnswerEvaluationRecord = {
   errors: unknown;
   modelAnswer: string | null;
   advice: string | null;
+  generationFlowName?: string | null;
+  generationProvider?: string | null;
+  generationModel?: string | null;
+  generationPromptVersion?: string | null;
+  generationSchemaVersion?: string | null;
+  generationInputSize?: number | null;
+  errorCode?: string | null;
 };
 
 type OpenQuestionSessionRecord = ActivitySessionRecord & {
   openQuestion?: OpenQuestionRecord | null;
   openAnswerEvaluation?: OpenAnswerEvaluationRecord | null;
+};
+
+type OpenAnswerEvaluationSessionRecord = OpenQuestionSessionRecord & {
+  knowledgeUnit: KnowledgeUnitRecord;
+  openQuestion: OpenQuestionRecord | null;
+  openAnswerEvaluation: OpenAnswerEvaluationRecord | null;
 };
 
 type DocumentChunkRecord = {
@@ -144,6 +157,8 @@ type KnowledgeUnitRecord = {
   difficulty: 'LOW' | 'MEDIUM' | 'HIGH' | null;
   sources?: KnowledgeUnitSourceRecord[];
 };
+
+const OPEN_ANSWER_SOURCE_EXCERPT_MAX_LENGTH = 520;
 
 @Injectable()
 export class PrismaActivitiesRepository implements ActivitiesRepository {
@@ -395,8 +410,11 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
               },
               select: {
                 id: true,
+                documentId: true,
+                subjectId: true,
                 pageNumber: true,
                 index: true,
+                text: true,
               },
             });
 
@@ -408,15 +426,7 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
         sourceChunks.map((chunk) => [chunk.id, chunk]),
       );
       const session = await tx.activitySession.create({
-        data: {
-          studentId: input.studentId,
-          subjectId: input.subjectId,
-          knowledgeUnitId: input.knowledgeUnitId,
-          documentId: input.documentId ?? null,
-          type: ActivityType.OPEN_QUESTION,
-          status: ActivityStatus.STARTED,
-          version: input.question.version,
-        },
+        data: buildOpenQuestionSessionCreateData(input),
       });
       const question = await tx.openQuestion.create({
         data: {
@@ -463,21 +473,16 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
           version: question.version,
           sources: sourceChunkIds
             .map((chunkId) => sourceChunkById.get(chunkId))
-            .filter(
-              (
-                chunk,
-              ): chunk is {
-                id: string;
-                pageNumber: number | null;
-                index: number;
-              } => Boolean(chunk),
-            )
+            .filter((chunk): chunk is DocumentChunkRecord => Boolean(chunk))
             .map((chunk) => ({
               chunkId: chunk.id,
               chunk: {
                 id: chunk.id,
+                documentId: chunk.documentId,
+                subjectId: chunk.subjectId,
                 pageNumber: chunk.pageNumber,
                 index: chunk.index,
+                text: chunk.text,
               },
             })),
         },
@@ -584,74 +589,94 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
     });
   }
 
-  async submitOpenAnswer(input: {
+  async findOpenAnswerEvaluationContext(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<OpenAnswerEvaluationContext> {
+    const session = (await this.prisma.activitySession.findFirst({
+      where: {
+        id: input.sessionId,
+        studentId: input.studentId,
+      },
+      include: {
+        knowledgeUnit: {
+          include: {
+            sources: {
+              include: {
+                chunk: true,
+              },
+            },
+          },
+        },
+        openQuestion: {
+          include: {
+            sources: {
+              include: {
+                chunk: true,
+              },
+            },
+          },
+        },
+        openAnswerEvaluation: true,
+      },
+    })) as OpenAnswerEvaluationSessionRecord | null;
+
+    assertOpenQuestionSessionCanBeEvaluated(session);
+
+    return toOpenAnswerEvaluationContext(session);
+  }
+
+  async saveOpenAnswerEvaluation(input: {
     studentId: string;
     sessionId: string;
     answerText: string;
+    evaluation: OpenAnswerEvaluationDraft;
   }): Promise<OpenAnswerSubmissionResult> {
     return this.prisma.$transaction(async (tx) => {
-      const session = await tx.activitySession.findFirst({
+      const session = (await tx.activitySession.findFirst({
         where: {
           id: input.sessionId,
           studentId: input.studentId,
         },
         include: {
-          questions: true,
+          knowledgeUnit: {
+            include: {
+              sources: {
+                include: {
+                  chunk: true,
+                },
+              },
+            },
+          },
           openQuestion: {
             include: {
               sources: {
                 include: {
-                  chunk: {
-                    select: {
-                      id: true,
-                      pageNumber: true,
-                      index: true,
-                    },
-                  },
+                  chunk: true,
                 },
               },
             },
           },
           openAnswerEvaluation: true,
         },
-      });
+      })) as OpenAnswerEvaluationSessionRecord | null;
 
-      if (!session) {
-        throw new Error('Activity session not found');
-      }
+      assertOpenQuestionSessionCanBeEvaluated(session);
 
-      if (session.type !== ActivityType.OPEN_QUESTION) {
-        throw new Error('Activity session is not an open question');
-      }
-
-      if (
-        session.status !== ActivityStatus.STARTED ||
-        session.openAnswerEvaluation
-      ) {
-        throw new Error('Activity session already submitted');
-      }
-
-      if (!session.openQuestion) {
-        throw new Error('Open question not found');
-      }
+      const sourceChunks = collectOpenQuestionSourceChunks(session);
+      assertOpenAnswerEvaluationSources(input.evaluation, sourceChunks);
+      const resultSourceChunks = selectOpenAnswerEvaluationSourceChunks(
+        input.evaluation,
+        sourceChunks,
+      );
 
       const evaluation = await tx.openAnswerEvaluation.create({
-        data: {
-          sessionId: session.id,
-          openQuestionId: session.openQuestion.id,
+        data: buildOpenAnswerEvaluationCreateData({
+          session,
           studentId: input.studentId,
-          subjectId: session.subjectId,
           answerText: input.answerText,
-          status: OpenAnswerEvaluationStatus.PENDING,
-          score: null,
-          maxScore: null,
-          feedback: null,
-          presentPoints: [],
-          missingPoints: [],
-          errors: [],
-          modelAnswer: null,
-          advice: null,
-        },
+          evaluation: input.evaluation,
+        }),
       });
 
       await tx.activitySession.update({
@@ -664,7 +689,7 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
         },
       });
 
-      return toOpenAnswerSubmissionResult(evaluation);
+      return toOpenAnswerSubmissionResult(evaluation, resultSourceChunks);
     });
   }
 }
@@ -696,6 +721,35 @@ function buildActivitySessionCreateData(input: {
     data.generationPromptVersion = input.quiz.metadata.promptVersion;
     data.generationSchemaVersion = input.quiz.metadata.schemaVersion;
     data.generationInputSize = input.quiz.metadata.inputSize;
+  }
+
+  return data;
+}
+
+function buildOpenQuestionSessionCreateData(input: {
+  studentId: string;
+  subjectId: string;
+  knowledgeUnitId: string;
+  documentId?: string | null;
+  question: OpenQuestionDraft;
+}): Prisma.ActivitySessionUncheckedCreateInput {
+  const data: Prisma.ActivitySessionUncheckedCreateInput = {
+    studentId: input.studentId,
+    subjectId: input.subjectId,
+    knowledgeUnitId: input.knowledgeUnitId,
+    documentId: input.documentId ?? null,
+    type: ActivityType.OPEN_QUESTION,
+    status: ActivityStatus.STARTED,
+    version: input.question.version,
+  };
+
+  if (input.question.metadata) {
+    data.generationFlowName = input.question.metadata.flowName;
+    data.generationProvider = input.question.metadata.provider;
+    data.generationModel = input.question.metadata.model;
+    data.generationPromptVersion = input.question.metadata.promptVersion;
+    data.generationSchemaVersion = input.question.metadata.schemaVersion;
+    data.generationInputSize = input.question.metadata.inputSize;
   }
 
   return data;
@@ -1142,8 +1196,186 @@ function toOpenQuestionActivity(
   };
 }
 
+function assertOpenQuestionSessionCanBeEvaluated(
+  session: OpenAnswerEvaluationSessionRecord | null,
+): asserts session is OpenAnswerEvaluationSessionRecord & {
+  openQuestion: OpenQuestionRecord;
+} {
+  if (!session) {
+    throw new Error('Activity session not found');
+  }
+
+  if (session.type !== ActivityType.OPEN_QUESTION) {
+    throw new Error('Activity session is not an open question');
+  }
+
+  if (
+    session.status !== ActivityStatus.STARTED ||
+    session.openAnswerEvaluation
+  ) {
+    throw new Error('Activity session already submitted');
+  }
+
+  if (!session.openQuestion) {
+    throw new Error('Open question not found');
+  }
+}
+
+function toOpenAnswerEvaluationContext(
+  session: OpenAnswerEvaluationSessionRecord & {
+    openQuestion: OpenQuestionRecord;
+  },
+): OpenAnswerEvaluationContext {
+  const chunks = collectOpenQuestionSourceChunks(session);
+
+  return {
+    sessionId: session.id,
+    subjectId: session.subjectId,
+    documentId: session.openQuestion.documentId,
+    knowledgeUnit: Object.assign(
+      new KnowledgeUnit({
+        id: session.knowledgeUnit.id,
+        subjectId: session.knowledgeUnit.subjectId,
+        title: session.knowledgeUnit.title,
+        summary: session.knowledgeUnit.summary,
+      }),
+      {
+        difficulty: session.knowledgeUnit.difficulty,
+        sourceChunkIds: chunks.map((chunk) => chunk.id),
+      },
+    ),
+    question: {
+      id: session.openQuestion.id,
+      prompt: session.openQuestion.prompt,
+      instructions: session.openQuestion.instructions,
+      sourceChunkIds: chunks.map((chunk) => chunk.id),
+    },
+    chunks: chunks.map((chunk) => ({
+      id: chunk.id,
+      index: chunk.index,
+      text: chunk.text,
+      pageNumber: chunk.pageNumber,
+    })),
+  };
+}
+
+function collectOpenQuestionSourceChunks(
+  session: OpenAnswerEvaluationSessionRecord & {
+    openQuestion: OpenQuestionRecord;
+  },
+): DocumentChunkRecord[] {
+  const chunksById = new Map<string, DocumentChunkRecord>();
+
+  for (const source of session.openQuestion.sources ?? []) {
+    chunksById.set(source.chunk.id, source.chunk);
+  }
+
+  if (chunksById.size === 0) {
+    for (const source of session.knowledgeUnit.sources ?? []) {
+      chunksById.set(source.chunk.id, source.chunk);
+    }
+  }
+
+  return [...chunksById.values()].sort(
+    (left, right) => left.index - right.index,
+  );
+}
+
+function assertOpenAnswerEvaluationSources(
+  evaluation: OpenAnswerEvaluationDraft,
+  sourceChunks: DocumentChunkRecord[],
+): void {
+  if (evaluation.status === 'FAILED') {
+    return;
+  }
+
+  const knownChunkIds = new Set(sourceChunks.map((chunk) => chunk.id));
+  const sourceChunkIds = dedupeStrings(evaluation.sourceChunkIds);
+
+  if (sourceChunks.length === 0 && sourceChunkIds.length > 0) {
+    throw new Error('OPEN_ANSWER_EVALUATION_SOURCE_INVALID');
+  }
+
+  if (
+    sourceChunks.length > 0 &&
+    (sourceChunkIds.length === 0 ||
+      sourceChunkIds.some((chunkId) => !knownChunkIds.has(chunkId)))
+  ) {
+    throw new Error('OPEN_ANSWER_EVALUATION_SOURCE_INVALID');
+  }
+}
+
+function selectOpenAnswerEvaluationSourceChunks(
+  evaluation: OpenAnswerEvaluationDraft,
+  sourceChunks: DocumentChunkRecord[],
+): DocumentChunkRecord[] {
+  if (evaluation.status === 'FAILED') {
+    return [];
+  }
+
+  const requestedIds = new Set(evaluation.sourceChunkIds);
+
+  return sourceChunks.filter((chunk) => requestedIds.has(chunk.id));
+}
+
+function buildOpenAnswerEvaluationCreateData(input: {
+  session: OpenAnswerEvaluationSessionRecord & {
+    openQuestion: OpenQuestionRecord;
+  };
+  studentId: string;
+  answerText: string;
+  evaluation: OpenAnswerEvaluationDraft;
+}): Prisma.OpenAnswerEvaluationUncheckedCreateInput {
+  const base: Prisma.OpenAnswerEvaluationUncheckedCreateInput = {
+    sessionId: input.session.id,
+    openQuestionId: input.session.openQuestion.id,
+    studentId: input.studentId,
+    subjectId: input.session.subjectId,
+    answerText: input.answerText,
+    status:
+      input.evaluation.status === 'READY'
+        ? OpenAnswerEvaluationStatus.READY
+        : OpenAnswerEvaluationStatus.FAILED,
+    score: null,
+    maxScore: null,
+    feedback: null,
+    presentPoints: [],
+    missingPoints: [],
+    errors: [],
+    modelAnswer: null,
+    advice: null,
+  };
+
+  if (input.evaluation.metadata) {
+    base.generationFlowName = input.evaluation.metadata.flowName;
+    base.generationProvider = input.evaluation.metadata.provider;
+    base.generationModel = input.evaluation.metadata.model;
+    base.generationPromptVersion = input.evaluation.metadata.promptVersion;
+    base.generationSchemaVersion = input.evaluation.metadata.schemaVersion;
+    base.generationInputSize = input.evaluation.metadata.inputSize;
+  }
+
+  if (input.evaluation.status === 'FAILED') {
+    base.errorCode = input.evaluation.errorCode;
+    base.errors = [input.evaluation.errorCode];
+    return base;
+  }
+
+  base.score = input.evaluation.score;
+  base.maxScore = input.evaluation.maxScore;
+  base.feedback = input.evaluation.feedback;
+  base.presentPoints = input.evaluation.presentPoints;
+  base.missingPoints = input.evaluation.missingPoints;
+  base.errors = input.evaluation.errors;
+  base.modelAnswer = input.evaluation.modelAnswer;
+  base.advice = input.evaluation.advice;
+
+  return base;
+}
+
 function toOpenAnswerSubmissionResult(
   evaluation: OpenAnswerEvaluationRecord,
+  sourceChunks: DocumentChunkRecord[] = [],
 ): OpenAnswerSubmissionResult {
   return {
     sessionId: evaluation.sessionId,
@@ -1160,9 +1392,28 @@ function toOpenAnswerSubmissionResult(
       errors: parseJsonArray(evaluation.errors),
       modelAnswer: evaluation.modelAnswer,
       advice: evaluation.advice,
-      sources: [],
+      sources:
+        evaluation.status === 'READY'
+          ? sourceChunks.map((chunk) => ({
+              chunkId: chunk.id,
+              text: truncateText(
+                chunk.text,
+                OPEN_ANSWER_SOURCE_EXCERPT_MAX_LENGTH,
+              ),
+              pageNumber: chunk.pageNumber,
+              index: chunk.index,
+            }))
+          : [],
     },
   };
+}
+
+function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return text.slice(0, maxLength).trimEnd();
 }
 
 function parseJsonArray(input: unknown): unknown[] {

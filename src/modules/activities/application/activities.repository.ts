@@ -5,6 +5,11 @@ import type {
   DiagnosticQuizGenerationKnowledgeUnit,
   GeneratedDiagnosticQuiz,
 } from './diagnostic-quiz-generator';
+import type {
+  GeneratedOpenAnswerEvaluation,
+  OpenAnswerEvaluationQuestion,
+} from './open-answer-evaluator';
+import type { OpenQuestionGenerationMetadata } from './open-question-generator';
 
 export interface ActivityQuestionChoice {
   id: string;
@@ -112,6 +117,7 @@ export interface OpenQuestionDraft {
   maxAnswerLength: number;
   sourceChunkIds: string[];
   version: number;
+  metadata?: OpenQuestionGenerationMetadata;
 }
 
 export const ACTIVITIES_REPOSITORY = Symbol('ACTIVITIES_REPOSITORY');
@@ -176,6 +182,23 @@ export interface OpenAnswerSubmissionResult {
   };
 }
 
+export interface OpenAnswerEvaluationContext {
+  sessionId: string;
+  subjectId: string;
+  documentId: string | null;
+  knowledgeUnit: DiagnosticQuizGenerationKnowledgeUnit;
+  question: OpenAnswerEvaluationQuestion;
+  chunks: DiagnosticQuizGenerationChunk[];
+}
+
+export type OpenAnswerEvaluationDraft =
+  | GeneratedOpenAnswerEvaluation
+  | {
+      status: 'FAILED';
+      errorCode: string;
+      metadata?: OpenQuestionGenerationMetadata;
+    };
+
 export interface ActivitiesRepository {
   findDiagnosticQuizGenerationContext(input: {
     studentId: string;
@@ -215,9 +238,15 @@ export interface ActivitiesRepository {
     }>;
   }): Promise<DiagnosticQuizSubmissionResult>;
 
-  submitOpenAnswer(input: {
+  findOpenAnswerEvaluationContext(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<OpenAnswerEvaluationContext>;
+
+  saveOpenAnswerEvaluation(input: {
     studentId: string;
     sessionId: string;
     answerText: string;
+    evaluation: OpenAnswerEvaluationDraft;
   }): Promise<OpenAnswerSubmissionResult>;
 }

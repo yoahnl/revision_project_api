@@ -16,6 +16,16 @@ import {
   type DiagnosticQuizGenerationInput,
   type GeneratedDiagnosticQuiz,
 } from './application/diagnostic-quiz-generator';
+import {
+  OPEN_QUESTION_GENERATOR,
+  type GeneratedOpenQuestion,
+  type OpenQuestionGenerationInput,
+} from './application/open-question-generator';
+import {
+  OPEN_ANSWER_EVALUATOR,
+  type GeneratedOpenAnswerEvaluation,
+  type OpenAnswerEvaluationInput,
+} from './application/open-answer-evaluator';
 import { KnowledgeUnit } from '../revision/domain/knowledge-unit.entity';
 import { TOKEN_VERIFIER } from '../auth/application/token-verifier';
 import { FirebaseAuthGuard } from '../auth/interfaces/firebase-auth.guard';
@@ -58,12 +68,25 @@ describe('ActivitiesModule', () => {
     >;
     submitResult: jest.Mock;
     createOpenQuestionActivity: jest.Mock;
-    submitOpenAnswer: jest.Mock;
+    findOpenAnswerEvaluationContext: jest.Mock;
+    saveOpenAnswerEvaluation: jest.Mock;
   };
   let diagnosticQuizGenerator: {
     generate: jest.Mock<
       Promise<GeneratedDiagnosticQuiz>,
       [DiagnosticQuizGenerationInput]
+    >;
+  };
+  let openQuestionGenerator: {
+    generate: jest.Mock<
+      Promise<GeneratedOpenQuestion>,
+      [OpenQuestionGenerationInput]
+    >;
+  };
+  let openAnswerEvaluator: {
+    evaluate: jest.Mock<
+      Promise<GeneratedOpenAnswerEvaluation>,
+      [OpenAnswerEvaluationInput]
     >;
   };
   let revisionRepository: {
@@ -108,6 +131,26 @@ describe('ActivitiesModule', () => {
         knowledgeUnitId: 'unit-1',
         items: [],
       }),
+      findOpenAnswerEvaluationContext: jest.fn().mockResolvedValue({
+        sessionId: 'open-session-1',
+        subjectId: 'subject-1',
+        documentId: null,
+        knowledgeUnit: {
+          id: 'unit-1',
+          subjectId: 'subject-1',
+          title: 'Revision constitutionnelle',
+          summary: 'La Constitution de 1958 encadre la procedure de revision.',
+          sourceChunkIds: [],
+        },
+        question: {
+          id: 'open-question-1',
+          prompt:
+            'Explique comment la révision constitutionnelle est encadrée.',
+          instructions: 'Réponds avec le cours.',
+          sourceChunkIds: [],
+        },
+        chunks: [],
+      }),
       createOpenQuestionActivity: jest
         .fn<Promise<OpenQuestionActivity>, []>()
         .mockResolvedValue({
@@ -127,7 +170,7 @@ describe('ActivitiesModule', () => {
             sources: [],
           },
         }),
-      submitOpenAnswer: jest
+      saveOpenAnswerEvaluation: jest
         .fn<Promise<OpenAnswerSubmissionResult>, []>()
         .mockResolvedValue({
           sessionId: 'open-session-1',
@@ -135,15 +178,16 @@ describe('ActivitiesModule', () => {
           status: 'submitted',
           evaluation: {
             id: 'evaluation-1',
-            status: 'PENDING',
-            score: null,
-            maxScore: null,
-            feedback: null,
-            presentPoints: [],
-            missingPoints: [],
+            status: 'READY',
+            score: 16,
+            maxScore: 20,
+            feedback: 'Réponse solide.',
+            presentPoints: ['Procédure encadrée'],
+            missingPoints: ['Limite matérielle'],
             errors: [],
-            modelAnswer: null,
-            advice: null,
+            modelAnswer:
+              'La révision constitutionnelle suit une procédure encadrée.',
+            advice: 'Relis les limites de révision.',
             sources: [],
           },
         }),
@@ -166,6 +210,54 @@ describe('ActivitiesModule', () => {
                 'La forme republicaine du gouvernement ne peut pas faire l objet d une revision.',
             },
           ],
+        }),
+    };
+    openQuestionGenerator = {
+      generate: jest
+        .fn<Promise<GeneratedOpenQuestion>, [OpenQuestionGenerationInput]>()
+        .mockResolvedValue({
+          version: 1,
+          prompt:
+            'Explique comment la révision constitutionnelle est encadrée.',
+          instructions: 'Réponds avec le cours.',
+          maxAnswerLength: 2600,
+          sourceChunkIds: [],
+          metadata: {
+            flowName: 'openQuestionGeneration',
+            provider: 'google-genai',
+            model: 'googleai/gemini-2.5-flash',
+            promptVersion: 'open-question-generation-v1',
+            schemaVersion: 'open-question-generation-v1',
+            inputSize: 900,
+          },
+        }),
+    };
+    openAnswerEvaluator = {
+      evaluate: jest
+        .fn<
+          Promise<GeneratedOpenAnswerEvaluation>,
+          [OpenAnswerEvaluationInput]
+        >()
+        .mockResolvedValue({
+          status: 'READY',
+          score: 16,
+          maxScore: 20,
+          feedback: 'Réponse solide.',
+          presentPoints: ['Procédure encadrée'],
+          missingPoints: ['Limite matérielle'],
+          errors: [],
+          modelAnswer:
+            'La révision constitutionnelle suit une procédure encadrée.',
+          advice: 'Relis les limites de révision.',
+          sourceChunkIds: [],
+          metadata: {
+            flowName: 'openAnswerEvaluation',
+            provider: 'google-genai',
+            model: 'googleai/gemini-2.5-flash',
+            promptVersion: 'open-answer-evaluation-v1',
+            schemaVersion: 'open-answer-evaluation-v1',
+            inputSize: 1100,
+          },
         }),
     };
     revisionRepository = {
@@ -200,6 +292,10 @@ describe('ActivitiesModule', () => {
       .useValue(activitiesRepository)
       .overrideProvider(DIAGNOSTIC_QUIZ_GENERATOR)
       .useValue(diagnosticQuizGenerator)
+      .overrideProvider(OPEN_QUESTION_GENERATOR)
+      .useValue(openQuestionGenerator)
+      .overrideProvider(OPEN_ANSWER_EVALUATOR)
+      .useValue(openAnswerEvaluator)
       .overrideProvider(REVISION_REPOSITORY)
       .useValue(revisionRepository)
       .overrideProvider(PrismaService)
@@ -427,7 +523,7 @@ describe('ActivitiesModule', () => {
     expect(publicPayload).not.toContain('feedback');
   });
 
-  it('submits an open answer and returns a pending evaluation contract', async () => {
+  it('submits an open answer and returns a ready evaluation contract', async () => {
     await request(app.getHttpServer())
       .post('/activities/open-session-1/open-answer')
       .send({
@@ -441,26 +537,34 @@ describe('ActivitiesModule', () => {
         status: 'submitted',
         evaluation: {
           id: 'evaluation-1',
-          status: 'PENDING',
-          score: null,
-          maxScore: null,
-          feedback: null,
-          presentPoints: [],
-          missingPoints: [],
+          status: 'READY',
+          score: 16,
+          maxScore: 20,
+          feedback: 'Réponse solide.',
+          presentPoints: ['Procédure encadrée'],
+          missingPoints: ['Limite matérielle'],
           errors: [],
-          modelAnswer: null,
-          advice: null,
+          modelAnswer:
+            'La révision constitutionnelle suit une procédure encadrée.',
+          advice: 'Relis les limites de révision.',
           sources: [],
         },
       });
 
-    expect(activitiesRepository.submitOpenAnswer).toHaveBeenCalledWith({
+    expect(activitiesRepository.saveOpenAnswerEvaluation).toHaveBeenCalled();
+    expect(openAnswerEvaluator.evaluate).toHaveBeenCalled();
+    expect(activitiesRepository.saveOpenAnswerEvaluation).toHaveBeenCalledWith({
       studentId: 'student-1',
       sessionId: 'open-session-1',
       answerText:
         'La révision constitutionnelle est une procédure encadrée par la Constitution.',
+      evaluation: expect.objectContaining({
+        status: 'READY',
+        score: 16,
+        maxScore: 20,
+      }) as GeneratedOpenAnswerEvaluation,
     });
-    expect(revisionRepository.upsertMastery).not.toHaveBeenCalled();
+    expect(revisionRepository.upsertMastery).toHaveBeenCalled();
   });
 
   it('rejects malformed open question and open answer payloads', async () => {
@@ -477,6 +581,8 @@ describe('ActivitiesModule', () => {
     expect(
       activitiesRepository.createOpenQuestionActivity,
     ).not.toHaveBeenCalled();
-    expect(activitiesRepository.submitOpenAnswer).not.toHaveBeenCalled();
+    expect(
+      activitiesRepository.saveOpenAnswerEvaluation,
+    ).not.toHaveBeenCalled();
   });
 });

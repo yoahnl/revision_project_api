@@ -41,6 +41,26 @@ describe('MasteryState', () => {
     expect(next.score).toBe(0.45);
   });
 
+  it('returns a new state with a weighted open answer ratio', () => {
+    const practicedAt = new Date('2026-06-14T10:00:00.000Z');
+    const mastery = new MasteryState({
+      studentId: 'student-1',
+      knowledgeUnitId: 'unit-1',
+      score: 0.4,
+      lastPracticedAt: null,
+    });
+
+    const next = mastery.applyOpenAnswerRatio(0.8, practicedAt);
+
+    expect(next).not.toBe(mastery);
+    expect(next).toMatchObject({
+      studentId: 'student-1',
+      knowledgeUnitId: 'unit-1',
+      score: 0.54,
+      lastPracticedAt: practicedAt,
+    });
+  });
+
   it('rejects non-finite mastery scores', () => {
     const invalidScores = [
       Number.NaN,

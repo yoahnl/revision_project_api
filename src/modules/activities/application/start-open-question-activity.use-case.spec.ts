@@ -1,12 +1,14 @@
 import type { RevisionRepository } from '../../revision/application/revision.repository';
 import { KnowledgeUnit } from '../../revision/domain/knowledge-unit.entity';
 import type { ActivitiesRepository } from './activities.repository';
+import type { OpenQuestionGenerator } from './open-question-generator';
 import { StartOpenQuestionActivityUseCase } from './start-open-question-activity.use-case';
 
 describe('StartOpenQuestionActivityUseCase', () => {
   it('creates an open question activity for an owned knowledge unit', async () => {
     const activitiesRepository = createActivitiesRepository();
     const revisionRepository = createRevisionRepository();
+    const openQuestionGenerator = createOpenQuestionGenerator();
     const knowledgeUnit = new KnowledgeUnit({
       id: 'unit-1',
       subjectId: 'subject-1',
@@ -30,6 +32,23 @@ describe('StartOpenQuestionActivityUseCase', () => {
         },
       ],
     });
+    openQuestionGenerator.generate.mockResolvedValue({
+      version: 1,
+      prompt:
+        'Explique pourquoi la séparation des pouvoirs protège contre la concentration du pouvoir.',
+      instructions:
+        'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
+      maxAnswerLength: 2500,
+      sourceChunkIds: ['chunk-1'],
+      metadata: {
+        flowName: 'openQuestionGeneration',
+        provider: 'google-genai',
+        model: 'googleai/gemini-2.5-flash',
+        promptVersion: 'open-question-generation-v1',
+        schemaVersion: 'open-question-generation-v1',
+        inputSize: 1200,
+      },
+    });
     activitiesRepository.createOpenQuestionActivity.mockResolvedValue(
       openQuestionActivity(),
     );
@@ -37,6 +56,7 @@ describe('StartOpenQuestionActivityUseCase', () => {
     const activity = await new StartOpenQuestionActivityUseCase(
       activitiesRepository,
       revisionRepository,
+      openQuestionGenerator,
     ).execute({
       studentId: 'student-1',
       subjectId: 'subject-1',
@@ -55,6 +75,32 @@ describe('StartOpenQuestionActivityUseCase', () => {
         },
       ],
     ]);
+    expect(openQuestionGenerator.generate.mock.calls).toEqual([
+      [
+        {
+          studentId: 'student-1',
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnit: {
+            id: 'unit-1',
+            subjectId: 'subject-1',
+            title: 'Séparation des pouvoirs',
+            summary:
+              'La séparation des pouvoirs distingue les fonctions législative, exécutive et juridictionnelle.',
+            difficulty: 'MEDIUM',
+            sourceChunkIds: ['chunk-1'],
+          },
+          chunks: [
+            {
+              id: 'chunk-1',
+              index: 0,
+              text: 'La séparation des pouvoirs organise les fonctions de l’État.',
+              pageNumber: null,
+            },
+          ],
+        },
+      ],
+    ]);
     expect(activitiesRepository.createOpenQuestionActivity.mock.calls).toEqual([
       [
         {
@@ -64,12 +110,20 @@ describe('StartOpenQuestionActivityUseCase', () => {
           documentId: 'document-1',
           question: {
             prompt:
-              'Explique avec tes propres mots la notion suivante : Séparation des pouvoirs.',
+              'Explique pourquoi la séparation des pouvoirs protège contre la concentration du pouvoir.',
             instructions:
               'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
-            maxAnswerLength: 4000,
+            maxAnswerLength: 2500,
             sourceChunkIds: ['chunk-1'],
             version: 1,
+            metadata: {
+              flowName: 'openQuestionGeneration',
+              provider: 'google-genai',
+              model: 'googleai/gemini-2.5-flash',
+              promptVersion: 'open-question-generation-v1',
+              schemaVersion: 'open-question-generation-v1',
+              inputSize: 1200,
+            },
           },
         },
       ],
@@ -92,6 +146,7 @@ describe('StartOpenQuestionActivityUseCase', () => {
       new StartOpenQuestionActivityUseCase(
         activitiesRepository,
         revisionRepository,
+        createOpenQuestionGenerator(),
       ).execute({
         studentId: 'student-1',
         subjectId: 'subject-1',
@@ -112,7 +167,14 @@ function createActivitiesRepository(): jest.Mocked<ActivitiesRepository> {
     submitResult: jest.fn(),
     findOpenQuestionGenerationContext: jest.fn(),
     createOpenQuestionActivity: jest.fn(),
-    submitOpenAnswer: jest.fn(),
+    findOpenAnswerEvaluationContext: jest.fn(),
+    saveOpenAnswerEvaluation: jest.fn(),
+  };
+}
+
+function createOpenQuestionGenerator(): jest.Mocked<OpenQuestionGenerator> {
+  return {
+    generate: jest.fn(),
   };
 }
 

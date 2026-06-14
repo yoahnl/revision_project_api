@@ -415,7 +415,14 @@ function normalizeActivityError(error: unknown): never {
       error.message === 'Generated diagnostic quiz is invalid' ||
       error.message === 'Question source chunk not found' ||
       error.message === 'Question visual source chunk not found' ||
-      error.message === 'Open question source chunk not found'
+      error.message === 'Open question source chunk not found' ||
+      error.message === 'OPEN_QUESTION_SOURCE_INVALID' ||
+      error.message === 'OPEN_QUESTION_GENERATION_INVALID' ||
+      error.message === 'OPEN_QUESTION_EMPTY_OUTPUT' ||
+      error.message === 'OPEN_ANSWER_EVALUATION_SOURCE_INVALID' ||
+      error.message === 'OPEN_ANSWER_EVALUATION_INVALID' ||
+      error.message === 'OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT' ||
+      error.message === 'OPEN_ANSWER_EVALUATION_FAILED'
     ) {
       throw new UnprocessableEntityException(error.message);
     }

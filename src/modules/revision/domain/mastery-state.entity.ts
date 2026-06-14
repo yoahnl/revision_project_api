@@ -51,4 +51,22 @@ export class MasteryState {
       lastPracticedAt: practicedAt,
     });
   }
+
+  applyOpenAnswerRatio(ratio: number, practicedAt: Date): MasteryState {
+    if (!Number.isFinite(ratio) || ratio < 0 || ratio > 1) {
+      throw new Error('Open answer ratio must be between 0 and 1');
+    }
+
+    const nextScore = Math.max(
+      0,
+      Math.min(1, this.score * 0.65 + ratio * 0.35),
+    );
+
+    return new MasteryState({
+      studentId: this.studentId,
+      knowledgeUnitId: this.knowledgeUnitId,
+      score: Number(nextScore.toFixed(3)),
+      lastPracticedAt: practicedAt,
+    });
+  }
 }

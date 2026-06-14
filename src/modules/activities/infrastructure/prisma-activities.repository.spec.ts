@@ -176,21 +176,41 @@ type OpenAnswerEvaluationCreatePayload = {
     studentId: string;
     subjectId: string;
     answerText: string;
-    status: 'PENDING';
-    score: null;
-    maxScore: null;
-    feedback: null;
-    presentPoints: [];
-    missingPoints: [];
-    errors: [];
-    modelAnswer: null;
-    advice: null;
+    status: 'READY' | 'FAILED';
+    score: number | null;
+    maxScore: number | null;
+    feedback: string | null;
+    presentPoints: unknown[];
+    missingPoints: unknown[];
+    errors: unknown[];
+    modelAnswer: string | null;
+    advice: string | null;
+    generationFlowName?: string;
+    generationProvider?: string;
+    generationModel?: string;
+    generationPromptVersion?: string;
+    generationSchemaVersion?: string;
+    generationInputSize?: number;
+    errorCode?: string;
   };
 };
 
 type OpenQuestionSessionRecord = ActivitySessionRecord & {
   openQuestion: OpenQuestionRecord | null;
   openAnswerEvaluation: OpenAnswerEvaluationRecord | null;
+  knowledgeUnit?: KnowledgeUnitRecord;
+};
+
+type KnowledgeUnitRecord = {
+  id: string;
+  subjectId: string;
+  documentId: string | null;
+  title: string;
+  summary: string;
+  difficulty: 'LOW' | 'MEDIUM' | 'HIGH' | null;
+  sources?: Array<{
+    chunk: DocumentChunkRecord;
+  }>;
 };
 
 type SessionWithQuestions = ActivitySessionRecord & {
@@ -388,6 +408,19 @@ describe('PrismaActivitiesRepository', () => {
     index: 0,
     pageNumber: null,
     text: 'Article 89 encadre la revision constitutionnelle.',
+    ...input,
+  });
+
+  const knowledgeUnitRecord = (
+    input: Partial<KnowledgeUnitRecord> = {},
+  ): KnowledgeUnitRecord => ({
+    id: 'unit-1',
+    subjectId: 'subject-1',
+    documentId: 'document-1',
+    title: 'Séparation des pouvoirs',
+    summary: 'Résumé.',
+    difficulty: null,
+    sources: [{ chunk: chunkRecord() }],
     ...input,
   });
 
@@ -1463,25 +1496,104 @@ describe('PrismaActivitiesRepository', () => {
     expect(publicPayload).not.toContain('Article 89');
   });
 
-  it('submits an open answer and creates a pending evaluation without fake correction', async () => {
+  it('builds an open answer evaluation context with sourced chunks', async () => {
     const { prisma, repository } = createRepository();
     prisma.activitySession.findFirst.mockResolvedValue({
       ...sessionRecord({
         type: 'OPEN_QUESTION' as never,
         status: 'STARTED',
       }),
-      openQuestion: openQuestionRecord({ sources: [] }),
+      knowledgeUnit: knowledgeUnitRecord(),
+      openQuestion: openQuestionRecord(),
+      openAnswerEvaluation: null,
+    } satisfies OpenQuestionSessionRecord);
+
+    const context = await repository.findOpenAnswerEvaluationContext({
+      studentId: 'student-1',
+      sessionId: 'session-1',
+    });
+
+    expect(context.knowledgeUnit).toMatchObject({
+      id: 'unit-1',
+      subjectId: 'subject-1',
+      title: 'Séparation des pouvoirs',
+      summary: 'Résumé.',
+      sourceChunkIds: ['chunk-1'],
+    });
+    expect(context).toEqual({
+      sessionId: 'session-1',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnit: context.knowledgeUnit,
+      question: {
+        id: 'open-question-1',
+        prompt:
+          'Explique avec tes propres mots la notion suivante : Séparation des pouvoirs.',
+        instructions:
+          'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
+        sourceChunkIds: ['chunk-1'],
+      },
+      chunks: [
+        {
+          id: 'chunk-1',
+          index: 0,
+          text: 'Article 89 encadre la revision constitutionnelle.',
+          pageNumber: null,
+        },
+      ],
+    });
+  });
+
+  it('saves a ready open answer evaluation with sourced feedback', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.activitySession.findFirst.mockResolvedValue({
+      ...sessionRecord({
+        type: 'OPEN_QUESTION' as never,
+        status: 'STARTED',
+      }),
+      knowledgeUnit: knowledgeUnitRecord(),
+      openQuestion: openQuestionRecord(),
       openAnswerEvaluation: null,
     } satisfies OpenQuestionSessionRecord);
     prisma.openAnswerEvaluation.create.mockResolvedValue(
-      openAnswerEvaluationRecord(),
+      openAnswerEvaluationRecord({
+        status: 'READY',
+        score: 16,
+        maxScore: 20,
+        feedback: 'Réponse solide.',
+        presentPoints: ['Point présent'],
+        missingPoints: ['Point manquant'],
+        errors: [],
+        modelAnswer: 'Réponse modèle.',
+        advice: 'Conseil.',
+      }),
     );
 
-    const result = await repository.submitOpenAnswer({
+    const result = await repository.saveOpenAnswerEvaluation({
       studentId: 'student-1',
       sessionId: 'session-1',
       answerText:
         'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
+      evaluation: {
+        status: 'READY',
+        score: 16,
+        maxScore: 20,
+        feedback: 'Réponse solide.',
+        presentPoints: ['Point présent'],
+        missingPoints: ['Point manquant'],
+        errors: [],
+        modelAnswer: 'Réponse modèle.',
+        advice: 'Conseil.',
+        sourceChunkIds: ['chunk-1'],
+        metadata: {
+          flowName: 'openAnswerEvaluation',
+          provider: 'google-genai',
+          model: 'googleai/gemini-2.5-flash',
+          promptVersion: 'open-answer-evaluation-v1',
+          schemaVersion: 'open-answer-evaluation-v1',
+          inputSize: 1400,
+        },
+      },
     });
 
     expect(prisma.openAnswerEvaluation.create).toHaveBeenCalledWith({
@@ -1492,15 +1604,21 @@ describe('PrismaActivitiesRepository', () => {
         subjectId: 'subject-1',
         answerText:
           'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
-        status: 'PENDING',
-        score: null,
-        maxScore: null,
-        feedback: null,
-        presentPoints: [],
-        missingPoints: [],
+        status: 'READY',
+        score: 16,
+        maxScore: 20,
+        feedback: 'Réponse solide.',
+        presentPoints: ['Point présent'],
+        missingPoints: ['Point manquant'],
         errors: [],
-        modelAnswer: null,
-        advice: null,
+        modelAnswer: 'Réponse modèle.',
+        advice: 'Conseil.',
+        generationFlowName: 'openAnswerEvaluation',
+        generationProvider: 'google-genai',
+        generationModel: 'googleai/gemini-2.5-flash',
+        generationPromptVersion: 'open-answer-evaluation-v1',
+        generationSchemaVersion: 'open-answer-evaluation-v1',
+        generationInputSize: 1400,
       },
     });
     expect(prisma.activitySession.update).toHaveBeenCalledTimes(1);
@@ -1522,16 +1640,23 @@ describe('PrismaActivitiesRepository', () => {
       status: 'submitted',
       evaluation: {
         id: 'evaluation-1',
-        status: 'PENDING',
-        score: null,
-        maxScore: null,
-        feedback: null,
-        presentPoints: [],
-        missingPoints: [],
+        status: 'READY',
+        score: 16,
+        maxScore: 20,
+        feedback: 'Réponse solide.',
+        presentPoints: ['Point présent'],
+        missingPoints: ['Point manquant'],
         errors: [],
-        modelAnswer: null,
-        advice: null,
-        sources: [],
+        modelAnswer: 'Réponse modèle.',
+        advice: 'Conseil.',
+        sources: [
+          {
+            chunkId: 'chunk-1',
+            text: 'Article 89 encadre la revision constitutionnelle.',
+            pageNumber: null,
+            index: 0,
+          },
+        ],
       },
     });
   });
@@ -1543,27 +1668,36 @@ describe('PrismaActivitiesRepository', () => {
         type: 'OPEN_QUESTION' as never,
         status: 'SUBMITTED',
       }),
+      knowledgeUnit: knowledgeUnitRecord(),
       openQuestion: openQuestionRecord(),
       openAnswerEvaluation: openAnswerEvaluationRecord(),
     } satisfies OpenQuestionSessionRecord);
 
     await expect(
-      repository.submitOpenAnswer({
+      repository.saveOpenAnswerEvaluation({
         studentId: 'student-1',
         sessionId: 'session-1',
         answerText:
           'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
+        evaluation: {
+          status: 'FAILED',
+          errorCode: 'OPEN_ANSWER_EVALUATION_SOURCE_INVALID',
+        },
       }),
     ).rejects.toThrow('Activity session already submitted');
 
     prisma.activitySession.findFirst.mockResolvedValue(sessionWithQuestions());
 
     await expect(
-      repository.submitOpenAnswer({
+      repository.saveOpenAnswerEvaluation({
         studentId: 'student-1',
         sessionId: 'session-1',
         answerText:
           'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
+        evaluation: {
+          status: 'FAILED',
+          errorCode: 'OPEN_ANSWER_EVALUATION_SOURCE_INVALID',
+        },
       }),
     ).rejects.toThrow('Activity session is not an open question');
 

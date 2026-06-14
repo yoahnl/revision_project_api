@@ -9,6 +9,10 @@ import {
   type ActivitiesRepository,
   type OpenQuestionActivity,
 } from './activities.repository';
+import {
+  OPEN_QUESTION_GENERATOR,
+  type OpenQuestionGenerator,
+} from './open-question-generator';
 
 export const OPEN_QUESTION_MAX_ANSWER_LENGTH = 4000;
 export const OPEN_QUESTION_INSTRUCTIONS =
@@ -21,6 +25,8 @@ export class StartOpenQuestionActivityUseCase {
     private readonly activitiesRepository: ActivitiesRepository,
     @Inject(REVISION_REPOSITORY)
     private readonly revisionRepository: RevisionRepository,
+    @Inject(OPEN_QUESTION_GENERATOR)
+    private readonly openQuestionGenerator: OpenQuestionGenerator,
   ) {}
 
   async execute(input: {
@@ -35,8 +41,24 @@ export class StartOpenQuestionActivityUseCase {
         subjectId: input.subjectId,
         knowledgeUnitId: knowledgeUnit.id,
       });
-    const sourceChunkIds = Array.from(
-      new Set(generationContext?.knowledgeUnit.sourceChunkIds ?? []),
+    const generatedQuestion = await this.openQuestionGenerator.generate(
+      generationContext
+        ? {
+            studentId: input.studentId,
+            subjectId: input.subjectId,
+            documentId: generationContext.documentId,
+            knowledgeUnit: generationContext.knowledgeUnit,
+            chunks: generationContext.chunks,
+          }
+        : {
+            studentId: input.studentId,
+            subjectId: input.subjectId,
+            documentId: null,
+            knowledgeUnit: Object.assign(knowledgeUnit, {
+              sourceChunkIds: [],
+            }),
+            chunks: [],
+          },
     );
 
     return this.activitiesRepository.createOpenQuestionActivity({
@@ -44,13 +66,7 @@ export class StartOpenQuestionActivityUseCase {
       subjectId: input.subjectId,
       knowledgeUnitId: knowledgeUnit.id,
       documentId: generationContext?.documentId ?? null,
-      question: {
-        prompt: buildOpenQuestionPrompt(knowledgeUnit),
-        instructions: OPEN_QUESTION_INSTRUCTIONS,
-        maxAnswerLength: OPEN_QUESTION_MAX_ANSWER_LENGTH,
-        sourceChunkIds,
-        version: 1,
-      },
+      question: generatedQuestion,
     });
   }
 
@@ -73,8 +89,4 @@ export class StartOpenQuestionActivityUseCase {
 
     return knowledgeUnit;
   }
-}
-
-function buildOpenQuestionPrompt(knowledgeUnit: KnowledgeUnit): string {
-  return `Explique avec tes propres mots la notion suivante : ${knowledgeUnit.title}.`;
 }
