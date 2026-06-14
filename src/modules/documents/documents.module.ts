@@ -5,6 +5,7 @@ import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
 import { DOCUMENT_FILE_STORAGE } from './application/document-file-storage';
 import { DOCUMENTS_REPOSITORY } from './application/documents.repository';
 import { GetDocumentUseCase } from './application/get-document.use-case';
+import { ListDocumentKnowledgeUnitsUseCase } from './application/list-document-knowledge-units.use-case';
 import { ListSubjectDocumentsUseCase } from './application/list-subject-documents.use-case';
 import { RegisterDocumentUseCase } from './application/register-document.use-case';
 import { UploadCoursePdfUseCase } from './application/upload-course-pdf.use-case';
@@ -17,6 +18,7 @@ import { DocumentsController } from './interfaces/documents.controller';
   controllers: [DocumentsController],
   providers: [
     GetDocumentUseCase,
+    ListDocumentKnowledgeUnitsUseCase,
     ListSubjectDocumentsUseCase,
     RegisterDocumentUseCase,
     UploadCoursePdfUseCase,

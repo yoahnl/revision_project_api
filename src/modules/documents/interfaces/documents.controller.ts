@@ -13,7 +13,11 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import type { AuthenticatedStudent } from '../../auth/interfaces/authenticated-student';
 import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
-import { GetDocumentUseCase } from '../application/get-document.use-case';
+import {
+  GetDocumentUseCase,
+  toPublicDocument,
+} from '../application/get-document.use-case';
+import { ListDocumentKnowledgeUnitsUseCase } from '../application/list-document-knowledge-units.use-case';
 import { ListSubjectDocumentsUseCase } from '../application/list-subject-documents.use-case';
 import { RegisterDocumentUseCase } from '../application/register-document.use-case';
 import { UploadCoursePdfUseCase } from '../application/upload-course-pdf.use-case';
@@ -55,6 +59,7 @@ export class DocumentsController {
     private readonly registerDocument: RegisterDocumentUseCase,
     private readonly listSubjectDocuments: ListSubjectDocumentsUseCase,
     private readonly getDocument: GetDocumentUseCase,
+    private readonly listDocumentKnowledgeUnits: ListDocumentKnowledgeUnitsUseCase,
     private readonly uploadCoursePdfUseCase: UploadCoursePdfUseCase,
   ) {}
 
@@ -77,6 +82,7 @@ export class DocumentsController {
         storagePath: validatedBody.storagePath,
         mimeType: validatedBody.mimeType,
       })
+      .then(toPublicDocument)
       .catch((error: unknown) => {
         normalizeDocumentRegistrationError(error);
       });
@@ -108,6 +114,7 @@ export class DocumentsController {
         content: validatedFile.content,
         mimeType: validatedFile.mimeType,
       })
+      .then(toPublicDocument)
       .catch((error: unknown) => {
         normalizeDocumentRegistrationError(error);
       });
@@ -123,6 +130,7 @@ export class DocumentsController {
         studentId: student.id,
         subjectId,
       })
+      .then((documents) => documents.map(toPublicDocument))
       .catch((error: unknown) => {
         normalizeDocumentRegistrationError(error);
       });
@@ -133,9 +141,30 @@ export class DocumentsController {
     @CurrentStudent() student: AuthenticatedStudent,
     @Param('documentId') documentId: string,
   ) {
+    const validatedDocumentId = trimRequiredString(
+      documentId,
+      'Document id is required',
+    );
+
     return this.getDocument.execute({
       studentId: student.id,
+      documentId: validatedDocumentId,
+    });
+  }
+
+  @Get('documents/:documentId/knowledge-units')
+  listKnowledgeUnits(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('documentId') documentId: string,
+  ) {
+    const validatedDocumentId = trimRequiredString(
       documentId,
+      'Document id is required',
+    );
+
+    return this.listDocumentKnowledgeUnits.execute({
+      studentId: student.id,
+      documentId: validatedDocumentId,
     });
   }
 }

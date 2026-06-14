@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import { GetDocumentUseCase } from '../application/get-document.use-case';
+import { ListDocumentKnowledgeUnitsUseCase } from '../application/list-document-knowledge-units.use-case';
 import { ListSubjectDocumentsUseCase } from '../application/list-subject-documents.use-case';
 import { RegisterDocumentUseCase } from '../application/register-document.use-case';
 import { UploadCoursePdfUseCase } from '../application/upload-course-pdf.use-case';
@@ -50,11 +51,9 @@ describe('DocumentsController', () => {
 
     const executeGet = jest.fn().mockResolvedValue({
       id: 'document-1',
-      studentId: 'student-1',
       subjectId: 'subject-1',
       kind: 'COURSE_PDF',
       fileName: 'cours.pdf',
-      storagePath: 'students/firebase-1/subjects/subject-1/cours.pdf',
       mimeType: 'application/pdf',
       status: 'UPLOADED',
       errorCode: null,
@@ -63,6 +62,32 @@ describe('DocumentsController', () => {
     const getDocument = {
       execute: executeGet,
     } as unknown as GetDocumentUseCase;
+
+    const executeKnowledgeUnits = jest.fn().mockResolvedValue({
+      documentId: 'document-1',
+      items: [
+        {
+          id: 'unit-1',
+          title: 'Séparation des pouvoirs',
+          summary: 'Résumé court.',
+          difficulty: 'MEDIUM',
+          displayOrder: 1,
+          confidence: 0.84,
+          sources: [
+            {
+              chunkId: 'chunk-1',
+              text: 'Extrait source issu du chunk.',
+              pageNumber: null,
+              index: 0,
+            },
+          ],
+        },
+      ],
+    });
+
+    const listDocumentKnowledgeUnits = {
+      execute: executeKnowledgeUnits,
+    } as unknown as ListDocumentKnowledgeUnitsUseCase;
 
     const executeUpload = jest.fn().mockResolvedValue({
       id: 'document-1',
@@ -86,11 +111,13 @@ describe('DocumentsController', () => {
         registerDocument,
         listSubjectDocuments,
         getDocument,
+        listDocumentKnowledgeUnits,
         uploadCoursePdf,
       ),
       execute,
       executeList,
       executeGet,
+      executeKnowledgeUnits,
       executeUpload,
     };
   }
@@ -226,12 +253,63 @@ describe('DocumentsController', () => {
   it('gets a document owned by the current student', async () => {
     const { controller, executeGet } = createController();
 
-    await controller.get(student, 'document-1');
+    const document = await controller.get(student, 'document-1');
 
     expect(executeGet).toHaveBeenCalledWith({
       studentId: 'student-1',
       documentId: 'document-1',
     });
+    expect(document).toEqual({
+      id: 'document-1',
+      subjectId: 'subject-1',
+      kind: 'COURSE_PDF',
+      fileName: 'cours.pdf',
+      mimeType: 'application/pdf',
+      status: 'UPLOADED',
+      errorCode: null,
+    });
+    expect(JSON.stringify(document)).not.toContain('storagePath');
+  });
+
+  it('lists sourced knowledge units for a document owned by the current student', async () => {
+    const { controller, executeKnowledgeUnits } = createController();
+
+    const response = await controller.listKnowledgeUnits(student, 'document-1');
+
+    expect(executeKnowledgeUnits).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+    expect(response).toEqual({
+      documentId: 'document-1',
+      items: [
+        {
+          id: 'unit-1',
+          title: 'Séparation des pouvoirs',
+          summary: 'Résumé court.',
+          difficulty: 'MEDIUM',
+          displayOrder: 1,
+          confidence: 0.84,
+          sources: [
+            {
+              chunkId: 'chunk-1',
+              text: 'Extrait source issu du chunk.',
+              pageNumber: null,
+              index: 0,
+            },
+          ],
+        },
+      ],
+    });
+    expect(JSON.stringify(response)).not.toContain('storagePath');
+  });
+
+  it('rejects empty document ids while reading knowledge units', () => {
+    const { controller } = createController();
+
+    expect(() => controller.listKnowledgeUnits(student, '  ')).toThrow(
+      BadRequestException,
+    );
   });
 
   it('uploads course PDFs for the current student', async () => {

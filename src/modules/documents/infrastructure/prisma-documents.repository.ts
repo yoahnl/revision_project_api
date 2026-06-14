@@ -3,6 +3,7 @@ import { KnowledgeUnit } from '../../revision/domain/knowledge-unit.entity';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import {
   type DocumentChunkPersistenceInput,
+  type DocumentKnowledgeUnitsDto,
   type DocumentsRepository,
   type KnowledgeUnitPersistenceInput,
   type KnowledgeUnitSourcePersistenceInput,
@@ -321,6 +322,60 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
     });
 
     return records.map((record) => this.toChunkDto(record));
+  }
+
+  async findKnowledgeUnitsByDocumentForStudent(input: {
+    studentId: string;
+    documentId: string;
+  }): Promise<DocumentKnowledgeUnitsDto | null> {
+    const document = await this.prisma.document.findFirst({
+      where: {
+        id: input.documentId,
+        studentId: input.studentId,
+      },
+    });
+
+    if (!document) {
+      return null;
+    }
+
+    const knowledgeUnits = await this.prisma.knowledgeUnit.findMany({
+      where: {
+        documentId: input.documentId,
+        subject: {
+          studentId: input.studentId,
+        },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+      include: {
+        sources: {
+          include: {
+            chunk: true,
+          },
+        },
+      },
+    });
+
+    return {
+      documentId: document.id,
+      documentStatus: document.status,
+      items: knowledgeUnits.map((unit) => ({
+        id: unit.id,
+        title: unit.title,
+        summary: unit.summary,
+        difficulty: unit.difficulty,
+        displayOrder: unit.displayOrder,
+        confidence: unit.confidence,
+        sources: unit.sources
+          .map((source) => ({
+            chunkId: source.chunkId,
+            text: source.chunk.text,
+            pageNumber: source.chunk.pageNumber,
+            index: source.chunk.index,
+          }))
+          .sort((left, right) => left.index - right.index),
+      })),
+    };
   }
 
   async replaceKnowledgeUnitSources(input: {

@@ -15,6 +15,16 @@ export interface RevisionDocumentDto {
   errorCode: string | null;
 }
 
+export interface PublicRevisionDocumentDto {
+  id: string;
+  subjectId: string;
+  kind: DocumentKind;
+  fileName: string;
+  mimeType: string;
+  status: DocumentStatus;
+  errorCode: string | null;
+}
+
 export type KnowledgeUnitDifficulty = 'LOW' | 'MEDIUM' | 'HIGH';
 
 export interface KnowledgeUnitPersistenceInput {
@@ -51,6 +61,29 @@ export interface RevisionDocumentChunkDto {
 export interface KnowledgeUnitSourcePersistenceInput {
   chunkId: string;
   relevanceScore?: number | null;
+}
+
+export interface DocumentKnowledgeUnitSourceDto {
+  chunkId: string;
+  text: string;
+  pageNumber: number | null;
+  index: number;
+}
+
+export interface DocumentKnowledgeUnitDto {
+  id: string;
+  title: string;
+  summary: string;
+  difficulty: KnowledgeUnitDifficulty | null;
+  displayOrder: number | null;
+  confidence: number | null;
+  sources: DocumentKnowledgeUnitSourceDto[];
+}
+
+export interface DocumentKnowledgeUnitsDto {
+  documentId: string;
+  documentStatus: DocumentStatus;
+  items: DocumentKnowledgeUnitDto[];
 }
 
 export const DOCUMENTS_REPOSITORY = Symbol('DOCUMENTS_REPOSITORY');
@@ -92,6 +125,11 @@ export interface DocumentsRepository {
   findChunksByDocumentId(
     documentId: string,
   ): Promise<RevisionDocumentChunkDto[]>;
+
+  findKnowledgeUnitsByDocumentForStudent(input: {
+    studentId: StudentId;
+    documentId: string;
+  }): Promise<DocumentKnowledgeUnitsDto | null>;
 
   replaceKnowledgeUnitSources(input: {
     knowledgeUnitId: string;

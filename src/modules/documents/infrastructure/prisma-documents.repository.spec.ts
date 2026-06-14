@@ -30,6 +30,7 @@ type PrismaDocumentsMock = {
   };
   knowledgeUnit: {
     findUnique: jest.Mock;
+    findMany: jest.Mock;
     create: jest.Mock;
     createMany: jest.Mock;
   };
@@ -67,6 +68,7 @@ describe('PrismaDocumentsRepository', () => {
       },
       knowledgeUnit: {
         findUnique: jest.fn(),
+        findMany: jest.fn(),
         create: jest.fn(),
         createMany: jest.fn(),
       },
@@ -699,6 +701,132 @@ describe('PrismaDocumentsRepository', () => {
         createdAt,
       },
     ]);
+  });
+
+  it('lists sourced knowledge units for a student document in stable order', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record({ status: 'READY' }));
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      {
+        id: 'unit-1',
+        title: 'Séparation des pouvoirs',
+        summary: 'Principe structurant les institutions.',
+        difficulty: 'MEDIUM',
+        displayOrder: 1,
+        confidence: 0.84,
+        sources: [
+          {
+            chunkId: 'chunk-2',
+            chunk: {
+              text: 'Second extrait.',
+              pageNumber: null,
+              index: 1,
+            },
+          },
+          {
+            chunkId: 'chunk-1',
+            chunk: {
+              text: 'Premier extrait.',
+              pageNumber: null,
+              index: 0,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const response = await repository.findKnowledgeUnitsByDocumentForStudent({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+      },
+    });
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        documentId: 'document-1',
+        subject: {
+          studentId: 'student-1',
+        },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+      include: {
+        sources: {
+          include: {
+            chunk: true,
+          },
+        },
+      },
+    });
+    expect(response).toEqual({
+      documentId: 'document-1',
+      documentStatus: 'READY',
+      items: [
+        {
+          id: 'unit-1',
+          title: 'Séparation des pouvoirs',
+          summary: 'Principe structurant les institutions.',
+          difficulty: 'MEDIUM',
+          displayOrder: 1,
+          confidence: 0.84,
+          sources: [
+            {
+              chunkId: 'chunk-1',
+              text: 'Premier extrait.',
+              pageNumber: null,
+              index: 0,
+            },
+            {
+              chunkId: 'chunk-2',
+              text: 'Second extrait.',
+              pageNumber: null,
+              index: 1,
+            },
+          ],
+        },
+      ],
+    });
+    expect(JSON.stringify(response)).not.toContain('storagePath');
+  });
+
+  it('returns null when listing knowledge units for another student document', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(null);
+
+    const response = await repository.findKnowledgeUnitsByDocumentForStudent({
+      studentId: 'student-2',
+      documentId: 'document-1',
+    });
+
+    expect(response).toBeNull();
+    expect(prisma.knowledgeUnit.findMany).not.toHaveBeenCalled();
+  });
+
+  it('does not return chunks that are not linked as sources', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record({ status: 'READY' }));
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      {
+        id: 'unit-1',
+        title: 'Constitution',
+        summary: 'Norme fondamentale.',
+        difficulty: null,
+        displayOrder: null,
+        confidence: null,
+        sources: [],
+      },
+    ]);
+
+    const response = await repository.findKnowledgeUnitsByDocumentForStudent({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+
+    expect(response?.items[0]?.sources).toEqual([]);
   });
 
   it('persists knowledge unit sources only for chunks in the same subject', async () => {
