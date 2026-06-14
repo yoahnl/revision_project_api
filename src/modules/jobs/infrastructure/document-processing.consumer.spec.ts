@@ -55,6 +55,12 @@ describe('DocumentProcessingConsumer', () => {
       {
         title: 'Cycle cardiaque',
         summary: 'Phases principales du cycle cardiaque.',
+        sourceChunkIds: ['chunk-1'],
+        difficulty: 'MEDIUM',
+        displayOrder: 1,
+        confidence: 0.75,
+        extractionPromptVersion: 'document-knowledge-v2',
+        extractionSchemaVersion: 'extracted-knowledge-v2',
       },
     ]);
 
@@ -84,8 +90,13 @@ describe('DocumentProcessingConsumer', () => {
     });
     expect(extractor.extract).toHaveBeenCalledWith({
       documentId: 'document-1',
-      fileName: 'cours.pdf',
-      text: 'Contenu PDF exploitable.',
+      chunks: [
+        {
+          id: 'chunk-1',
+          index: 0,
+          text: 'Contenu PDF exploitable.',
+        },
+      ],
     });
     expect(documentsRepository.replaceChunks).toHaveBeenCalledWith({
       documentId: 'document-1',
@@ -102,6 +113,9 @@ describe('DocumentProcessingConsumer', () => {
     expect(
       documentsRepository.replaceChunks.mock.invocationCallOrder[0],
     ).toBeLessThan(extractor.extract.mock.invocationCallOrder[0]);
+    expect(documentsRepository.findChunksByDocumentId).toHaveBeenCalledWith(
+      'document-1',
+    );
     expect(
       documentsRepository.markReadyWithKnowledgeUnits,
     ).toHaveBeenCalledWith({
@@ -110,6 +124,12 @@ describe('DocumentProcessingConsumer', () => {
         {
           title: 'Cycle cardiaque',
           summary: 'Phases principales du cycle cardiaque.',
+          sourceChunkIds: ['chunk-1'],
+          difficulty: 'MEDIUM',
+          displayOrder: 1,
+          confidence: 0.75,
+          extractionPromptVersion: 'document-knowledge-v2',
+          extractionSchemaVersion: 'extracted-knowledge-v2',
         },
       ],
     });
@@ -280,6 +300,84 @@ describe('DocumentProcessingConsumer', () => {
     ).not.toHaveBeenCalled();
   });
 
+  it('fails sourced extraction when a generated unit has no source', async () => {
+    const documentsRepository = createDocumentsRepository();
+    const extractor = createExtractor();
+    const contentReader = createContentReader();
+    const textExtractor = createTextExtractor();
+    const chunker = createChunker();
+    extractor.extract.mockResolvedValue([
+      {
+        title: 'Constitution',
+        summary: 'Norme fondamentale.',
+        sourceChunkIds: [],
+      },
+    ]);
+
+    const consumer = new DocumentProcessingConsumer(
+      documentsRepository.service,
+      extractor.service,
+      contentReader.service,
+      textExtractor.service,
+      chunker.service,
+    );
+
+    await expect(
+      consumer.process({
+        data: { documentId: 'document-1' },
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as Job<{ documentId: string }>),
+    ).rejects.toThrow('Document knowledge extraction returned unsourced units');
+
+    expect(documentsRepository.markFailed).toHaveBeenCalledWith({
+      documentId: 'document-1',
+      errorCode: 'KNOWLEDGE_SOURCE_INVALID',
+    });
+    expect(
+      documentsRepository.markReadyWithKnowledgeUnits,
+    ).not.toHaveBeenCalled();
+  });
+
+  it('fails sourced extraction when a generated source is not a persisted chunk', async () => {
+    const documentsRepository = createDocumentsRepository();
+    const extractor = createExtractor();
+    const contentReader = createContentReader();
+    const textExtractor = createTextExtractor();
+    const chunker = createChunker();
+    extractor.extract.mockResolvedValue([
+      {
+        title: 'Constitution',
+        summary: 'Norme fondamentale.',
+        sourceChunkIds: ['chunk-unknown'],
+      },
+    ]);
+
+    const consumer = new DocumentProcessingConsumer(
+      documentsRepository.service,
+      extractor.service,
+      contentReader.service,
+      textExtractor.service,
+      chunker.service,
+    );
+
+    await expect(
+      consumer.process({
+        data: { documentId: 'document-1' },
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as Job<{ documentId: string }>),
+    ).rejects.toThrow('Document knowledge extraction referenced unknown chunk');
+
+    expect(documentsRepository.markFailed).toHaveBeenCalledWith({
+      documentId: 'document-1',
+      errorCode: 'KNOWLEDGE_SOURCE_INVALID',
+    });
+    expect(
+      documentsRepository.markReadyWithKnowledgeUnits,
+    ).not.toHaveBeenCalled();
+  });
+
   it('fails empty chunks without calling Genkit on the final attempt', async () => {
     const documentsRepository = createDocumentsRepository();
     const extractor = createExtractor();
@@ -319,12 +417,26 @@ function createDocumentsRepository(): {
   markFailed: jest.Mock;
   findById: jest.Mock;
   replaceChunks: jest.Mock;
+  findChunksByDocumentId: jest.Mock;
 } {
   const markProcessing = jest.fn().mockResolvedValue(undefined);
   const markReadyWithKnowledgeUnits = jest.fn().mockResolvedValue(undefined);
   const markFailed = jest.fn().mockResolvedValue(undefined);
   const findById = jest.fn().mockResolvedValue(documentRecord());
   const replaceChunks = jest.fn().mockResolvedValue(undefined);
+  const findChunksByDocumentId = jest.fn().mockResolvedValue([
+    {
+      id: 'chunk-1',
+      documentId: 'document-1',
+      subjectId: 'subject-1',
+      index: 0,
+      text: 'Contenu PDF exploitable.',
+      charStart: 0,
+      charEnd: 23,
+      pageNumber: null,
+      createdAt: new Date('2026-06-14T12:00:00.000Z'),
+    },
+  ]);
 
   return {
     service: {
@@ -336,7 +448,7 @@ function createDocumentsRepository(): {
       markReadyWithKnowledgeUnits,
       markFailed,
       replaceChunks,
-      findChunksByDocumentId: jest.fn(),
+      findChunksByDocumentId,
       replaceKnowledgeUnitSources: jest.fn(),
     },
     markProcessing,
@@ -344,6 +456,7 @@ function createDocumentsRepository(): {
     markFailed,
     findById,
     replaceChunks,
+    findChunksByDocumentId,
   };
 }
 

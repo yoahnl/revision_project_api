@@ -6,8 +6,10 @@ export const ExtractedKnowledgeUnitSchema = z
   .object({
     title: z.string(),
     summary: z.string(),
-    sourceExcerpt: z.string().optional(),
+    sourceChunkIds: z.array(z.string().min(1)).min(1),
     difficulty: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
+    displayOrder: z.number().int().min(0).optional(),
+    confidence: z.number().min(0).max(1).optional(),
   })
   .strict();
 

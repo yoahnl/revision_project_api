@@ -187,30 +187,59 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       }
 
       if (input.units.length > 0) {
-        await tx.knowledgeUnit.createMany({
-          data: input.units.map((unit) => {
-            const knowledgeUnit = new KnowledgeUnit({
-              id: 'validation-knowledge-unit',
+        const allSourceChunkIds = [
+          ...new Set(input.units.flatMap((unit) => unit.sourceChunkIds ?? [])),
+        ];
+
+        if (allSourceChunkIds.length === 0) {
+          await tx.knowledgeUnit.createMany({
+            data: input.units.map((unit) =>
+              this.toKnowledgeUnitCreateData({
+                documentId: input.documentId,
+                subjectId: document.subjectId,
+                unit,
+              }),
+            ),
+          });
+        } else {
+          const chunks = await tx.documentChunk.findMany({
+            where: {
+              id: { in: allSourceChunkIds },
               subjectId: document.subjectId,
-              title: unit.title,
-              summary: unit.summary,
+              documentId: input.documentId,
+            },
+            select: { id: true },
+          });
+          const existingChunkIds = new Set(chunks.map((chunk) => chunk.id));
+
+          if (
+            allSourceChunkIds.some((chunkId) => !existingChunkIds.has(chunkId))
+          ) {
+            throw new Error('Knowledge unit source chunk not found');
+          }
+
+          for (const unit of input.units) {
+            const sourceChunkIds = [...new Set(unit.sourceChunkIds ?? [])];
+            const createdKnowledgeUnit = await tx.knowledgeUnit.create({
+              data: this.toKnowledgeUnitCreateData({
+                documentId: input.documentId,
+                subjectId: document.subjectId,
+                unit,
+              }),
             });
 
-            return {
-              documentId: input.documentId,
-              subjectId: knowledgeUnit.subjectId,
-              title: knowledgeUnit.title,
-              summary: knowledgeUnit.summary,
-              difficulty: unit.difficulty ?? undefined,
-              displayOrder: unit.displayOrder ?? undefined,
-              confidence: unit.confidence ?? undefined,
-              extractionPromptVersion:
-                unit.extractionPromptVersion ?? undefined,
-              extractionSchemaVersion:
-                unit.extractionSchemaVersion ?? undefined,
-            };
-          }),
-        });
+            if (sourceChunkIds.length > 0) {
+              await tx.knowledgeUnitSource.createMany({
+                data: sourceChunkIds.map((chunkId) => ({
+                  knowledgeUnitId: createdKnowledgeUnit.id,
+                  subjectId: document.subjectId,
+                  chunkId,
+                  relevanceScore: null,
+                })),
+              });
+            }
+          }
+        }
       }
 
       const result = await tx.document.updateMany({
@@ -430,6 +459,31 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       charEnd: record.charEnd,
       pageNumber: record.pageNumber,
       createdAt: record.createdAt,
+    };
+  }
+
+  private toKnowledgeUnitCreateData(input: {
+    documentId: string;
+    subjectId: string;
+    unit: KnowledgeUnitPersistenceInput;
+  }) {
+    const knowledgeUnit = new KnowledgeUnit({
+      id: 'validation-knowledge-unit',
+      subjectId: input.subjectId,
+      title: input.unit.title,
+      summary: input.unit.summary,
+    });
+
+    return {
+      documentId: input.documentId,
+      subjectId: knowledgeUnit.subjectId,
+      title: knowledgeUnit.title,
+      summary: knowledgeUnit.summary,
+      difficulty: input.unit.difficulty ?? undefined,
+      displayOrder: input.unit.displayOrder ?? undefined,
+      confidence: input.unit.confidence ?? undefined,
+      extractionPromptVersion: input.unit.extractionPromptVersion ?? undefined,
+      extractionSchemaVersion: input.unit.extractionSchemaVersion ?? undefined,
     };
   }
 }

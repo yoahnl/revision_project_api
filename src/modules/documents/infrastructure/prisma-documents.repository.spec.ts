@@ -30,6 +30,7 @@ type PrismaDocumentsMock = {
   };
   knowledgeUnit: {
     findUnique: jest.Mock;
+    create: jest.Mock;
     createMany: jest.Mock;
   };
   documentChunk: {
@@ -66,6 +67,7 @@ describe('PrismaDocumentsRepository', () => {
       },
       knowledgeUnit: {
         findUnique: jest.fn(),
+        create: jest.fn(),
         createMany: jest.fn(),
       },
       documentChunk: {
@@ -374,6 +376,103 @@ describe('PrismaDocumentsRepository', () => {
         },
       ],
     });
+  });
+
+  it('creates knowledge unit sources when marking sourced units ready', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.documentChunk.findMany.mockResolvedValue([
+      { id: 'chunk-1' },
+      { id: 'chunk-2' },
+    ]);
+    prisma.knowledgeUnit.create.mockResolvedValue({
+      id: 'knowledge-unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markReadyWithKnowledgeUnits({
+      documentId: 'document-1',
+      units: [
+        {
+          title: 'Séparation des pouvoirs',
+          summary: 'Principe structurant les institutions.',
+          sourceChunkIds: ['chunk-2', 'chunk-1', 'chunk-2'],
+          difficulty: 'MEDIUM',
+          displayOrder: 2,
+          confidence: 0.84,
+          extractionPromptVersion: 'document-knowledge-v2',
+          extractionSchemaVersion: 'extracted-knowledge-v2',
+        },
+      ],
+    });
+
+    expect(prisma.documentChunk.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['chunk-2', 'chunk-1'] },
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+      },
+      select: { id: true },
+    });
+    expect(prisma.knowledgeUnit.create).toHaveBeenCalledWith({
+      data: {
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        title: 'Séparation des pouvoirs',
+        summary: 'Principe structurant les institutions.',
+        difficulty: 'MEDIUM',
+        displayOrder: 2,
+        confidence: 0.84,
+        extractionPromptVersion: 'document-knowledge-v2',
+        extractionSchemaVersion: 'extracted-knowledge-v2',
+      },
+    });
+    expect(prisma.knowledgeUnitSource.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          knowledgeUnitId: 'knowledge-unit-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-2',
+          relevanceScore: null,
+        },
+        {
+          knowledgeUnitId: 'knowledge-unit-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-1',
+          relevanceScore: null,
+        },
+      ],
+    });
+    expect(prisma.knowledgeUnit.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects sourced ready transitions when a source chunk belongs to another document', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.documentChunk.findMany.mockResolvedValue([{ id: 'chunk-1' }]);
+
+    await expect(
+      repository.markReadyWithKnowledgeUnits({
+        documentId: 'document-1',
+        units: [
+          {
+            title: 'Constitution',
+            summary: 'Norme fondamentale.',
+            sourceChunkIds: ['chunk-1', 'chunk-other-document'],
+          },
+        ],
+      }),
+    ).rejects.toThrow('Knowledge unit source chunk not found');
+
+    expect(prisma.knowledgeUnit.create).not.toHaveBeenCalled();
+    expect(prisma.knowledgeUnitSource.createMany).not.toHaveBeenCalled();
+    expect(prisma.document.updateMany).not.toHaveBeenCalled();
   });
 
   it('does not duplicate knowledge units when a document is already ready', async () => {

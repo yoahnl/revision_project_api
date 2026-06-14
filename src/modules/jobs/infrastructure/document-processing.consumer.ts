@@ -94,15 +94,30 @@ export class DocumentProcessingConsumer extends WorkerHost {
         chunks,
       });
 
+      const persistedChunks =
+        await this.documentsRepository.findChunksByDocumentId(documentId);
+
+      if (persistedChunks.length === 0) {
+        throw new EmptyDocumentChunksError();
+      }
+
       units = await this.extractor.extract({
         documentId,
-        fileName: document.fileName,
-        text,
+        chunks: persistedChunks.map((chunk) => ({
+          id: chunk.id,
+          index: chunk.index,
+          text: chunk.text,
+        })),
       });
 
       if (units.length === 0) {
         throw new EmptyExtractedKnowledgeUnitsError();
       }
+
+      validateExtractedKnowledgeUnitSources(
+        units,
+        persistedChunks.map((chunk) => chunk.id),
+      );
     } catch (error) {
       if (isFinalAttempt(job) && !(error instanceof DocumentNotFoundError)) {
         await this.documentsRepository.markFailed({
@@ -157,6 +172,18 @@ class EmptyExtractedKnowledgeUnitsError extends Error {
   }
 }
 
+class UnsourcedExtractedKnowledgeUnitsError extends Error {
+  constructor() {
+    super('Document knowledge extraction returned unsourced units');
+  }
+}
+
+class UnknownExtractedKnowledgeSourceError extends Error {
+  constructor() {
+    super('Document knowledge extraction referenced unknown chunk');
+  }
+}
+
 function isFirstAttempt(job: Job<{ documentId: string }>): boolean {
   return (job.attemptsMade ?? 0) === 0;
 }
@@ -192,5 +219,29 @@ function getExtractionErrorCode(error: unknown): string {
     return 'KNOWLEDGE_EXTRACTION_EMPTY';
   }
 
+  if (
+    error instanceof UnsourcedExtractedKnowledgeUnitsError ||
+    error instanceof UnknownExtractedKnowledgeSourceError
+  ) {
+    return 'KNOWLEDGE_SOURCE_INVALID';
+  }
+
   return 'KNOWLEDGE_EXTRACTION_FAILED';
+}
+
+function validateExtractedKnowledgeUnitSources(
+  units: Awaited<ReturnType<DocumentKnowledgeExtractor['extract']>>,
+  chunkIds: string[],
+): void {
+  const knownChunkIds = new Set(chunkIds);
+
+  for (const unit of units) {
+    if (unit.sourceChunkIds.length === 0) {
+      throw new UnsourcedExtractedKnowledgeUnitsError();
+    }
+
+    if (unit.sourceChunkIds.some((chunkId) => !knownChunkIds.has(chunkId))) {
+      throw new UnknownExtractedKnowledgeSourceError();
+    }
+  }
 }

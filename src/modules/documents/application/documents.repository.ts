@@ -25,6 +25,7 @@ export interface KnowledgeUnitPersistenceInput {
   confidence?: number | null;
   extractionPromptVersion?: string | null;
   extractionSchemaVersion?: string | null;
+  sourceChunkIds?: string[] | null;
 }
 
 export interface DocumentChunkPersistenceInput {

@@ -7,7 +7,14 @@ type GenerateInput = {
 
 type GenerateResult = {
   output?: {
-    units: Array<{ title: string; summary: string }>;
+    units: Array<{
+      title: string;
+      summary: string;
+      sourceChunkIds?: string[];
+      difficulty?: 'LOW' | 'MEDIUM' | 'HIGH';
+      displayOrder?: number;
+      confidence?: number;
+    }>;
   };
 };
 
@@ -77,6 +84,10 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
           {
             title: 'Cycle cardiaque',
             summary: 'Phases principales du cycle cardiaque.',
+            sourceChunkIds: ['chunk-1'],
+            difficulty: 'MEDIUM',
+            displayOrder: 1,
+            confidence: 0.8,
           },
         ],
       },
@@ -84,8 +95,7 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
 
     const units = await new GenkitMistralDocumentKnowledgeExtractor().extract({
       documentId: 'document-1',
-      fileName: 'cours.pdf',
-      text: 'Contenu du document.',
+      chunks: [{ id: 'chunk-1', index: 0, text: 'Contenu du document.' }],
     });
 
     expect(mockOpenAICompatible).toHaveBeenCalledWith({
@@ -102,6 +112,12 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
       {
         title: 'Cycle cardiaque',
         summary: 'Phases principales du cycle cardiaque.',
+        sourceChunkIds: ['chunk-1'],
+        difficulty: 'MEDIUM',
+        displayOrder: 1,
+        confidence: 0.8,
+        extractionPromptVersion: 'document-knowledge-v2',
+        extractionSchemaVersion: 'extracted-knowledge-v2',
       },
     ]);
   });
@@ -115,8 +131,7 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
 
     await new GenkitMistralDocumentKnowledgeExtractor().extract({
       documentId: 'document-1',
-      fileName: 'cours.pdf',
-      text: 'Contenu du document.',
+      chunks: [{ id: 'chunk-1', index: 0, text: 'Contenu du document.' }],
     });
 
     expect(mockGenkit).toHaveBeenCalledWith(
@@ -132,8 +147,7 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
     await expect(
       new GenkitMistralDocumentKnowledgeExtractor().extract({
         documentId: 'document-1',
-        fileName: 'cours.pdf',
-        text: 'Contenu du document.',
+        chunks: [{ id: 'chunk-1', index: 0, text: 'Contenu du document.' }],
       }),
     ).rejects.toThrow('MISTRAL_API_KEY is required');
     expect(mockOpenAICompatible).not.toHaveBeenCalled();
@@ -152,6 +166,7 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
           {
             title: 'SENTINEL_OUTPUT_TITLE',
             summary: 'SENTINEL_OUTPUT_SUMMARY',
+            sourceChunkIds: ['chunk-1'],
           },
         ],
       },
@@ -160,29 +175,109 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
 
     await new GenkitMistralDocumentKnowledgeExtractor(observer).extract({
       documentId: 'document-1',
-      fileName: 'secret-file-name.pdf',
-      text: 'SENTINEL_FULL_DOCUMENT_TEXT',
+      chunks: [
+        {
+          id: 'chunk-1',
+          index: 0,
+          text: 'SENTINEL_FULL_CHUNK_TEXT',
+        },
+      ],
     });
 
     const observation = getObservedObservation(observer);
     expect(observation.durationMs).toEqual(expect.any(Number));
+    expect(observation.inputSize).toEqual(expect.any(Number));
     expect(observation).toEqual({
       flowName: 'documentKnowledgeExtraction',
       provider: 'mistral',
       model: 'mistral/mistral-small-latest',
-      promptVersion: 'document-knowledge-v1',
-      schemaVersion: 'extracted-knowledge-v1',
-      inputSize: 'SENTINEL_FULL_DOCUMENT_TEXT'.length,
+      promptVersion: 'document-knowledge-v2',
+      schemaVersion: 'extracted-knowledge-v2',
+      inputSize: observation.inputSize,
       durationMs: observation.durationMs,
       status: 'success',
       documentId: 'document-1',
     });
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
-    expect(observedPayload).not.toContain('SENTINEL_FULL_DOCUMENT_TEXT');
-    expect(observedPayload).not.toContain('secret-file-name.pdf');
+    expect(observedPayload).not.toContain('SENTINEL_FULL_CHUNK_TEXT');
     expect(observedPayload).not.toContain('secret-test-key');
     expect(observedPayload).not.toContain('SENTINEL_OUTPUT_TITLE');
     expect(observedPayload).not.toContain('SENTINEL_OUTPUT_SUMMARY');
+  });
+
+  it('rejects generated sources that do not match provided chunks', async () => {
+    process.env.MISTRAL_API_KEY = 'secret-test-key';
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate.mockResolvedValue({
+      output: {
+        units: [
+          {
+            title: 'Constitution',
+            summary: 'Norme fondamentale.',
+            sourceChunkIds: ['chunk-unknown'],
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitMistralDocumentKnowledgeExtractor().extract({
+        documentId: 'document-1',
+        chunks: [{ id: 'chunk-1', index: 0, text: 'Texte source.' }],
+      }),
+    ).rejects.toThrow('Generated knowledge references unknown chunk');
+  });
+
+  it('rejects generated units without source chunk ids', async () => {
+    process.env.MISTRAL_API_KEY = 'secret-test-key';
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate.mockResolvedValue({
+      output: {
+        units: [
+          {
+            title: 'Constitution',
+            summary: 'Norme fondamentale.',
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitMistralDocumentKnowledgeExtractor().extract({
+        documentId: 'document-1',
+        chunks: [{ id: 'chunk-1', index: 0, text: 'Texte source.' }],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('rejects generated confidence outside allowed bounds', async () => {
+    process.env.MISTRAL_API_KEY = 'secret-test-key';
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate.mockResolvedValue({
+      output: {
+        units: [
+          {
+            title: 'Constitution',
+            summary: 'Norme fondamentale.',
+            sourceChunkIds: ['chunk-1'],
+            confidence: -0.1,
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitMistralDocumentKnowledgeExtractor().extract({
+        documentId: 'document-1',
+        chunks: [{ id: 'chunk-1', index: 0, text: 'Texte source.' }],
+      }),
+    ).rejects.toThrow();
   });
 
   it('observes Mistral extraction errors without logging provider messages', async () => {
@@ -199,8 +294,13 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
     await expect(
       new GenkitMistralDocumentKnowledgeExtractor(observer).extract({
         documentId: 'document-1',
-        fileName: 'secret-file-name.pdf',
-        text: 'SENTINEL_FULL_DOCUMENT_TEXT',
+        chunks: [
+          {
+            id: 'chunk-1',
+            index: 0,
+            text: 'SENTINEL_FULL_CHUNK_TEXT',
+          },
+        ],
       }),
     ).rejects.toThrow('SENTINEL_PROVIDER_ERROR_WITH_COURSE_TEXT');
 
@@ -210,17 +310,16 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
       flowName: 'documentKnowledgeExtraction',
       provider: 'mistral',
       model: 'mistral/mistral-small-latest',
-      promptVersion: 'document-knowledge-v1',
-      schemaVersion: 'extracted-knowledge-v1',
-      inputSize: 'SENTINEL_FULL_DOCUMENT_TEXT'.length,
+      promptVersion: 'document-knowledge-v2',
+      schemaVersion: 'extracted-knowledge-v2',
+      inputSize: observation.inputSize,
       durationMs: observation.durationMs,
       status: 'error',
       errorCode: 'GENKIT_GENERATION_FAILED',
       documentId: 'document-1',
     });
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
-    expect(observedPayload).not.toContain('SENTINEL_FULL_DOCUMENT_TEXT');
-    expect(observedPayload).not.toContain('secret-file-name.pdf');
+    expect(observedPayload).not.toContain('SENTINEL_FULL_CHUNK_TEXT');
     expect(observedPayload).not.toContain('secret-test-key');
     expect(observedPayload).not.toContain(
       'SENTINEL_PROVIDER_ERROR_WITH_COURSE_TEXT',
