@@ -12,6 +12,11 @@ import {
 import { MasteryState } from '../../revision/domain/mastery-state.entity';
 import {
   OPEN_ANSWER_EVALUATOR,
+  OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT,
+  OPEN_ANSWER_EVALUATION_FAILED,
+  OPEN_ANSWER_EVALUATION_INVALID,
+  OPEN_ANSWER_EVALUATION_SOURCE_INVALID,
+  type GeneratedOpenAnswerEvaluation,
   type OpenAnswerEvaluator,
 } from './open-answer-evaluator';
 import {
@@ -56,8 +61,10 @@ export class SubmitOpenAnswerUseCase {
         sessionId: input.sessionId,
       });
 
+    let evaluation: GeneratedOpenAnswerEvaluation;
+
     try {
-      const evaluation = await this.openAnswerEvaluator.evaluate({
+      evaluation = await this.openAnswerEvaluator.evaluate({
         studentId: input.studentId,
         subjectId: context.subjectId,
         documentId: context.documentId,
@@ -67,20 +74,6 @@ export class SubmitOpenAnswerUseCase {
         answerText,
         chunks: context.chunks,
       });
-      const result = await this.activitiesRepository.saveOpenAnswerEvaluation({
-        studentId: input.studentId,
-        sessionId: input.sessionId,
-        answerText,
-        evaluation,
-      });
-      await this.updateMastery({
-        studentId: input.studentId,
-        knowledgeUnitId: context.knowledgeUnit.id,
-        score: evaluation.score,
-        maxScore: evaluation.maxScore,
-      });
-
-      return result;
     } catch (error) {
       return this.activitiesRepository.saveOpenAnswerEvaluation({
         studentId: input.studentId,
@@ -92,6 +85,22 @@ export class SubmitOpenAnswerUseCase {
         },
       });
     }
+
+    const result = await this.activitiesRepository.saveOpenAnswerEvaluation({
+      studentId: input.studentId,
+      sessionId: input.sessionId,
+      answerText,
+      evaluation,
+    });
+
+    await this.updateMastery({
+      studentId: input.studentId,
+      knowledgeUnitId: context.knowledgeUnit.id,
+      score: evaluation.score,
+      maxScore: evaluation.maxScore,
+    });
+
+    return result;
   }
 
   private async updateMastery(input: {
@@ -128,9 +137,19 @@ export class SubmitOpenAnswerUseCase {
 }
 
 function resolveOpenAnswerEvaluationErrorCode(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
+  if (
+    error instanceof Error &&
+    OPEN_ANSWER_EVALUATION_ERROR_CODES.has(error.message)
+  ) {
     return error.message;
   }
 
-  return 'OPEN_ANSWER_EVALUATION_FAILED';
+  return OPEN_ANSWER_EVALUATION_FAILED;
 }
+
+const OPEN_ANSWER_EVALUATION_ERROR_CODES = new Set<string>([
+  OPEN_ANSWER_EVALUATION_SOURCE_INVALID,
+  OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT,
+  OPEN_ANSWER_EVALUATION_INVALID,
+  OPEN_ANSWER_EVALUATION_FAILED,
+]);

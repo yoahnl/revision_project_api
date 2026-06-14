@@ -130,6 +130,132 @@ describe('SubmitOpenAnswerUseCase', () => {
     expect(result).toEqual(failedEvaluationResult());
   });
 
+  it('normalizes unknown evaluator errors before persisting FAILED evaluation', async () => {
+    const activitiesRepository = createActivitiesRepository();
+    const openAnswerEvaluator = createOpenAnswerEvaluator();
+    const revisionRepository = createRevisionRepository();
+    activitiesRepository.findOpenAnswerEvaluationContext.mockResolvedValue(
+      evaluationContext(),
+    );
+    openAnswerEvaluator.evaluate.mockRejectedValue(
+      new Error('Provider raw error with sensitive internals'),
+    );
+    activitiesRepository.saveOpenAnswerEvaluation.mockResolvedValue(
+      failedEvaluationResult({
+        errors: ['OPEN_ANSWER_EVALUATION_FAILED'],
+      }),
+    );
+
+    await new SubmitOpenAnswerUseCase(
+      activitiesRepository,
+      openAnswerEvaluator,
+      revisionRepository,
+    ).execute({
+      studentId: 'student-1',
+      sessionId: 'session-1',
+      answerText:
+        'La séparation des pouvoirs organise les fonctions de l’État pour éviter leur concentration.',
+    });
+
+    expect(activitiesRepository.saveOpenAnswerEvaluation.mock.calls).toEqual([
+      [
+        {
+          studentId: 'student-1',
+          sessionId: 'session-1',
+          answerText:
+            'La séparation des pouvoirs organise les fonctions de l’État pour éviter leur concentration.',
+          evaluation: {
+            status: 'FAILED',
+            errorCode: 'OPEN_ANSWER_EVALUATION_FAILED',
+          },
+        },
+      ],
+    ]);
+    expect(
+      JSON.stringify(activitiesRepository.saveOpenAnswerEvaluation.mock.calls),
+    ).not.toContain('Provider raw error');
+  });
+
+  it('propagates READY persistence errors without creating a FAILED evaluation', async () => {
+    const activitiesRepository = createActivitiesRepository();
+    const openAnswerEvaluator = createOpenAnswerEvaluator();
+    const revisionRepository = createRevisionRepository();
+    activitiesRepository.findOpenAnswerEvaluationContext.mockResolvedValue(
+      evaluationContext(),
+    );
+    openAnswerEvaluator.evaluate.mockResolvedValue(readyEvaluation());
+    activitiesRepository.saveOpenAnswerEvaluation.mockRejectedValueOnce(
+      new Error('Database unavailable'),
+    );
+
+    await expect(
+      new SubmitOpenAnswerUseCase(
+        activitiesRepository,
+        openAnswerEvaluator,
+        revisionRepository,
+      ).execute({
+        studentId: 'student-1',
+        sessionId: 'session-1',
+        answerText:
+          'La séparation des pouvoirs organise les fonctions de l’État pour éviter leur concentration.',
+      }),
+    ).rejects.toThrow('Database unavailable');
+
+    expect(activitiesRepository.saveOpenAnswerEvaluation.mock.calls).toEqual([
+      [
+        {
+          studentId: 'student-1',
+          sessionId: 'session-1',
+          answerText:
+            'La séparation des pouvoirs organise les fonctions de l’État pour éviter leur concentration.',
+          evaluation: readyEvaluation(),
+        },
+      ],
+    ]);
+    expect(revisionRepository.upsertMastery.mock.calls).toHaveLength(0);
+  });
+
+  it('propagates mastery update errors after READY persistence without creating FAILED evaluation', async () => {
+    const activitiesRepository = createActivitiesRepository();
+    const openAnswerEvaluator = createOpenAnswerEvaluator();
+    const revisionRepository = createRevisionRepository();
+    activitiesRepository.findOpenAnswerEvaluationContext.mockResolvedValue(
+      evaluationContext(),
+    );
+    openAnswerEvaluator.evaluate.mockResolvedValue(readyEvaluation());
+    activitiesRepository.saveOpenAnswerEvaluation.mockResolvedValue(
+      readyEvaluationResult(),
+    );
+    revisionRepository.upsertMastery.mockRejectedValue(
+      new Error('Mastery unavailable'),
+    );
+
+    await expect(
+      new SubmitOpenAnswerUseCase(
+        activitiesRepository,
+        openAnswerEvaluator,
+        revisionRepository,
+      ).execute({
+        studentId: 'student-1',
+        sessionId: 'session-1',
+        answerText:
+          'La séparation des pouvoirs organise les fonctions de l’État pour éviter leur concentration.',
+      }),
+    ).rejects.toThrow('Mastery unavailable');
+
+    expect(activitiesRepository.saveOpenAnswerEvaluation.mock.calls).toEqual([
+      [
+        {
+          studentId: 'student-1',
+          sessionId: 'session-1',
+          answerText:
+            'La séparation des pouvoirs organise les fonctions de l’État pour éviter leur concentration.',
+          evaluation: readyEvaluation(),
+        },
+      ],
+    ]);
+  });
+
   it.each([
     ['empty', ''],
     ['blank', '     '],
@@ -283,7 +409,21 @@ function readyEvaluationResult() {
   };
 }
 
-function failedEvaluationResult() {
+function failedEvaluationResult(
+  input: Partial<ReturnType<typeof baseFailedEvaluation>['evaluation']> = {},
+) {
+  const evaluation = {
+    ...baseFailedEvaluation().evaluation,
+    ...input,
+  };
+
+  return {
+    ...baseFailedEvaluation(),
+    evaluation,
+  };
+}
+
+function baseFailedEvaluation() {
   return {
     sessionId: 'session-1',
     type: 'open_question',

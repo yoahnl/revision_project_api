@@ -36,6 +36,13 @@ export interface GeneratedOpenAnswerEvaluation {
   metadata?: OpenQuestionGenerationMetadata;
 }
 
+export const OPEN_ANSWER_EVALUATION_SOURCE_INVALID =
+  'OPEN_ANSWER_EVALUATION_SOURCE_INVALID';
+export const OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT =
+  'OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT';
+export const OPEN_ANSWER_EVALUATION_INVALID = 'OPEN_ANSWER_EVALUATION_INVALID';
+export const OPEN_ANSWER_EVALUATION_FAILED = 'OPEN_ANSWER_EVALUATION_FAILED';
+
 export const OPEN_ANSWER_EVALUATOR = Symbol('OPEN_ANSWER_EVALUATOR');
 
 export interface OpenAnswerEvaluator {

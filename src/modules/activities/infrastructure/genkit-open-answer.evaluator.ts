@@ -12,6 +12,9 @@ import {
 } from '../../ai/infrastructure/document-artifact-genkit-config';
 import type { DiagnosticQuizGenerationChunk } from '../application/diagnostic-quiz-generator';
 import {
+  OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT,
+  OPEN_ANSWER_EVALUATION_INVALID,
+  OPEN_ANSWER_EVALUATION_SOURCE_INVALID,
   type GeneratedOpenAnswerEvaluation,
   type OpenAnswerEvaluationInput,
   type OpenAnswerEvaluator,
@@ -20,8 +23,6 @@ import {
 const FLOW_NAME = 'openAnswerEvaluation';
 const PROMPT_VERSION = 'open-answer-evaluation-v1';
 const SCHEMA_VERSION = 'open-answer-evaluation-v1';
-const SOURCE_INVALID_ERROR_CODE = 'OPEN_ANSWER_EVALUATION_SOURCE_INVALID';
-const EMPTY_OUTPUT_ERROR_CODE = 'OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT';
 const DEFAULT_MAX_CHUNKS = 10;
 const DEFAULT_MAX_CHARS = 10000;
 const MAX_EVALUATION_SCORE = 20;
@@ -82,14 +83,14 @@ export class GenkitOpenAnswerEvaluator implements OpenAnswerEvaluator {
       });
 
       if (!output) {
-        throw new Error(EMPTY_OUTPUT_ERROR_CODE);
+        throw new Error(OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT);
       }
 
       const parsed = GeneratedOpenAnswerEvaluationSchema.parse(output);
       const sourceChunkIds = normalizeSourceChunkIds(
         parsed.sourceChunkIds,
         chunks,
-        SOURCE_INVALID_ERROR_CODE,
+        OPEN_ANSWER_EVALUATION_SOURCE_INVALID,
       );
       const evaluation: GeneratedOpenAnswerEvaluation = {
         status: 'READY',
@@ -298,13 +299,19 @@ function resolvePositiveInteger(value: string | undefined, fallback: number) {
 }
 
 function resolveOpenAnswerEvaluationErrorCode(error: unknown): string {
-  if (error instanceof Error && error.message === SOURCE_INVALID_ERROR_CODE) {
-    return SOURCE_INVALID_ERROR_CODE;
+  if (
+    error instanceof Error &&
+    error.message === OPEN_ANSWER_EVALUATION_SOURCE_INVALID
+  ) {
+    return OPEN_ANSWER_EVALUATION_SOURCE_INVALID;
   }
 
-  if (error instanceof Error && error.message === EMPTY_OUTPUT_ERROR_CODE) {
-    return EMPTY_OUTPUT_ERROR_CODE;
+  if (
+    error instanceof Error &&
+    error.message === OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT
+  ) {
+    return OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT;
   }
 
-  return 'OPEN_ANSWER_EVALUATION_INVALID';
+  return OPEN_ANSWER_EVALUATION_INVALID;
 }
