@@ -16,7 +16,9 @@ import {
   resolveDiagnosticQuizMaxQuestionCount,
   resolveDiagnosticQuizQuestionCount,
 } from '../application/diagnostic-quiz-question-count';
+import { StartOpenQuestionActivityUseCase } from '../application/start-open-question-activity.use-case';
 import { StartNextActivityUseCase } from '../application/start-next-activity.use-case';
+import { SubmitOpenAnswerUseCase } from '../application/submit-open-answer.use-case';
 import { SubmitActivityResultUseCase } from '../application/submit-activity-result.use-case';
 import type {
   DiagnosticQuizSelectionMode,
@@ -40,6 +42,15 @@ class SubmitActivityDto {
   }>;
 }
 
+class StartOpenQuestionDto {
+  subjectId!: string;
+  knowledgeUnitId!: string;
+}
+
+class SubmitOpenAnswerDto {
+  answerText!: string;
+}
+
 interface ValidatedActivityAnswer {
   questionId: string;
   choiceId?: string;
@@ -60,7 +71,9 @@ interface ValidatedStartActivityBody {
 export class ActivitiesController {
   constructor(
     private readonly startNextActivity: StartNextActivityUseCase,
+    private readonly startOpenQuestionActivity: StartOpenQuestionActivityUseCase,
     private readonly submitActivityResult: SubmitActivityResultUseCase,
+    private readonly submitOpenAnswer: SubmitOpenAnswerUseCase,
   ) {}
 
   @Post('next')
@@ -85,6 +98,24 @@ export class ActivitiesController {
       });
   }
 
+  @Post('open-question')
+  startOpenQuestion(
+    @CurrentStudent() student: { id: string },
+    @Body() body: StartOpenQuestionDto,
+  ) {
+    const validatedBody = validateStartOpenQuestionBody(body);
+
+    return this.startOpenQuestionActivity
+      .execute({
+        studentId: student.id,
+        subjectId: validatedBody.subjectId,
+        knowledgeUnitId: validatedBody.knowledgeUnitId,
+      })
+      .catch((error: unknown) => {
+        normalizeActivityError(error);
+      });
+  }
+
   @Post(':sessionId/result')
   submit(
     @CurrentStudent() student: { id: string },
@@ -102,6 +133,29 @@ export class ActivitiesController {
         studentId: student.id,
         sessionId: validatedSessionId,
         answers: validatedBody.answers,
+      })
+      .catch((error: unknown) => {
+        normalizeActivityError(error);
+      });
+  }
+
+  @Post(':sessionId/open-answer')
+  submitOpenQuestionAnswer(
+    @CurrentStudent() student: { id: string },
+    @Param('sessionId') sessionId: string,
+    @Body() body: SubmitOpenAnswerDto,
+  ) {
+    const validatedSessionId = validateRequiredId(
+      sessionId,
+      'Activity session id',
+    );
+    const validatedBody = validateSubmitOpenAnswerBody(body);
+
+    return this.submitOpenAnswer
+      .execute({
+        studentId: student.id,
+        sessionId: validatedSessionId,
+        answerText: validatedBody.answerText,
       })
       .catch((error: unknown) => {
         normalizeActivityError(error);
@@ -167,6 +221,35 @@ function validateSubmitActivityBody(input: SubmitActivityDto): {
   });
 
   return { answers };
+}
+
+function validateStartOpenQuestionBody(input: StartOpenQuestionDto): {
+  subjectId: string;
+  knowledgeUnitId: string;
+} {
+  return {
+    subjectId: validateRequiredId(input?.subjectId, 'Subject id'),
+    knowledgeUnitId: validateRequiredId(
+      input?.knowledgeUnitId,
+      'Knowledge unit id',
+    ),
+  };
+}
+
+function validateSubmitOpenAnswerBody(input: SubmitOpenAnswerDto): {
+  answerText: string;
+} {
+  if (typeof input?.answerText !== 'string') {
+    throw new BadRequestException('Open answer text is required');
+  }
+
+  const answerText = input.answerText.trim();
+
+  if (answerText.length === 0) {
+    throw new BadRequestException('Open answer text is required');
+  }
+
+  return { answerText };
 }
 
 function validateOptionalBoolean(input: unknown, label: string) {
@@ -308,9 +391,16 @@ function normalizeActivityError(error: unknown): never {
       throw new ConflictException(error.message);
     }
 
+    if (error.message === 'Activity session already submitted') {
+      throw new ConflictException(error.message);
+    }
+
     if (
       error.message === 'Knowledge unit does not belong to student subject' ||
       error.message === 'No knowledge unit available for subject' ||
+      error.message === 'Activity session is not an open question' ||
+      error.message === 'Open answer is too short' ||
+      error.message === 'Open answer is too long' ||
       error.message === 'Duplicate answers are not allowed' ||
       error.message === 'Missing answers are not allowed' ||
       error.message === 'Question does not belong to activity session' ||
@@ -324,7 +414,8 @@ function normalizeActivityError(error: unknown): never {
     if (
       error.message === 'Generated diagnostic quiz is invalid' ||
       error.message === 'Question source chunk not found' ||
-      error.message === 'Question visual source chunk not found'
+      error.message === 'Question visual source chunk not found' ||
+      error.message === 'Open question source chunk not found'
     ) {
       throw new UnprocessableEntityException(error.message);
     }

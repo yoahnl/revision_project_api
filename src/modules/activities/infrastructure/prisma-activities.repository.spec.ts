@@ -13,7 +13,7 @@ type ActivitySessionRecord = {
   generationPromptVersion: string | null;
   generationSchemaVersion: string | null;
   generationInputSize: number | null;
-  status: 'STARTED' | 'COMPLETED';
+  status: 'STARTED' | 'SUBMITTED' | 'COMPLETED';
   completedAt: Date | null;
 };
 
@@ -111,9 +111,86 @@ type ActivitySessionUpdatePayload = {
     id: string;
   };
   data: {
-    status: 'COMPLETED';
-    completedAt: Date;
+    status: 'SUBMITTED' | 'COMPLETED';
+    completedAt?: Date;
   };
+};
+
+type OpenQuestionRecord = {
+  id: string;
+  sessionId: string;
+  studentId: string;
+  subjectId: string;
+  documentId: string | null;
+  knowledgeUnitId: string;
+  prompt: string;
+  instructions: string | null;
+  maxAnswerLength: number;
+  version: number;
+  sources?: OpenQuestionSourceRecord[];
+};
+
+type OpenQuestionSourceRecord = {
+  questionId: string;
+  subjectId: string;
+  chunkId: string;
+  chunk: DocumentChunkRecord;
+};
+
+type OpenAnswerEvaluationRecord = {
+  id: string;
+  sessionId: string;
+  openQuestionId: string;
+  studentId: string;
+  subjectId: string;
+  answerText: string;
+  status: 'PENDING' | 'READY' | 'FAILED';
+  score: number | null;
+  maxScore: number | null;
+  feedback: string | null;
+  presentPoints: unknown;
+  missingPoints: unknown;
+  errors: unknown;
+  modelAnswer: string | null;
+  advice: string | null;
+};
+
+type OpenQuestionCreatePayload = {
+  data: {
+    sessionId: string;
+    studentId: string;
+    subjectId: string;
+    documentId?: string | null;
+    knowledgeUnitId: string;
+    prompt: string;
+    instructions?: string | null;
+    maxAnswerLength: number;
+    version: number;
+  };
+};
+
+type OpenAnswerEvaluationCreatePayload = {
+  data: {
+    sessionId: string;
+    openQuestionId: string;
+    studentId: string;
+    subjectId: string;
+    answerText: string;
+    status: 'PENDING';
+    score: null;
+    maxScore: null;
+    feedback: null;
+    presentPoints: [];
+    missingPoints: [];
+    errors: [];
+    modelAnswer: null;
+    advice: null;
+  };
+};
+
+type OpenQuestionSessionRecord = ActivitySessionRecord & {
+  openQuestion: OpenQuestionRecord | null;
+  openAnswerEvaluation: OpenAnswerEvaluationRecord | null;
 };
 
 type SessionWithQuestions = ActivitySessionRecord & {
@@ -131,7 +208,7 @@ type PrismaActivitiesMock = {
   activitySession: {
     create: jest.Mock<ActivitySessionRecord, [ActivitySessionCreatePayload]>;
     findFirst: jest.Mock;
-    update: jest.Mock;
+    update: jest.Mock<ActivitySessionRecord, [ActivitySessionUpdatePayload]>;
   };
   question: {
     create: jest.Mock<QuestionRecord, [QuestionCreatePayload]>;
@@ -144,6 +221,18 @@ type PrismaActivitiesMock = {
   };
   questionVisualSource: {
     createMany: jest.Mock;
+  };
+  openQuestion: {
+    create: jest.Mock<OpenQuestionRecord, [OpenQuestionCreatePayload]>;
+  };
+  openQuestionSource: {
+    createMany: jest.Mock;
+  };
+  openAnswerEvaluation: {
+    create: jest.Mock<
+      OpenAnswerEvaluationRecord,
+      [OpenAnswerEvaluationCreatePayload]
+    >;
   };
   questionAnswer: {
     create: jest.Mock;
@@ -177,7 +266,10 @@ describe('PrismaActivitiesRepository', () => {
           [ActivitySessionCreatePayload]
         >(),
         findFirst: jest.fn(),
-        update: jest.fn(),
+        update: jest.fn<
+          ActivitySessionRecord,
+          [ActivitySessionUpdatePayload]
+        >(),
       },
       question: {
         create: jest.fn<QuestionRecord, [QuestionCreatePayload]>(),
@@ -190,6 +282,18 @@ describe('PrismaActivitiesRepository', () => {
       },
       questionVisualSource: {
         createMany: jest.fn(),
+      },
+      openQuestion: {
+        create: jest.fn<OpenQuestionRecord, [OpenQuestionCreatePayload]>(),
+      },
+      openQuestionSource: {
+        createMany: jest.fn(),
+      },
+      openAnswerEvaluation: {
+        create: jest.fn<
+          OpenAnswerEvaluationRecord,
+          [OpenAnswerEvaluationCreatePayload]
+        >(),
       },
       questionAnswer: {
         create: jest.fn(),
@@ -284,6 +388,54 @@ describe('PrismaActivitiesRepository', () => {
     index: 0,
     pageNumber: null,
     text: 'Article 89 encadre la revision constitutionnelle.',
+    ...input,
+  });
+
+  const openQuestionRecord = (
+    input: Partial<OpenQuestionRecord> = {},
+  ): OpenQuestionRecord => ({
+    id: 'open-question-1',
+    sessionId: 'session-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    documentId: 'document-1',
+    knowledgeUnitId: 'unit-1',
+    prompt:
+      'Explique avec tes propres mots la notion suivante : Séparation des pouvoirs.',
+    instructions:
+      'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
+    maxAnswerLength: 4000,
+    version: 1,
+    sources: [
+      {
+        questionId: 'open-question-1',
+        subjectId: 'subject-1',
+        chunkId: 'chunk-1',
+        chunk: chunkRecord(),
+      },
+    ],
+    ...input,
+  });
+
+  const openAnswerEvaluationRecord = (
+    input: Partial<OpenAnswerEvaluationRecord> = {},
+  ): OpenAnswerEvaluationRecord => ({
+    id: 'evaluation-1',
+    sessionId: 'session-1',
+    openQuestionId: 'open-question-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    answerText:
+      'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
+    status: 'PENDING',
+    score: null,
+    maxScore: null,
+    feedback: null,
+    presentPoints: [],
+    missingPoints: [],
+    errors: [],
+    modelAnswer: null,
+    advice: null,
     ...input,
   });
 
@@ -1217,5 +1369,204 @@ describe('PrismaActivitiesRepository', () => {
     ).rejects.toThrow('Choice does not belong to question');
 
     expect(prisma.activityResult.create).not.toHaveBeenCalled();
+  });
+
+  it('creates an open question activity without leaking source text or correction fields', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findFirst.mockResolvedValue({
+      id: 'unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.documentChunk.findMany.mockResolvedValue([chunkRecord()]);
+    prisma.activitySession.create.mockResolvedValue(
+      sessionRecord({
+        type: 'OPEN_QUESTION' as never,
+        version: 1,
+        documentId: 'document-1',
+      }),
+    );
+    prisma.openQuestion.create.mockResolvedValue(openQuestionRecord());
+
+    const activity = await repository.createOpenQuestionActivity({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      documentId: 'document-1',
+      question: {
+        prompt:
+          'Explique avec tes propres mots la notion suivante : Séparation des pouvoirs.',
+        instructions:
+          'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
+        maxAnswerLength: 4000,
+        sourceChunkIds: ['chunk-1'],
+        version: 1,
+      },
+    });
+
+    expect(prisma.activitySession.create).toHaveBeenCalledWith({
+      data: {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        knowledgeUnitId: 'unit-1',
+        documentId: 'document-1',
+        type: 'OPEN_QUESTION',
+        status: 'STARTED',
+        version: 1,
+      },
+    });
+    expect(prisma.openQuestion.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'session-1',
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        prompt:
+          'Explique avec tes propres mots la notion suivante : Séparation des pouvoirs.',
+        instructions:
+          'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
+        maxAnswerLength: 4000,
+        version: 1,
+      },
+    });
+    expect(prisma.openQuestionSource.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          questionId: 'open-question-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-1',
+        },
+      ],
+    });
+    expect(activity).toEqual({
+      sessionId: 'session-1',
+      type: 'open_question',
+      version: 1,
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      question: {
+        id: 'open-question-1',
+        prompt:
+          'Explique avec tes propres mots la notion suivante : Séparation des pouvoirs.',
+        instructions:
+          'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
+        maxAnswerLength: 4000,
+        sources: [{ chunkId: 'chunk-1', pageNumber: null, index: 0 }],
+      },
+    });
+    const publicPayload = JSON.stringify(activity);
+    expect(publicPayload).not.toContain('answerText');
+    expect(publicPayload).not.toContain('modelAnswer');
+    expect(publicPayload).not.toContain('score');
+    expect(publicPayload).not.toContain('feedback');
+    expect(publicPayload).not.toContain('Article 89');
+  });
+
+  it('submits an open answer and creates a pending evaluation without fake correction', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.activitySession.findFirst.mockResolvedValue({
+      ...sessionRecord({
+        type: 'OPEN_QUESTION' as never,
+        status: 'STARTED',
+      }),
+      openQuestion: openQuestionRecord({ sources: [] }),
+      openAnswerEvaluation: null,
+    } satisfies OpenQuestionSessionRecord);
+    prisma.openAnswerEvaluation.create.mockResolvedValue(
+      openAnswerEvaluationRecord(),
+    );
+
+    const result = await repository.submitOpenAnswer({
+      studentId: 'student-1',
+      sessionId: 'session-1',
+      answerText:
+        'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
+    });
+
+    expect(prisma.openAnswerEvaluation.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'session-1',
+        openQuestionId: 'open-question-1',
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        answerText:
+          'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
+        status: 'PENDING',
+        score: null,
+        maxScore: null,
+        feedback: null,
+        presentPoints: [],
+        missingPoints: [],
+        errors: [],
+        modelAnswer: null,
+        advice: null,
+      },
+    });
+    expect(prisma.activitySession.update).toHaveBeenCalledTimes(1);
+    const [sessionUpdateInput] = prisma.activitySession.update.mock.calls[0] as
+      | [ActivitySessionUpdatePayload]
+      | [];
+    expect(sessionUpdateInput).toEqual({
+      where: {
+        id: 'session-1',
+      },
+      data: {
+        status: 'SUBMITTED',
+        completedAt: expect.any(Date) as Date,
+      },
+    });
+    expect(result).toEqual({
+      sessionId: 'session-1',
+      type: 'open_question',
+      status: 'submitted',
+      evaluation: {
+        id: 'evaluation-1',
+        status: 'PENDING',
+        score: null,
+        maxScore: null,
+        feedback: null,
+        presentPoints: [],
+        missingPoints: [],
+        errors: [],
+        modelAnswer: null,
+        advice: null,
+        sources: [],
+      },
+    });
+  });
+
+  it('rejects double submit and non-open-question sessions for open answers', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.activitySession.findFirst.mockResolvedValue({
+      ...sessionRecord({
+        type: 'OPEN_QUESTION' as never,
+        status: 'SUBMITTED',
+      }),
+      openQuestion: openQuestionRecord(),
+      openAnswerEvaluation: openAnswerEvaluationRecord(),
+    } satisfies OpenQuestionSessionRecord);
+
+    await expect(
+      repository.submitOpenAnswer({
+        studentId: 'student-1',
+        sessionId: 'session-1',
+        answerText:
+          'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
+      }),
+    ).rejects.toThrow('Activity session already submitted');
+
+    prisma.activitySession.findFirst.mockResolvedValue(sessionWithQuestions());
+
+    await expect(
+      repository.submitOpenAnswer({
+        studentId: 'student-1',
+        sessionId: 'session-1',
+        answerText:
+          'La séparation des pouvoirs évite la concentration des fonctions étatiques.',
+      }),
+    ).rejects.toThrow('Activity session is not an open question');
+
+    expect(prisma.openAnswerEvaluation.create).not.toHaveBeenCalled();
   });
 });

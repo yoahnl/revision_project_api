@@ -6,7 +6,9 @@ import { RevisionModule } from '../revision/revision.module';
 import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
 import { ACTIVITIES_REPOSITORY } from './application/activities.repository';
 import { DIAGNOSTIC_QUIZ_GENERATOR } from './application/diagnostic-quiz-generator';
+import { StartOpenQuestionActivityUseCase } from './application/start-open-question-activity.use-case';
 import { StartNextActivityUseCase } from './application/start-next-activity.use-case';
+import { SubmitOpenAnswerUseCase } from './application/submit-open-answer.use-case';
 import { SubmitActivityResultUseCase } from './application/submit-activity-result.use-case';
 import { GenkitDiagnosticQuizGenerator } from './infrastructure/genkit-diagnostic-quiz.generator';
 import { PrismaActivitiesRepository } from './infrastructure/prisma-activities.repository';
@@ -18,7 +20,9 @@ import { ActivitiesController } from './interfaces/activities.controller';
   providers: [
     AdaptivePlanService,
     StartNextActivityUseCase,
+    StartOpenQuestionActivityUseCase,
     SubmitActivityResultUseCase,
+    SubmitOpenAnswerUseCase,
     {
       provide: ACTIVITIES_REPOSITORY,
       useClass: PrismaActivitiesRepository,

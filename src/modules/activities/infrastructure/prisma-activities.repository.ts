@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   ActivityStatus,
   ActivityType,
+  OpenAnswerEvaluationStatus,
   QuestionSelectionMode,
   QuestionVisualType,
 } from '../../../generated/prisma/enums';
@@ -16,6 +17,9 @@ import type {
   DiagnosticQuizActivity,
   DiagnosticQuizGenerationContext,
   DiagnosticQuizSubmissionResult,
+  OpenAnswerSubmissionResult,
+  OpenQuestionActivity,
+  OpenQuestionDraft,
 } from '../application/activities.repository';
 import type {
   GeneratedDiagnosticQuiz,
@@ -77,6 +81,47 @@ type ActivitySessionRecord = {
   result?: object | null;
 };
 
+type OpenQuestionSourceRecord = {
+  chunkId: string;
+  chunk: {
+    id: string;
+    pageNumber: number | null;
+    index: number;
+  };
+};
+
+type OpenQuestionRecord = {
+  id: string;
+  sessionId: string;
+  subjectId: string;
+  documentId: string | null;
+  knowledgeUnitId: string;
+  prompt: string;
+  instructions: string | null;
+  maxAnswerLength: number;
+  version: number;
+  sources?: OpenQuestionSourceRecord[];
+};
+
+type OpenAnswerEvaluationRecord = {
+  id: string;
+  sessionId: string;
+  status: 'PENDING' | 'READY' | 'FAILED';
+  score: number | null;
+  maxScore: number | null;
+  feedback: string | null;
+  presentPoints: unknown;
+  missingPoints: unknown;
+  errors: unknown;
+  modelAnswer: string | null;
+  advice: string | null;
+};
+
+type OpenQuestionSessionRecord = ActivitySessionRecord & {
+  openQuestion?: OpenQuestionRecord | null;
+  openAnswerEvaluation?: OpenAnswerEvaluationRecord | null;
+};
+
 type DocumentChunkRecord = {
   id: string;
   documentId: string;
@@ -131,6 +176,14 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
     }
 
     return toDiagnosticQuizGenerationContext(knowledgeUnit);
+  }
+
+  async findOpenQuestionGenerationContext(input: {
+    studentId: string;
+    subjectId: string;
+    knowledgeUnitId: string;
+  }): Promise<DiagnosticQuizGenerationContext | null> {
+    return this.findDiagnosticQuizGenerationContext(input);
   }
 
   async createDiagnosticQuiz(input: {
@@ -306,6 +359,132 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
     });
   }
 
+  async createOpenQuestionActivity(input: {
+    studentId: string;
+    subjectId: string;
+    knowledgeUnitId: string;
+    documentId?: string | null;
+    question: OpenQuestionDraft;
+  }): Promise<OpenQuestionActivity> {
+    return this.prisma.$transaction(async (tx) => {
+      const knowledgeUnit = await tx.knowledgeUnit.findFirst({
+        where: {
+          id: input.knowledgeUnitId,
+          subjectId: input.subjectId,
+          subject: {
+            studentId: input.studentId,
+          },
+        },
+      });
+
+      if (!knowledgeUnit) {
+        throw new Error('Knowledge unit does not belong to student subject');
+      }
+
+      const sourceChunkIds = dedupeStrings(input.question.sourceChunkIds);
+      const sourceChunks =
+        sourceChunkIds.length === 0
+          ? []
+          : await tx.documentChunk.findMany({
+              where: {
+                id: {
+                  in: sourceChunkIds,
+                },
+                subjectId: input.subjectId,
+                ...(input.documentId ? { documentId: input.documentId } : {}),
+              },
+              select: {
+                id: true,
+                pageNumber: true,
+                index: true,
+              },
+            });
+
+      if (sourceChunks.length !== sourceChunkIds.length) {
+        throw new Error('Open question source chunk not found');
+      }
+
+      const sourceChunkById = new Map(
+        sourceChunks.map((chunk) => [chunk.id, chunk]),
+      );
+      const session = await tx.activitySession.create({
+        data: {
+          studentId: input.studentId,
+          subjectId: input.subjectId,
+          knowledgeUnitId: input.knowledgeUnitId,
+          documentId: input.documentId ?? null,
+          type: ActivityType.OPEN_QUESTION,
+          status: ActivityStatus.STARTED,
+          version: input.question.version,
+        },
+      });
+      const question = await tx.openQuestion.create({
+        data: {
+          sessionId: session.id,
+          studentId: input.studentId,
+          subjectId: input.subjectId,
+          documentId: input.documentId ?? null,
+          knowledgeUnitId: input.knowledgeUnitId,
+          prompt: input.question.prompt,
+          instructions: input.question.instructions,
+          maxAnswerLength: input.question.maxAnswerLength,
+          version: input.question.version,
+        },
+      });
+
+      if (sourceChunkIds.length > 0) {
+        await tx.openQuestionSource.createMany({
+          data: sourceChunkIds.map((chunkId) => ({
+            questionId: question.id,
+            subjectId: input.subjectId,
+            chunkId,
+          })),
+        });
+      }
+
+      return toOpenQuestionActivity({
+        id: session.id,
+        subjectId: session.subjectId,
+        knowledgeUnitId: session.knowledgeUnitId,
+        type: session.type,
+        status: session.status,
+        version: session.version,
+        documentId: session.documentId,
+        questions: [],
+        openQuestion: {
+          id: question.id,
+          sessionId: question.sessionId,
+          subjectId: question.subjectId,
+          documentId: question.documentId,
+          knowledgeUnitId: question.knowledgeUnitId,
+          prompt: question.prompt,
+          instructions: question.instructions,
+          maxAnswerLength: question.maxAnswerLength,
+          version: question.version,
+          sources: sourceChunkIds
+            .map((chunkId) => sourceChunkById.get(chunkId))
+            .filter(
+              (
+                chunk,
+              ): chunk is {
+                id: string;
+                pageNumber: number | null;
+                index: number;
+              } => Boolean(chunk),
+            )
+            .map((chunk) => ({
+              chunkId: chunk.id,
+              chunk: {
+                id: chunk.id,
+                pageNumber: chunk.pageNumber,
+                index: chunk.index,
+              },
+            })),
+        },
+      });
+    });
+  }
+
   async submitResult(input: {
     studentId: string;
     sessionId: string;
@@ -402,6 +581,90 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
         ...result,
         knowledgeUnitId: session.knowledgeUnitId,
       };
+    });
+  }
+
+  async submitOpenAnswer(input: {
+    studentId: string;
+    sessionId: string;
+    answerText: string;
+  }): Promise<OpenAnswerSubmissionResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const session = await tx.activitySession.findFirst({
+        where: {
+          id: input.sessionId,
+          studentId: input.studentId,
+        },
+        include: {
+          questions: true,
+          openQuestion: {
+            include: {
+              sources: {
+                include: {
+                  chunk: {
+                    select: {
+                      id: true,
+                      pageNumber: true,
+                      index: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          openAnswerEvaluation: true,
+        },
+      });
+
+      if (!session) {
+        throw new Error('Activity session not found');
+      }
+
+      if (session.type !== ActivityType.OPEN_QUESTION) {
+        throw new Error('Activity session is not an open question');
+      }
+
+      if (
+        session.status !== ActivityStatus.STARTED ||
+        session.openAnswerEvaluation
+      ) {
+        throw new Error('Activity session already submitted');
+      }
+
+      if (!session.openQuestion) {
+        throw new Error('Open question not found');
+      }
+
+      const evaluation = await tx.openAnswerEvaluation.create({
+        data: {
+          sessionId: session.id,
+          openQuestionId: session.openQuestion.id,
+          studentId: input.studentId,
+          subjectId: session.subjectId,
+          answerText: input.answerText,
+          status: OpenAnswerEvaluationStatus.PENDING,
+          score: null,
+          maxScore: null,
+          feedback: null,
+          presentPoints: [],
+          missingPoints: [],
+          errors: [],
+          modelAnswer: null,
+          advice: null,
+        },
+      });
+
+      await tx.activitySession.update({
+        where: {
+          id: session.id,
+        },
+        data: {
+          status: ActivityStatus.SUBMITTED,
+          completedAt: new Date(),
+        },
+      });
+
+      return toOpenAnswerSubmissionResult(evaluation);
     });
   }
 }
@@ -847,6 +1110,63 @@ function toDiagnosticQuizActivity(
   }
 
   return activity;
+}
+
+function toOpenQuestionActivity(
+  session: OpenQuestionSessionRecord,
+): OpenQuestionActivity {
+  if (!session.openQuestion) {
+    throw new Error('Open question not found');
+  }
+
+  return {
+    sessionId: session.id,
+    type: 'open_question',
+    version: session.openQuestion.version,
+    subjectId: session.subjectId,
+    documentId: session.openQuestion.documentId,
+    knowledgeUnitId: session.knowledgeUnitId,
+    question: {
+      id: session.openQuestion.id,
+      prompt: session.openQuestion.prompt,
+      instructions: session.openQuestion.instructions,
+      maxAnswerLength: session.openQuestion.maxAnswerLength,
+      sources: (session.openQuestion.sources ?? [])
+        .map((source) => ({
+          chunkId: source.chunkId,
+          pageNumber: source.chunk.pageNumber,
+          index: source.chunk.index,
+        }))
+        .sort((left, right) => left.index - right.index),
+    },
+  };
+}
+
+function toOpenAnswerSubmissionResult(
+  evaluation: OpenAnswerEvaluationRecord,
+): OpenAnswerSubmissionResult {
+  return {
+    sessionId: evaluation.sessionId,
+    type: 'open_question',
+    status: 'submitted',
+    evaluation: {
+      id: evaluation.id,
+      status: evaluation.status,
+      score: evaluation.score,
+      maxScore: evaluation.maxScore,
+      feedback: evaluation.feedback,
+      presentPoints: parseJsonArray(evaluation.presentPoints),
+      missingPoints: parseJsonArray(evaluation.missingPoints),
+      errors: parseJsonArray(evaluation.errors),
+      modelAnswer: evaluation.modelAnswer,
+      advice: evaluation.advice,
+      sources: [],
+    },
+  };
+}
+
+function parseJsonArray(input: unknown): unknown[] {
+  return Array.isArray(input) ? input : [];
 }
 
 function toActivityQuestion(question: QuestionRecord): ActivityQuestion {

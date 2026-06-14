@@ -8,6 +8,8 @@ import { REVISION_REPOSITORY } from '../revision/application/revision.repository
 import {
   ACTIVITIES_REPOSITORY,
   type DiagnosticQuizActivity,
+  type OpenAnswerSubmissionResult,
+  type OpenQuestionActivity,
 } from './application/activities.repository';
 import {
   DIAGNOSTIC_QUIZ_GENERATOR,
@@ -49,11 +51,14 @@ describe('ActivitiesModule', () => {
   let app: INestApplication<App>;
   let activitiesRepository: {
     findDiagnosticQuizGenerationContext: jest.Mock;
+    findOpenQuestionGenerationContext: jest.Mock;
     createDiagnosticQuiz: jest.Mock<
       Promise<DiagnosticQuizActivity>,
       [CreateDiagnosticQuizInput]
     >;
     submitResult: jest.Mock;
+    createOpenQuestionActivity: jest.Mock;
+    submitOpenAnswer: jest.Mock;
   };
   let diagnosticQuizGenerator: {
     generate: jest.Mock<
@@ -72,6 +77,7 @@ describe('ActivitiesModule', () => {
     delete process.env.DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
     activitiesRepository = {
       findDiagnosticQuizGenerationContext: jest.fn().mockResolvedValue(null),
+      findOpenQuestionGenerationContext: jest.fn().mockResolvedValue(null),
       createDiagnosticQuiz: jest.fn<
         Promise<DiagnosticQuizActivity>,
         [CreateDiagnosticQuizInput]
@@ -102,6 +108,45 @@ describe('ActivitiesModule', () => {
         knowledgeUnitId: 'unit-1',
         items: [],
       }),
+      createOpenQuestionActivity: jest
+        .fn<Promise<OpenQuestionActivity>, []>()
+        .mockResolvedValue({
+          sessionId: 'open-session-1',
+          type: 'open_question',
+          version: 1,
+          subjectId: 'subject-1',
+          documentId: null,
+          knowledgeUnitId: 'unit-1',
+          question: {
+            id: 'open-question-1',
+            prompt:
+              'Explique avec tes propres mots la notion suivante : Revision constitutionnelle.',
+            instructions:
+              'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
+            maxAnswerLength: 4000,
+            sources: [],
+          },
+        }),
+      submitOpenAnswer: jest
+        .fn<Promise<OpenAnswerSubmissionResult>, []>()
+        .mockResolvedValue({
+          sessionId: 'open-session-1',
+          type: 'open_question',
+          status: 'submitted',
+          evaluation: {
+            id: 'evaluation-1',
+            status: 'PENDING',
+            score: null,
+            maxScore: null,
+            feedback: null,
+            presentPoints: [],
+            missingPoints: [],
+            errors: [],
+            modelAnswer: null,
+            advice: null,
+            sources: [],
+          },
+        }),
     };
     diagnosticQuizGenerator = {
       generate: jest
@@ -349,5 +394,89 @@ describe('ActivitiesModule', () => {
       .expect(400);
 
     expect(activitiesRepository.submitResult).not.toHaveBeenCalled();
+  });
+
+  it('starts an open question activity without exposing correction data', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/activities/open-question')
+      .send({ subjectId: 'subject-1', knowledgeUnitId: 'unit-1' })
+      .expect(201);
+
+    expect(activitiesRepository.createOpenQuestionActivity).toHaveBeenCalled();
+    expect(response.body).toEqual({
+      sessionId: 'open-session-1',
+      type: 'open_question',
+      version: 1,
+      subjectId: 'subject-1',
+      documentId: null,
+      knowledgeUnitId: 'unit-1',
+      question: {
+        id: 'open-question-1',
+        prompt:
+          'Explique avec tes propres mots la notion suivante : Revision constitutionnelle.',
+        instructions:
+          'Réponds en quelques phrases structurées, en t’appuyant uniquement sur le cours.',
+        maxAnswerLength: 4000,
+        sources: [],
+      },
+    });
+    const publicPayload = JSON.stringify(response.body);
+    expect(publicPayload).not.toContain('answerText');
+    expect(publicPayload).not.toContain('modelAnswer');
+    expect(publicPayload).not.toContain('score');
+    expect(publicPayload).not.toContain('feedback');
+  });
+
+  it('submits an open answer and returns a pending evaluation contract', async () => {
+    await request(app.getHttpServer())
+      .post('/activities/open-session-1/open-answer')
+      .send({
+        answerText:
+          'La révision constitutionnelle est une procédure encadrée par la Constitution.',
+      })
+      .expect(201)
+      .expect({
+        sessionId: 'open-session-1',
+        type: 'open_question',
+        status: 'submitted',
+        evaluation: {
+          id: 'evaluation-1',
+          status: 'PENDING',
+          score: null,
+          maxScore: null,
+          feedback: null,
+          presentPoints: [],
+          missingPoints: [],
+          errors: [],
+          modelAnswer: null,
+          advice: null,
+          sources: [],
+        },
+      });
+
+    expect(activitiesRepository.submitOpenAnswer).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'open-session-1',
+      answerText:
+        'La révision constitutionnelle est une procédure encadrée par la Constitution.',
+    });
+    expect(revisionRepository.upsertMastery).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed open question and open answer payloads', async () => {
+    await request(app.getHttpServer())
+      .post('/activities/open-question')
+      .send({ subjectId: '', knowledgeUnitId: 'unit-1' })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/activities/open-session-1/open-answer')
+      .send({ answerText: '' })
+      .expect(400);
+
+    expect(
+      activitiesRepository.createOpenQuestionActivity,
+    ).not.toHaveBeenCalled();
+    expect(activitiesRepository.submitOpenAnswer).not.toHaveBeenCalled();
   });
 });

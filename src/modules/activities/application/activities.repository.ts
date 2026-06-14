@@ -84,6 +84,36 @@ export interface DiagnosticQuizActivity {
   questions: ActivityQuestion[];
 }
 
+export interface OpenQuestionActivitySource {
+  chunkId: string;
+  pageNumber: number | null;
+  index: number;
+}
+
+export interface OpenQuestionActivity {
+  sessionId: string;
+  type: 'open_question';
+  version: number;
+  subjectId: string;
+  documentId?: string | null;
+  knowledgeUnitId: string;
+  question: {
+    id: string;
+    prompt: string;
+    instructions: string | null;
+    maxAnswerLength: number;
+    sources: OpenQuestionActivitySource[];
+  };
+}
+
+export interface OpenQuestionDraft {
+  prompt: string;
+  instructions: string | null;
+  maxAnswerLength: number;
+  sourceChunkIds: string[];
+  version: number;
+}
+
 export const ACTIVITIES_REPOSITORY = Symbol('ACTIVITIES_REPOSITORY');
 
 export interface DiagnosticQuizGenerationContext {
@@ -127,8 +157,33 @@ export interface DiagnosticQuizSubmissionResult {
   items: ActivityQuestionCorrectionItem[];
 }
 
+export interface OpenAnswerSubmissionResult {
+  sessionId: string;
+  type: 'open_question';
+  status: 'submitted';
+  evaluation: {
+    id: string;
+    status: 'PENDING' | 'READY' | 'FAILED';
+    score: number | null;
+    maxScore: number | null;
+    feedback: string | null;
+    presentPoints: unknown[];
+    missingPoints: unknown[];
+    errors: unknown[];
+    modelAnswer: string | null;
+    advice: string | null;
+    sources: ActivityQuestionCorrectionSource[];
+  };
+}
+
 export interface ActivitiesRepository {
   findDiagnosticQuizGenerationContext(input: {
+    studentId: string;
+    subjectId: string;
+    knowledgeUnitId: string;
+  }): Promise<DiagnosticQuizGenerationContext | null>;
+
+  findOpenQuestionGenerationContext(input: {
     studentId: string;
     subjectId: string;
     knowledgeUnitId: string;
@@ -142,6 +197,14 @@ export interface ActivitiesRepository {
     quiz: GeneratedDiagnosticQuiz;
   }): Promise<DiagnosticQuizActivity>;
 
+  createOpenQuestionActivity(input: {
+    studentId: string;
+    subjectId: string;
+    knowledgeUnitId: string;
+    documentId?: string | null;
+    question: OpenQuestionDraft;
+  }): Promise<OpenQuestionActivity>;
+
   submitResult(input: {
     studentId: string;
     sessionId: string;
@@ -151,4 +214,10 @@ export interface ActivitiesRepository {
       choiceIds?: string[];
     }>;
   }): Promise<DiagnosticQuizSubmissionResult>;
+
+  submitOpenAnswer(input: {
+    studentId: string;
+    sessionId: string;
+    answerText: string;
+  }): Promise<OpenAnswerSubmissionResult>;
 }

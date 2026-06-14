@@ -22,6 +22,8 @@ model StudentProfile {
   sessions ActivitySession[]
   summaries Summary[]
   revisionSheets RevisionSheet[]
+  openQuestions OpenQuestion[]
+  openAnswerEvaluations OpenAnswerEvaluation[]
 }
 
 model RevisionGoal {
@@ -52,6 +54,8 @@ model Subject {
   sessions       ActivitySession[]
   summaries      Summary[]
   revisionSheets RevisionSheet[]
+  openQuestions  OpenQuestion[]
+  openAnswerEvaluations OpenAnswerEvaluation[]
 
   @@index([studentId])
   @@unique([id, studentId])
@@ -76,6 +80,7 @@ model Document {
   jobs           DocumentProcessingJob[]
   summaries      Summary[]
   revisionSheets RevisionSheet[]
+  openQuestions  OpenQuestion[]
 
   @@index([studentId])
   @@index([subjectId])
@@ -113,6 +118,7 @@ model KnowledgeUnit {
   questions Question[]
   sessions ActivitySession[]
   sources  KnowledgeUnitSource[]
+  openQuestions OpenQuestion[]
 
   @@index([subjectId])
   @@index([documentId])
@@ -136,6 +142,7 @@ model DocumentChunk {
   revisionSheetSectionSources RevisionSheetSectionSource[]
   questionSources QuestionSource[]
   questionVisualSources QuestionVisualSource[]
+  openQuestionSources OpenQuestionSource[]
 
   @@index([documentId])
   @@index([subjectId])
@@ -314,6 +321,8 @@ model ActivitySession {
   questions     Question[]
   result        ActivityResult?
   answers       QuestionAnswer[]
+  openQuestion  OpenQuestion?
+  openAnswerEvaluation OpenAnswerEvaluation?
 
   @@index([studentId])
   @@index([subjectId])
@@ -432,6 +441,86 @@ model ActivityResult {
   session ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 }
 
+model OpenQuestion {
+  id              String   @id @default(cuid())
+  sessionId       String   @unique
+  studentId       String
+  subjectId       String
+  documentId      String?
+  knowledgeUnitId String
+  prompt          String
+  instructions    String?
+  maxAnswerLength Int      @default(4000)
+  version         Int      @default(1)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  session       ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student       StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject       Subject         @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  document      Document?       @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
+  knowledgeUnit KnowledgeUnit   @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sources       OpenQuestionSource[]
+  evaluations   OpenAnswerEvaluation[]
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@index([documentId])
+  @@index([knowledgeUnitId])
+  @@unique([id, subjectId])
+}
+
+model OpenQuestionSource {
+  questionId     String
+  subjectId      String
+  chunkId        String
+  relevanceScore Float?
+  createdAt      DateTime @default(now())
+
+  question OpenQuestion  @relation(fields: [questionId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  chunk    DocumentChunk @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
+
+  @@id([questionId, chunkId])
+  @@index([chunkId])
+  @@index([subjectId])
+}
+
+model OpenAnswerEvaluation {
+  id                      String                     @id @default(cuid())
+  sessionId               String                     @unique
+  openQuestionId          String
+  studentId               String
+  subjectId               String
+  answerText              String
+  status                  OpenAnswerEvaluationStatus @default(PENDING)
+  score                   Float?
+  maxScore                Float?
+  feedback                String?
+  presentPoints           Json?
+  missingPoints           Json?
+  errors                  Json?
+  modelAnswer             String?
+  advice                  String?
+  generationFlowName      String?
+  generationProvider      String?
+  generationModel         String?
+  generationPromptVersion String?
+  generationSchemaVersion String?
+  generationInputSize     Int?
+  errorCode               String?
+  createdAt               DateTime                   @default(now())
+  updatedAt               DateTime                   @updatedAt
+
+  session      ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  openQuestion OpenQuestion    @relation(fields: [openQuestionId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  student      StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject      Subject         @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@index([openQuestionId])
+}
+
 enum DocumentKind {
   COURSE_PDF
   EXAM_PDF
@@ -470,11 +559,19 @@ enum JobStatus {
 
 enum ActivityType {
   DIAGNOSTIC_QUIZ
+  OPEN_QUESTION
 }
 
 enum ActivityStatus {
   STARTED
+  SUBMITTED
   COMPLETED
+}
+
+enum OpenAnswerEvaluationStatus {
+  PENDING
+  READY
+  FAILED
 }
 
 enum QuestionSelectionMode {
