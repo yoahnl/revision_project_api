@@ -11,12 +11,18 @@ import {
 } from '@nestjs/common';
 import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
+import {
+  DIAGNOSTIC_QUIZ_QUESTION_COUNT_INVALID,
+  resolveDiagnosticQuizMaxQuestionCount,
+  resolveDiagnosticQuizQuestionCount,
+} from '../application/diagnostic-quiz-question-count';
 import { StartNextActivityUseCase } from '../application/start-next-activity.use-case';
 import { SubmitActivityResultUseCase } from '../application/submit-activity-result.use-case';
 
 class StartActivityDto {
   subjectId!: string;
   knowledgeUnitId?: string;
+  questionCount?: number;
 }
 
 class SubmitActivityDto {
@@ -48,6 +54,7 @@ export class ActivitiesController {
         studentId: student.id,
         subjectId: validatedBody.subjectId,
         knowledgeUnitId: validatedBody.knowledgeUnitId,
+        questionCount: validatedBody.questionCount,
       })
       .catch((error: unknown) => {
         normalizeActivityError(error);
@@ -85,6 +92,7 @@ function validateStartActivityBody(input: StartActivityDto): StartActivityDto {
       input?.knowledgeUnitId === undefined
         ? undefined
         : validateRequiredId(input.knowledgeUnitId, 'Knowledge unit id'),
+    questionCount: validateQuestionCount(input?.questionCount),
   };
 }
 
@@ -121,6 +129,35 @@ function validateRequiredId(input: unknown, label: string): string {
   }
 
   return input.trim();
+}
+
+function validateQuestionCount(input: unknown): number | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (typeof input !== 'number') {
+    throw questionCountBadRequest();
+  }
+
+  try {
+    return resolveDiagnosticQuizQuestionCount(input);
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      error.message === DIAGNOSTIC_QUIZ_QUESTION_COUNT_INVALID
+    ) {
+      throw questionCountBadRequest();
+    }
+
+    throw error;
+  }
+}
+
+function questionCountBadRequest(): BadRequestException {
+  return new BadRequestException(
+    `Diagnostic quiz question count must be an integer between 1 and ${resolveDiagnosticQuizMaxQuestionCount()}`,
+  );
 }
 
 function normalizeActivityError(error: unknown): never {

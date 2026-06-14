@@ -226,6 +226,17 @@ describe('PrismaActivitiesRepository', () => {
     ...input,
   });
 
+  const generatedQuizQuestions = (questionCount: number) =>
+    Array.from({ length: questionCount }, (_value, index) => ({
+      prompt: `Question de revision ${index + 1}`,
+      choices: [
+        { id: `a-${index + 1}`, label: 'Bonne reponse' },
+        { id: `b-${index + 1}`, label: 'Distracteur' },
+      ],
+      correctChoiceId: `a-${index + 1}`,
+      explanation: 'Explication de correction.',
+    }));
+
   it('persists the generated diagnostic quiz after verifying ownership', async () => {
     const { prisma, repository } = createRepository();
     prisma.knowledgeUnit.findFirst.mockResolvedValue({
@@ -309,6 +320,39 @@ describe('PrismaActivitiesRepository', () => {
       title: 'Diagnostic constitutionnel',
       questions: [{ id: 'question-1' }],
     });
+  });
+
+  it('persists a generated diagnostic quiz with ten questions', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findFirst.mockResolvedValue({
+      id: 'unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.activitySession.create.mockResolvedValue(sessionRecord());
+    prisma.question.create.mockImplementation(
+      ({ data }: QuestionCreatePayload) =>
+        questionRecord({
+          id: `question-${prisma.question.create.mock.calls.length}`,
+          prompt: data.prompt,
+          choices: data.choices,
+          correctChoiceId: data.correctChoiceId,
+          explanation: data.explanation,
+        }),
+    );
+
+    const activity = await repository.createDiagnosticQuiz({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      quiz: {
+        title: 'Diagnostic constitutionnel',
+        questions: generatedQuizQuestions(10),
+      },
+    });
+
+    expect(prisma.question.create).toHaveBeenCalledTimes(10);
+    expect(activity.questions).toHaveLength(10);
+    expect(activity.questions[9]?.id).toBe('question-10');
   });
 
   it('persists a sourced v2 diagnostic quiz without leaking correction fields before submit', async () => {

@@ -74,6 +74,10 @@ describe('GenkitDiagnosticQuizGenerator', () => {
   const originalGenkitModel = process.env.GENKIT_MODEL;
   const originalMaxChunks = process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS;
   const originalMaxChars = process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS;
+  const originalDefaultQuestionCount =
+    process.env.DIAGNOSTIC_QUIZ_DEFAULT_QUESTION_COUNT;
+  const originalMaxQuestionCount =
+    process.env.DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
 
   afterEach(() => {
     restoreEnv('AI_PROVIDER', originalAiProvider);
@@ -87,6 +91,11 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     restoreEnv('GENKIT_MODEL', originalGenkitModel);
     restoreEnv('DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS', originalMaxChunks);
     restoreEnv('DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS', originalMaxChars);
+    restoreEnv(
+      'DIAGNOSTIC_QUIZ_DEFAULT_QUESTION_COUNT',
+      originalDefaultQuestionCount,
+    );
+    restoreEnv('DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT', originalMaxQuestionCount);
     mockOpenAICompatible.mockClear();
     mockGoogleAI.mockClear();
     mockGenkit.mockClear();
@@ -134,8 +143,73 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(generateInput?.prompt).toContain('forme republicaine');
     expect(generateInput?.prompt).not.toContain('contraction cardiaque');
     expect(generateInput?.prompt).toContain('correctChoiceId');
+    expect(generateInput?.prompt).toContain('exactement 10 questions');
     expect(generateInput?.output.schema).toBeDefined();
     expect(quiz).toEqual(generatedQuiz());
+  });
+
+  it('generates the requested number of quiz questions up to twenty', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: generatedQuizWithQuestionCount(20),
+    });
+
+    const quiz = await new GenkitDiagnosticQuizGenerator().generate({
+      questionCount: 20,
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-1',
+        subjectId: 'subject-1',
+        title: 'Controle de constitutionnalite',
+        summary: 'Le Conseil constitutionnel controle certaines normes.',
+      }),
+    });
+
+    const [generateInput] = mockGenerate.mock.calls[0] ?? [];
+    expect(generateInput?.prompt).toContain('exactement 20 questions');
+    expect(quiz.questions).toHaveLength(20);
+  });
+
+  it('rejects quiz output with fewer questions than requested', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: generatedQuizWithQuestionCount(3),
+    });
+    const observer = createObserver();
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator(observer).generate({
+        questionCount: 10,
+        knowledgeUnit: new KnowledgeUnit({
+          id: 'unit-1',
+          subjectId: 'subject-1',
+          title: 'Controle de constitutionnalite',
+          summary: 'Le Conseil constitutionnel controle certaines normes.',
+        }),
+      }),
+    ).rejects.toThrow('DIAGNOSTIC_QUIZ_QUESTION_COUNT_INVALID');
+
+    const observation = getObservedObservation(observer);
+    expect(observation.errorCode).toBe(
+      'DIAGNOSTIC_QUIZ_QUESTION_COUNT_INVALID',
+    );
+  });
+
+  it('rejects quiz output with more than twenty questions', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: generatedQuizWithQuestionCount(21),
+    });
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator().generate({
+        knowledgeUnit: new KnowledgeUnit({
+          id: 'unit-1',
+          subjectId: 'subject-1',
+          title: 'Controle de constitutionnalite',
+          summary: 'Le Conseil constitutionnel controle certaines normes.',
+        }),
+      }),
+    ).rejects.toThrow();
   });
 
   it('generates a sourced v2 quiz from the selected knowledge unit chunks', async () => {
@@ -151,7 +225,7 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     const quiz = await new GenkitDiagnosticQuizGenerator(observer).generate({
       documentId: 'document-1',
       subjectId: 'subject-1',
-      questionCount: 2,
+      questionCount: 1,
       knowledgeUnit: sourcedKnowledgeUnit(),
       chunks: [
         {
@@ -677,6 +751,28 @@ function generatedQuiz() {
           'La forme republicaine du gouvernement ne peut pas faire l objet d une revision.',
       },
     ],
+  };
+}
+
+function generatedQuizWithQuestionCount(questionCount: number) {
+  return {
+    title: 'Diagnostic constitutionnel',
+    questions: Array.from({ length: questionCount }, (_value, index) => ({
+      prompt: `Quelle limite materielle ${index + 1} encadre la revision constitutionnelle en France ?`,
+      choices: [
+        {
+          id: `correct-${index + 1}`,
+          label: 'La forme republicaine du gouvernement',
+        },
+        {
+          id: `wrong-${index + 1}`,
+          label: 'La suppression du Parlement',
+        },
+      ],
+      correctChoiceId: `correct-${index + 1}`,
+      explanation:
+        'La forme republicaine du gouvernement ne peut pas faire l objet d une revision.',
+    })),
   };
 }
 

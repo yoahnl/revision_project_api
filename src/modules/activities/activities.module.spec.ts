@@ -11,6 +11,7 @@ import {
 } from './application/activities.repository';
 import {
   DIAGNOSTIC_QUIZ_GENERATOR,
+  type DiagnosticQuizGenerationInput,
   type GeneratedDiagnosticQuiz,
 } from './application/diagnostic-quiz-generator';
 import { KnowledgeUnit } from '../revision/domain/knowledge-unit.entity';
@@ -57,7 +58,7 @@ describe('ActivitiesModule', () => {
   let diagnosticQuizGenerator: {
     generate: jest.Mock<
       Promise<GeneratedDiagnosticQuiz>,
-      [{ knowledgeUnit: KnowledgeUnit }]
+      [DiagnosticQuizGenerationInput]
     >;
   };
   let revisionRepository: {
@@ -67,6 +68,8 @@ describe('ActivitiesModule', () => {
   };
 
   beforeEach(async () => {
+    delete process.env.DIAGNOSTIC_QUIZ_DEFAULT_QUESTION_COUNT;
+    delete process.env.DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
     activitiesRepository = {
       findDiagnosticQuizGenerationContext: jest.fn().mockResolvedValue(null),
       createDiagnosticQuiz: jest.fn<
@@ -102,10 +105,7 @@ describe('ActivitiesModule', () => {
     };
     diagnosticQuizGenerator = {
       generate: jest
-        .fn<
-          Promise<GeneratedDiagnosticQuiz>,
-          [{ knowledgeUnit: KnowledgeUnit }]
-        >()
+        .fn<Promise<GeneratedDiagnosticQuiz>, [DiagnosticQuizGenerationInput]>()
         .mockResolvedValue({
           title: 'Diagnostic constitutionnel',
           questions: [
@@ -167,6 +167,8 @@ describe('ActivitiesModule', () => {
 
   afterEach(async () => {
     await app?.close();
+    delete process.env.DIAGNOSTIC_QUIZ_DEFAULT_QUESTION_COUNT;
+    delete process.env.DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
   });
 
   it('registers activity routes through the app module', async () => {
@@ -186,6 +188,7 @@ describe('ActivitiesModule', () => {
     expect(generateInput?.knowledgeUnit.title).toBe(
       'Revision constitutionnelle',
     );
+    expect(generateInput?.questionCount).toBe(10);
 
     await request(app.getHttpServer())
       .post(`/activities/${nextBody.sessionId}/result`)
@@ -199,6 +202,41 @@ describe('ActivitiesModule', () => {
         score: 1,
         items: [],
       });
+  });
+
+  it('accepts an explicit activity question count up to the configured max', async () => {
+    await request(app.getHttpServer())
+      .post('/activities/next')
+      .send({
+        subjectId: 'subject-1',
+        knowledgeUnitId: 'unit-1',
+        questionCount: 20,
+      })
+      .expect(201);
+
+    const [generateInput] =
+      diagnosticQuizGenerator.generate.mock.calls[0] ?? [];
+    expect(generateInput?.questionCount).toBe(20);
+  });
+
+  it.each([
+    ['zero', 0],
+    ['negative', -1],
+    ['too high', 21],
+    ['decimal', 1.5],
+    ['string', '10'],
+  ])('rejects %s activity question counts with 400', async (_label, value) => {
+    await request(app.getHttpServer())
+      .post('/activities/next')
+      .send({
+        subjectId: 'subject-1',
+        knowledgeUnitId: 'unit-1',
+        questionCount: value,
+      })
+      .expect(400);
+
+    expect(activitiesRepository.createDiagnosticQuiz).not.toHaveBeenCalled();
+    expect(diagnosticQuizGenerator.generate).not.toHaveBeenCalled();
   });
 
   it('rejects malformed activity start payloads with 400', async () => {

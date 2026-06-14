@@ -14,6 +14,7 @@ import {
   DIAGNOSTIC_QUIZ_GENERATOR,
   type DiagnosticQuizGenerator,
 } from './diagnostic-quiz-generator';
+import { resolveDiagnosticQuizQuestionCount } from './diagnostic-quiz-question-count';
 
 @Injectable()
 export class StartNextActivityUseCase {
@@ -31,8 +32,12 @@ export class StartNextActivityUseCase {
     studentId: string;
     subjectId: string;
     knowledgeUnitId?: string;
+    questionCount?: number;
   }): Promise<DiagnosticQuizActivity> {
     void this.adaptivePlanService;
+    const questionCount = resolveDiagnosticQuizQuestionCount(
+      input.questionCount,
+    );
     const knowledgeUnitId = input.knowledgeUnitId;
     const knowledgeUnit = knowledgeUnitId
       ? await this.findKnowledgeUnit({
@@ -55,8 +60,9 @@ export class StartNextActivityUseCase {
             documentId: generationContext.documentId,
             knowledgeUnit: generationContext.knowledgeUnit,
             chunks: generationContext.chunks,
+            questionCount,
           }
-        : { knowledgeUnit },
+        : { knowledgeUnit, questionCount },
     );
 
     return this.activitiesRepository.createDiagnosticQuiz({

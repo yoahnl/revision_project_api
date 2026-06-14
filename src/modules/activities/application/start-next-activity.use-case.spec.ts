@@ -38,7 +38,10 @@ describe('StartNextActivityUseCase', () => {
       knowledgeUnitId: 'unit-1',
       quiz: generatedQuiz(),
     });
-    expect(generator.generate.mock.calls[0]?.[0]).toEqual({ knowledgeUnit });
+    expect(generator.generate.mock.calls[0]?.[0]).toEqual({
+      knowledgeUnit,
+      questionCount: 10,
+    });
     expect(repository.findDiagnosticQuizGenerationContext).toHaveBeenCalledWith(
       {
         studentId: 'student-1',
@@ -85,6 +88,7 @@ describe('StartNextActivityUseCase', () => {
       studentId: 'student-1',
       subjectId: 'subject-1',
       knowledgeUnitId: 'unit-1',
+      questionCount: 12,
     });
 
     const [generationInput] = generator.generate.mock.calls[0] ?? [];
@@ -100,6 +104,7 @@ describe('StartNextActivityUseCase', () => {
         pageNumber: null,
       },
     ]);
+    expect(generationInput?.questionCount).toBe(12);
     expect(repository.createDiagnosticQuiz).toHaveBeenCalledWith({
       studentId: 'student-1',
       subjectId: 'subject-1',
@@ -161,6 +166,37 @@ describe('StartNextActivityUseCase', () => {
     });
     expect(generator.generate.mock.calls[0]?.[0]).toEqual({
       knowledgeUnit: weakestUnit,
+      questionCount: 10,
+    });
+  });
+
+  it('passes an explicit legacy question count to the generator', async () => {
+    const repository = createActivitiesRepository();
+    const generator = createDiagnosticQuizGenerator();
+    const revisionRepository = createRevisionRepository();
+    const knowledgeUnit = new KnowledgeUnit({
+      id: 'unit-1',
+      subjectId: 'subject-1',
+      title: 'Controle de constitutionnalite',
+      summary: 'Le Conseil constitutionnel controle certaines normes.',
+    });
+    revisionRepository.findKnowledgeUnits.mockResolvedValue([knowledgeUnit]);
+
+    await new StartNextActivityUseCase(
+      new AdaptivePlanService(),
+      repository,
+      revisionRepository,
+      generator,
+    ).execute({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      questionCount: 15,
+    });
+
+    expect(generator.generate.mock.calls[0]?.[0]).toEqual({
+      knowledgeUnit,
+      questionCount: 15,
     });
   });
 

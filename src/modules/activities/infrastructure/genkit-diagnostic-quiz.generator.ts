@@ -11,6 +11,11 @@ import type {
   GeneratedDiagnosticQuizQuestion,
 } from '../application/diagnostic-quiz-generator';
 import {
+  DEFAULT_DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT,
+  DIAGNOSTIC_QUIZ_QUESTION_COUNT_INVALID,
+  resolveDiagnosticQuizQuestionCount,
+} from '../application/diagnostic-quiz-question-count';
+import {
   AI_GENERATION_OBSERVER,
   type AiGenerationObserver,
   noopAiGenerationObserver,
@@ -33,10 +38,11 @@ const SCHEMA_VERSION = 'diagnostic-quiz-v2';
 const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
 const EMPTY_OUTPUT_ERROR_CODE = 'GENKIT_EMPTY_OUTPUT';
 const SOURCE_INVALID_ERROR_CODE = 'DIAGNOSTIC_QUIZ_SOURCE_INVALID';
+const QUESTION_COUNT_INVALID_ERROR_CODE =
+  DIAGNOSTIC_QUIZ_QUESTION_COUNT_INVALID;
 const DEFAULT_MAX_CHUNKS = 8;
 const DEFAULT_MAX_CHARS = 8000;
-const DEFAULT_QUESTION_COUNT = 3;
-const MAX_QUESTION_COUNT = 5;
+const MAX_QUESTION_COUNT = DEFAULT_DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
 
 const NonEmptyStringSchema = z.string().trim().min(1);
 const DiagnosticQuizDifficultySchema = z.enum(['LOW', 'MEDIUM', 'HIGH']);
@@ -73,7 +79,10 @@ const GeneratedDiagnosticQuizQuestionSchema = z
 const GeneratedDiagnosticQuizSchema = z
   .object({
     title: z.string().min(2),
-    questions: z.array(GeneratedDiagnosticQuizQuestionSchema).min(1).max(5),
+    questions: z
+      .array(GeneratedDiagnosticQuizQuestionSchema)
+      .min(1)
+      .max(MAX_QUESTION_COUNT),
   })
   .strict();
 
@@ -118,6 +127,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
         const quiz = normalizeGeneratedQuiz({
           output: GeneratedDiagnosticQuizSchema.parse(output),
           chunks,
+          expectedQuestionCount: input.questionCount,
           metadata: {
             provider: metadata.provider,
             model: metadata.model,
@@ -161,6 +171,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           attempts.length > 1 &&
           isInvalidAiOutputError(error, [
             SOURCE_INVALID_ERROR_CODE,
+            QUESTION_COUNT_INVALID_ERROR_CODE,
             'Generated diagnostic quiz is empty',
           ])
         ) {
@@ -214,7 +225,7 @@ function buildPrompt(
   input: DiagnosticQuizGenerationInput,
   chunks: DiagnosticQuizPromptChunk[],
 ): string {
-  const questionCount = resolveQuestionCount(input.questionCount);
+  const questionCount = resolveDiagnosticQuizQuestionCount(input.questionCount);
   const basePrompt = [
     'Tu es un tuteur universitaire qui genere un QCM de revision en francais.',
     'Genere le QCM exclusivement a partir de l unite de connaissance et des chunks fournis.',
@@ -222,9 +233,11 @@ function buildPrompt(
     'Le QCM est mono-reponse: chaque question a un seul correctChoiceId.',
     'Les distracteurs doivent etre plausibles mais faux, distincts et non ambigus.',
     'Chaque explication doit rester fondee sur le cours fourni.',
+    `Genere exactement ${questionCount} questions.`,
+    'Les questions doivent etre variees, non redondantes et couvrir plusieurs angles de la notion quand les sources le permettent.',
+    'Si les sources ne permettent pas un QCM fiable, retourne uniquement des questions strictement justifiables par le cours.',
     'Retourne uniquement du JSON strict respectant le schema demande.',
     'Champs attendus: title, questions, prompt, difficulty, choices, correctChoiceId, explanation, sourceChunkIds.',
-    `Nombre de questions souhaite: ${questionCount}`,
     `Titre de l unite: ${input.knowledgeUnit.title}`,
     `Resume de l unite: ${input.knowledgeUnit.summary}`,
   ];
@@ -234,7 +247,7 @@ function buildPrompt(
       ...basePrompt,
       'Aucun chunk verifiable n est fourni pour ce mode legacy.',
       'Dans ce mode uniquement, sourceChunkIds peut etre omis.',
-      'Contraintes: 1 a 3 questions, 2 a 4 choix par question, une seule bonne reponse, explication concise.',
+      'Contraintes: 2 a 4 choix par question, une seule bonne reponse, explication concise.',
     ].join('\n\n');
   }
 
@@ -251,12 +264,20 @@ function buildPrompt(
 function normalizeGeneratedQuiz(input: {
   output: GeneratedDiagnosticQuiz;
   chunks: DiagnosticQuizPromptChunk[];
+  expectedQuestionCount?: number;
   metadata: {
     provider: string;
     model: string;
     inputSize: number;
   };
 }): GeneratedDiagnosticQuiz {
+  if (
+    input.expectedQuestionCount !== undefined &&
+    input.output.questions.length !== input.expectedQuestionCount
+  ) {
+    throw new Error(QUESTION_COUNT_INVALID_ERROR_CODE);
+  }
+
   if (input.chunks.length === 0) {
     return input.output;
   }
@@ -406,18 +427,6 @@ function toPromptPayload(
   };
 }
 
-function resolveQuestionCount(questionCount: number | undefined): number {
-  if (
-    questionCount === undefined ||
-    !Number.isInteger(questionCount) ||
-    questionCount <= 0
-  ) {
-    return DEFAULT_QUESTION_COUNT;
-  }
-
-  return Math.min(questionCount, MAX_QUESTION_COUNT);
-}
-
 function resolvePositiveInteger(value: string | undefined, fallback: number) {
   const parsed = Number(value);
 
@@ -533,6 +542,13 @@ function resolveDiagnosticQuizGenerationErrorCode(error: unknown): string {
 
   if (error instanceof Error && error.message === SOURCE_INVALID_ERROR_CODE) {
     return SOURCE_INVALID_ERROR_CODE;
+  }
+
+  if (
+    error instanceof Error &&
+    error.message === QUESTION_COUNT_INVALID_ERROR_CODE
+  ) {
+    return QUESTION_COUNT_INVALID_ERROR_CODE;
   }
 
   return GENERATION_FAILED_ERROR_CODE;
