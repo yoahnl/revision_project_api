@@ -38,8 +38,8 @@ const DEFAULT_GENKIT_MODEL = 'googleai/gemini-2.5-flash';
 const FLOW_NAME = 'diagnosticQuizGeneration';
 const GOOGLE_PROVIDER = 'google-genai';
 const MISTRAL_PROVIDER = 'mistral';
-const PROMPT_VERSION = 'diagnostic-quiz-v2';
-const SCHEMA_VERSION = 'diagnostic-quiz-v2';
+const DIAGNOSTIC_QUIZ_V2_VERSION = 'diagnostic-quiz-v2';
+const DIAGNOSTIC_QUIZ_V3_VERSION = 'diagnostic-quiz-v3';
 const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
 const EMPTY_OUTPUT_ERROR_CODE = 'GENKIT_EMPTY_OUTPUT';
 const SOURCE_INVALID_ERROR_CODE = 'DIAGNOSTIC_QUIZ_SOURCE_INVALID';
@@ -221,6 +221,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     const attempts = fallbackMetadata
       ? [primaryMetadata, fallbackMetadata]
       : [primaryMetadata];
+    const generationVersion = resolveDiagnosticQuizGenerationVersion(input);
     const chunks = selectDiagnosticQuizChunks(input);
     const prompt = buildPrompt(input, chunks);
     const inputSize = prompt.length;
@@ -252,6 +253,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           metadata: {
             provider: metadata.provider,
             model: metadata.model,
+            generationVersion,
             inputSize,
           },
         });
@@ -260,8 +262,8 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           flowName: FLOW_NAME,
           provider: metadata.provider,
           model: metadata.model,
-          promptVersion: PROMPT_VERSION,
-          schemaVersion: SCHEMA_VERSION,
+          promptVersion: generationVersion,
+          schemaVersion: generationVersion,
           inputSize,
           durationMs: Date.now() - startedAt,
           status: 'success',
@@ -276,8 +278,8 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           flowName: FLOW_NAME,
           provider: metadata.provider,
           model: metadata.model,
-          promptVersion: PROMPT_VERSION,
-          schemaVersion: SCHEMA_VERSION,
+          promptVersion: generationVersion,
+          schemaVersion: generationVersion,
           inputSize,
           durationMs: Date.now() - startedAt,
           status: 'error',
@@ -402,6 +404,7 @@ function normalizeGeneratedQuiz(input: {
   metadata: {
     provider: string;
     model: string;
+    generationVersion: DiagnosticQuizGenerationVersion;
     inputSize: number;
   };
 }): GeneratedDiagnosticQuiz {
@@ -433,11 +436,31 @@ function normalizeGeneratedQuiz(input: {
       flowName: FLOW_NAME,
       provider: input.metadata.provider,
       model: input.metadata.model,
-      promptVersion: PROMPT_VERSION,
-      schemaVersion: SCHEMA_VERSION,
+      promptVersion: input.metadata.generationVersion,
+      schemaVersion: input.metadata.generationVersion,
       inputSize: input.metadata.inputSize,
     },
   };
+}
+
+type DiagnosticQuizGenerationVersion =
+  | typeof DIAGNOSTIC_QUIZ_V2_VERSION
+  | typeof DIAGNOSTIC_QUIZ_V3_VERSION;
+
+function resolveDiagnosticQuizGenerationVersion(
+  input: DiagnosticQuizGenerationInput,
+): DiagnosticQuizGenerationVersion {
+  const selectionModes = resolveAllowedSelectionModes(input.selectionModes);
+
+  if (
+    input.visualsEnabled === true ||
+    (input.visualTypes ?? []).length > 0 ||
+    selectionModes.includes('multiple')
+  ) {
+    return DIAGNOSTIC_QUIZ_V3_VERSION;
+  }
+
+  return DIAGNOSTIC_QUIZ_V2_VERSION;
 }
 
 function normalizeSourcedQuestion(

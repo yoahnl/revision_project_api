@@ -313,8 +313,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     mockGenerate.mockResolvedValue({
       output: generatedMediaMultiQuiz(),
     });
+    const observer = createObserver();
 
-    const quiz = await new GenkitDiagnosticQuizGenerator().generate({
+    const quiz = await new GenkitDiagnosticQuizGenerator(observer).generate({
       documentId: 'document-1',
       subjectId: 'subject-1',
       questionCount: 1,
@@ -338,6 +339,10 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(generateInput?.prompt).toContain('DIAGRAM');
     expect(generateInput?.prompt).not.toContain('IMAGE');
     expect(quiz.version).toBe(3);
+    expect(quiz.metadata).toMatchObject({
+      promptVersion: 'diagnostic-quiz-v3',
+      schemaVersion: 'diagnostic-quiz-v3',
+    });
     expect(quiz.questions[0]).toMatchObject({
       selectionMode: 'multiple',
       minSelections: 1,
@@ -347,6 +352,11 @@ describe('GenkitDiagnosticQuizGenerator', () => {
         expect.objectContaining({ type: 'CHART' }),
         expect.objectContaining({ type: 'DIAGRAM' }),
       ],
+    });
+    expect(getObservedObservation(observer)).toMatchObject({
+      promptVersion: 'diagnostic-quiz-v3',
+      schemaVersion: 'diagnostic-quiz-v3',
+      status: 'success',
     });
   });
 
@@ -390,8 +400,83 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       }),
     ).rejects.toThrow('DIAGNOSTIC_QUIZ_VISUAL_INVALID');
 
-    expect(getObservedObservation(observer).errorCode).toBe(
-      'DIAGNOSTIC_QUIZ_VISUAL_INVALID',
+    expect(getObservedObservation(observer)).toMatchObject({
+      promptVersion: 'diagnostic-quiz-v3',
+      schemaVersion: 'diagnostic-quiz-v3',
+      status: 'error',
+      errorCode: 'DIAGNOSTIC_QUIZ_VISUAL_INVALID',
+    });
+  });
+
+  it('keeps v3 versions when a Mistral fallback succeeds after invalid v3 output', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_MODEL = 'mistral-small-latest';
+    process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL = 'mistral-large-latest';
+    mockGenerate
+      .mockResolvedValueOnce({
+        output: {
+          ...generatedMediaMultiQuiz(),
+          questions: [
+            {
+              ...generatedMediaMultiQuiz().questions[0],
+              visuals: [
+                {
+                  ...generatedMediaMultiQuiz().questions[0].visuals?.[0],
+                  sourceChunkIds: ['missing-chunk'],
+                },
+              ],
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        output: generatedMediaMultiQuiz(),
+      });
+    const observer = createObserver();
+
+    const quiz = await new GenkitDiagnosticQuizGenerator(observer).generate({
+      documentId: 'document-1',
+      subjectId: 'subject-1',
+      questionCount: 1,
+      visualsEnabled: true,
+      visualTypes: ['CHART', 'DIAGRAM'],
+      selectionModes: ['single', 'multiple'],
+      knowledgeUnit: sourcedKnowledgeUnit(),
+      chunks: [
+        {
+          id: 'chunk-source',
+          index: 1,
+          text: 'Le cours compare les pouvoirs et leurs controles.',
+          pageNumber: 2,
+        },
+      ],
+    });
+
+    expect(quiz.metadata).toMatchObject({
+      model: 'mistral/mistral-large-latest',
+      promptVersion: 'diagnostic-quiz-v3',
+      schemaVersion: 'diagnostic-quiz-v3',
+    });
+    expect(observer.observe.mock.calls).toHaveLength(2);
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      model: 'mistral/mistral-small-latest',
+      promptVersion: 'diagnostic-quiz-v3',
+      schemaVersion: 'diagnostic-quiz-v3',
+      status: 'error',
+      errorCode: 'DIAGNOSTIC_QUIZ_VISUAL_INVALID',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      model: 'mistral/mistral-large-latest',
+      promptVersion: 'diagnostic-quiz-v3',
+      schemaVersion: 'diagnostic-quiz-v3',
+      status: 'success',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('correctChoiceIds');
+    expect(observedPayload).not.toContain('Le controle juridictionnel');
+    expect(observedPayload).not.toContain(
+      'Le controle et la separation des pouvoirs',
     );
   });
 
