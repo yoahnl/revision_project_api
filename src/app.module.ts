@@ -6,6 +6,7 @@ import { ActivitiesModule } from './modules/activities/activities.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { RevisionModule } from './modules/revision/revision.module';
+import { StudyArtifactsModule } from './modules/study-artifacts/study-artifacts.module';
 import { SubjectsModule } from './modules/subjects/subjects.module';
 
 @Module({
@@ -15,6 +16,7 @@ import { SubjectsModule } from './modules/subjects/subjects.module';
     RevisionModule,
     DocumentsModule,
     ActivitiesModule,
+    StudyArtifactsModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],

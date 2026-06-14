@@ -20,6 +20,8 @@ model StudentProfile {
   subjects Subject[]
   mastery  MasteryState[]
   sessions ActivitySession[]
+  summaries Summary[]
+  revisionSheets RevisionSheet[]
 }
 
 model RevisionGoal {
@@ -48,6 +50,8 @@ model Subject {
   knowledgeUnits KnowledgeUnit[]
   mastery        MasteryState[]
   sessions       ActivitySession[]
+  summaries      Summary[]
+  revisionSheets RevisionSheet[]
 
   @@index([studentId])
   @@unique([id, studentId])
@@ -70,6 +74,8 @@ model Document {
   chunks         DocumentChunk[]
   knowledgeUnits KnowledgeUnit[]
   jobs           DocumentProcessingJob[]
+  summaries      Summary[]
+  revisionSheets RevisionSheet[]
 
   @@index([studentId])
   @@index([subjectId])
@@ -126,6 +132,8 @@ model DocumentChunk {
 
   document Document              @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
   sources  KnowledgeUnitSource[]
+  summarySources SummarySource[]
+  revisionSheetSectionSources RevisionSheetSectionSource[]
 
   @@index([documentId])
   @@index([subjectId])
@@ -144,6 +152,121 @@ model KnowledgeUnitSource {
   chunk         DocumentChunk @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
 
   @@id([knowledgeUnitId, chunkId])
+  @@index([chunkId])
+  @@index([subjectId])
+}
+
+model Summary {
+  id              String                      @id @default(cuid())
+  documentId      String
+  subjectId       String
+  studentId       String
+  status          StudyArtifactStatus
+  title           String?
+  content         String?
+  keyPoints       Json?
+  limits          String?
+  createdAt       DateTime                    @default(now())
+  updatedAt       DateTime                    @updatedAt
+  generatedAt     DateTime
+  flowName        String
+  provider        String
+  model           String
+  promptVersion   String
+  schemaVersion   String
+  inputSize       Int?
+  sourceStrategy  StudyArtifactSourceStrategy
+  errorCode       String?
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject Subject        @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  document Document      @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sources SummarySource[]
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@unique([documentId])
+  @@unique([id, subjectId])
+}
+
+model SummarySource {
+  summaryId      String
+  subjectId      String
+  chunkId        String
+  relevanceScore Float?
+  createdAt      DateTime @default(now())
+
+  summary Summary       @relation(fields: [summaryId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  chunk   DocumentChunk @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
+
+  @@id([summaryId, chunkId])
+  @@index([chunkId])
+  @@index([subjectId])
+}
+
+model RevisionSheet {
+  id                  String                      @id @default(cuid())
+  documentId          String
+  subjectId           String
+  studentId           String
+  status              StudyArtifactStatus
+  title               String?
+  introduction        String?
+  keyPoints           Json?
+  commonMistakes      Json?
+  mustKnow            Json?
+  practiceSuggestions Json?
+  createdAt           DateTime                    @default(now())
+  updatedAt           DateTime                    @updatedAt
+  generatedAt         DateTime
+  flowName            String
+  provider            String
+  model               String
+  promptVersion       String
+  schemaVersion       String
+  inputSize           Int?
+  sourceStrategy      StudyArtifactSourceStrategy
+  errorCode           String?
+
+  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject Subject        @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  document Document      @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sections RevisionSheetSection[]
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@unique([documentId])
+  @@unique([id, subjectId])
+}
+
+model RevisionSheetSection {
+  id              String   @id @default(cuid())
+  revisionSheetId String
+  subjectId       String
+  displayOrder    Int
+  title           String
+  content         String
+  createdAt       DateTime @default(now())
+
+  revisionSheet RevisionSheet @relation(fields: [revisionSheetId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sources RevisionSheetSectionSource[]
+
+  @@index([subjectId])
+  @@unique([revisionSheetId, displayOrder])
+  @@unique([id, subjectId])
+}
+
+model RevisionSheetSectionSource {
+  sectionId      String
+  subjectId      String
+  chunkId        String
+  relevanceScore Float?
+  createdAt      DateTime @default(now())
+
+  section RevisionSheetSection @relation(fields: [sectionId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  chunk   DocumentChunk        @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
+
+  @@id([sectionId, chunkId])
   @@index([chunkId])
   @@index([subjectId])
 }
@@ -227,6 +350,16 @@ enum KnowledgeUnitDifficulty {
   LOW
   MEDIUM
   HIGH
+}
+
+enum StudyArtifactStatus {
+  READY
+  FAILED
+}
+
+enum StudyArtifactSourceStrategy {
+  DOCUMENT_CHUNKS
+  DOCUMENT_CHUNKS_AND_KNOWLEDGE_UNITS
 }
 
 enum JobStatus {
