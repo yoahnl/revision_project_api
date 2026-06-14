@@ -8,8 +8,10 @@ import {
 import {
   resolveArtifactGenkitConfig,
   resolveArtifactGenkitMetadata,
+  resolveArtifactMistralFallbackMetadata,
   type ResolvedArtifactGenkitMetadata,
 } from '../../ai/infrastructure/document-artifact-genkit-config';
+import { isInvalidAiOutputError } from '../../ai/infrastructure/mistral-model-fallback';
 import type { DiagnosticQuizGenerationChunk } from '../application/diagnostic-quiz-generator';
 import {
   OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT,
@@ -63,7 +65,14 @@ export class GenkitOpenAnswerEvaluator implements OpenAnswerEvaluator {
   async evaluate(
     input: OpenAnswerEvaluationInput,
   ): Promise<GeneratedOpenAnswerEvaluation> {
-    const metadata = this.resolveMetadata();
+    const primaryMetadata = this.resolveMetadata();
+    const fallbackMetadata = resolveArtifactMistralFallbackMetadata(
+      primaryMetadata,
+      'MISTRAL_OPEN_ANSWER_EVALUATION_FALLBACK_MODEL',
+    );
+    const attempts = fallbackMetadata
+      ? [primaryMetadata, fallbackMetadata]
+      : [primaryMetadata];
     const chunks = selectChunks({
       chunks: input.chunks ?? [],
       sourceChunkIds: input.question.sourceChunkIds,
@@ -72,84 +81,100 @@ export class GenkitOpenAnswerEvaluator implements OpenAnswerEvaluator {
     });
     const prompt = buildOpenAnswerEvaluationPrompt(input, chunks);
     const inputSize = prompt.length;
-    const startedAt = Date.now();
 
-    try {
-      const { output } = await this.getAi(metadata).generate({
-        prompt,
-        output: {
-          schema: GeneratedOpenAnswerEvaluationSchema,
-        },
-      });
+    for (const [index, metadata] of attempts.entries()) {
+      const startedAt = Date.now();
 
-      if (!output) {
-        throw new Error(OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT);
-      }
+      try {
+        const { output } = await this.getAi(metadata).generate({
+          prompt,
+          output: {
+            schema: GeneratedOpenAnswerEvaluationSchema,
+          },
+        });
 
-      const parsed = GeneratedOpenAnswerEvaluationSchema.parse(output);
-      const sourceChunkIds = normalizeSourceChunkIds(
-        parsed.sourceChunkIds,
-        chunks,
-        OPEN_ANSWER_EVALUATION_SOURCE_INVALID,
-      );
-      const evaluation: GeneratedOpenAnswerEvaluation = {
-        status: 'READY',
-        score: parsed.score,
-        maxScore: parsed.maxScore,
-        feedback: parsed.feedback,
-        presentPoints: parsed.presentPoints,
-        missingPoints: parsed.missingPoints,
-        errors: parsed.errors,
-        modelAnswer: parsed.modelAnswer,
-        advice: parsed.advice,
-        sourceChunkIds,
-        metadata: {
+        if (!output) {
+          throw new Error(OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT);
+        }
+
+        const parsed = GeneratedOpenAnswerEvaluationSchema.parse(output);
+        const sourceChunkIds = normalizeSourceChunkIds(
+          parsed.sourceChunkIds,
+          chunks,
+          OPEN_ANSWER_EVALUATION_SOURCE_INVALID,
+        );
+        const evaluation: GeneratedOpenAnswerEvaluation = {
+          status: 'READY',
+          score: parsed.score,
+          maxScore: parsed.maxScore,
+          feedback: parsed.feedback,
+          presentPoints: parsed.presentPoints,
+          missingPoints: parsed.missingPoints,
+          errors: parsed.errors,
+          modelAnswer: parsed.modelAnswer,
+          advice: parsed.advice,
+          sourceChunkIds,
+          metadata: {
+            flowName: FLOW_NAME,
+            provider: metadata.provider,
+            model: metadata.model,
+            promptVersion: PROMPT_VERSION,
+            schemaVersion: SCHEMA_VERSION,
+            inputSize,
+          },
+        };
+
+        this.observer.observe({
           flowName: FLOW_NAME,
           provider: metadata.provider,
           model: metadata.model,
           promptVersion: PROMPT_VERSION,
           schemaVersion: SCHEMA_VERSION,
           inputSize,
-        },
-      };
+          durationMs: Date.now() - startedAt,
+          status: 'success',
+          documentId: input.documentId ?? undefined,
+          subjectId: input.subjectId,
+          knowledgeUnitId: input.knowledgeUnit.id,
+          activitySessionId: input.activitySessionId,
+          studentId: input.studentId,
+        });
 
-      this.observer.observe({
-        flowName: FLOW_NAME,
-        provider: metadata.provider,
-        model: metadata.model,
-        promptVersion: PROMPT_VERSION,
-        schemaVersion: SCHEMA_VERSION,
-        inputSize,
-        durationMs: Date.now() - startedAt,
-        status: 'success',
-        documentId: input.documentId ?? undefined,
-        subjectId: input.subjectId,
-        knowledgeUnitId: input.knowledgeUnit.id,
-        activitySessionId: input.activitySessionId,
-        studentId: input.studentId,
-      });
+        return evaluation;
+      } catch (error) {
+        this.observer.observe({
+          flowName: FLOW_NAME,
+          provider: metadata.provider,
+          model: metadata.model,
+          promptVersion: PROMPT_VERSION,
+          schemaVersion: SCHEMA_VERSION,
+          inputSize,
+          durationMs: Date.now() - startedAt,
+          status: 'error',
+          errorCode: resolveOpenAnswerEvaluationErrorCode(error),
+          documentId: input.documentId ?? undefined,
+          subjectId: input.subjectId,
+          knowledgeUnitId: input.knowledgeUnit.id,
+          activitySessionId: input.activitySessionId,
+          studentId: input.studentId,
+        });
 
-      return evaluation;
-    } catch (error) {
-      this.observer.observe({
-        flowName: FLOW_NAME,
-        provider: metadata.provider,
-        model: metadata.model,
-        promptVersion: PROMPT_VERSION,
-        schemaVersion: SCHEMA_VERSION,
-        inputSize,
-        durationMs: Date.now() - startedAt,
-        status: 'error',
-        errorCode: resolveOpenAnswerEvaluationErrorCode(error),
-        documentId: input.documentId ?? undefined,
-        subjectId: input.subjectId,
-        knowledgeUnitId: input.knowledgeUnit.id,
-        activitySessionId: input.activitySessionId,
-        studentId: input.studentId,
-      });
+        if (
+          index === 0 &&
+          attempts.length > 1 &&
+          isInvalidAiOutputError(error, [
+            OPEN_ANSWER_EVALUATION_SOURCE_INVALID,
+            OPEN_ANSWER_EVALUATION_EMPTY_OUTPUT,
+          ])
+        ) {
+          continue;
+        }
 
-      throw error;
+        throw error;
+      }
     }
+
+    throw new Error(OPEN_ANSWER_EVALUATION_INVALID);
   }
 
   private getAi(
