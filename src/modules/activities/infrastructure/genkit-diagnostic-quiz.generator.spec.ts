@@ -89,6 +89,7 @@ import type {
   AiGenerationObservation,
   AiGenerationObserver,
 } from '../../ai/application/ai-generation-observer';
+import { Logger } from '@nestjs/common';
 
 describe('GenkitDiagnosticQuizGenerator', () => {
   const originalAiProvider = process.env.AI_PROVIDER;
@@ -104,6 +105,17 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     process.env.DIAGNOSTIC_QUIZ_DEFAULT_QUESTION_COUNT;
   const originalMaxQuestionCount =
     process.env.DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
+  let loggerLogSpy: jest.SpyInstance;
+  let loggerWarnSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    loggerLogSpy = jest
+      .spyOn(Logger.prototype, 'log')
+      .mockImplementation(() => undefined);
+    loggerWarnSpy = jest
+      .spyOn(Logger.prototype, 'warn')
+      .mockImplementation(() => undefined);
+  });
 
   afterEach(() => {
     restoreEnv('AI_PROVIDER', originalAiProvider);
@@ -126,6 +138,8 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     mockGoogleAI.mockClear();
     mockGenkit.mockClear();
     mockGenerate.mockReset();
+    loggerLogSpy.mockRestore();
+    loggerWarnSpy.mockRestore();
   });
 
   it('does not initialize Genkit when imported or constructed', () => {
@@ -396,6 +410,79 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       schemaVersion: 'diagnostic-quiz-v3',
       status: 'success',
     });
+  });
+
+  it('logs safe quiz generation diagnostics for requested capabilities and output shape', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: generatedMediaMultiQuiz(),
+    });
+
+    await new GenkitDiagnosticQuizGenerator(createObserver()).generate({
+      documentId: 'document-1',
+      subjectId: 'subject-1',
+      questionCount: 1,
+      visualsEnabled: true,
+      visualTypes: ['CHART', 'DIAGRAM'],
+      selectionModes: ['single', 'multiple'],
+      knowledgeUnit: sourcedKnowledgeUnit(),
+      chunks: [
+        {
+          id: 'chunk-source',
+          index: 1,
+          text: 'SENTINEL_SOURCE_CHUNK_TEXT Le cours compare les pouvoirs.',
+          pageNumber: 2,
+        },
+      ],
+    });
+
+    const logPayloads = loggerLogSpy.mock.calls
+      .map(([message]): Record<string, unknown> | null =>
+        typeof message === 'string'
+          ? (JSON.parse(message) as Record<string, unknown>)
+          : null,
+      )
+      .filter(
+        (payload): payload is Record<string, unknown> => payload !== null,
+      );
+    const contextLog = logPayloads.find(
+      (payload) => payload.event === 'diagnostic.quiz.generation.context',
+    );
+
+    expect(logPayloads).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          event: 'diagnostic.quiz.generation.context',
+          generationVersion: 'diagnostic-quiz-v3',
+          requestedQuestionCount: 1,
+          selectedChunkCount: 1,
+          requestedSelectionModes: ['single', 'multiple'],
+          requestedVisualTypes: ['CHART', 'DIAGRAM'],
+          visualsEnabled: true,
+          hasSourcedContext: true,
+          documentId: 'document-1',
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-source',
+        }),
+        expect.objectContaining({
+          event: 'diagnostic.quiz.generation.output',
+          generationVersion: 'diagnostic-quiz-v3',
+          outputQuestionCount: 1,
+          difficultyCounts: { LOW: 0, MEDIUM: 1, HIGH: 0, UNKNOWN: 0 },
+          selectionModeCounts: { single: 0, multiple: 1 },
+          visualCounts: { CHART: 1, DIAGRAM: 1 },
+          sourcedQuestionCount: 1,
+          visualQuestionCount: 1,
+          basicPromptHeuristicCount: 0,
+        }),
+      ]),
+    );
+    expect(typeof contextLog?.selectedChunkCharCount).toBe('number');
+    const logs = JSON.stringify(loggerLogSpy.mock.calls);
+    expect(logs).not.toContain('SENTINEL_SOURCE_CHUNK_TEXT');
+    expect(logs).not.toContain('correctChoiceIds');
+    expect(logs).not.toContain('Le controle juridictionnel');
+    expect(logs).not.toContain('Ce choix est correct');
   });
 
   it('rejects a visual source unknown to the selected chunks', async () => {

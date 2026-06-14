@@ -1,4 +1,4 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import openAICompatible from '@genkit-ai/compat-oai';
 import { googleAI } from '@genkit-ai/google-genai';
 import { genkit, z } from 'genkit';
@@ -204,6 +204,7 @@ const GeneratedDiagnosticQuizSchema = z
 
 @Injectable()
 export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
+  private readonly logger = new Logger(GenkitDiagnosticQuizGenerator.name);
   private readonly aiByModel = new Map<string, ReturnType<typeof genkit>>();
   private resolvedMetadata?: ResolvedGenkitMetadata;
 
@@ -225,6 +226,24 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     const chunks = selectDiagnosticQuizChunks(input);
     const prompt = buildPrompt(input, chunks);
     const inputSize = prompt.length;
+    const allowedSelectionModes = resolveAllowedSelectionModes(
+      input.selectionModes,
+    );
+    const allowedVisualTypes = resolveAllowedVisualTypes(input);
+
+    this.logger.log(
+      JSON.stringify(
+        buildDiagnosticQuizContextLog({
+          input,
+          chunks,
+          metadata: primaryMetadata,
+          generationVersion,
+          inputSize,
+          allowedSelectionModes,
+          allowedVisualTypes,
+        }),
+      ),
+    );
 
     for (const [index, metadata] of attempts.entries()) {
       const startedAt = Date.now();
@@ -246,10 +265,8 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           chunks,
           expectedQuestionCount: input.questionCount,
           visualsEnabled: input.visualsEnabled === true,
-          allowedVisualTypes: resolveAllowedVisualTypes(input),
-          allowedSelectionModes: resolveAllowedSelectionModes(
-            input.selectionModes,
-          ),
+          allowedVisualTypes,
+          allowedSelectionModes,
           metadata: {
             provider: metadata.provider,
             model: metadata.model,
@@ -257,6 +274,17 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
             inputSize,
           },
         });
+
+        this.logger.log(
+          JSON.stringify(
+            buildDiagnosticQuizOutputLog({
+              input,
+              quiz,
+              metadata,
+              generationVersion,
+            }),
+          ),
+        );
 
         this.observer.observe({
           flowName: FLOW_NAME,
@@ -274,6 +302,19 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
 
         return quiz;
       } catch (error) {
+        const errorCode = resolveDiagnosticQuizGenerationErrorCode(error);
+
+        this.logger.warn(
+          JSON.stringify(
+            buildDiagnosticQuizErrorLog({
+              input,
+              metadata,
+              generationVersion,
+              errorCode,
+            }),
+          ),
+        );
+
         this.observer.observe({
           flowName: FLOW_NAME,
           provider: metadata.provider,
@@ -283,7 +324,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           inputSize,
           durationMs: Date.now() - startedAt,
           status: 'error',
-          errorCode: resolveDiagnosticQuizGenerationErrorCode(error),
+          errorCode,
           knowledgeUnitId: input.knowledgeUnit.id,
           subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
           documentId: input.documentId ?? undefined,
@@ -593,6 +634,165 @@ function shouldUseV3(
         (question.visuals ?? []).length > 0,
     )
   );
+}
+
+function buildDiagnosticQuizContextLog(input: {
+  input: DiagnosticQuizGenerationInput;
+  chunks: DiagnosticQuizPromptChunk[];
+  metadata: ResolvedGenkitMetadata;
+  generationVersion: DiagnosticQuizGenerationVersion;
+  inputSize: number;
+  allowedSelectionModes: DiagnosticQuizSelectionMode[];
+  allowedVisualTypes: DiagnosticQuizVisualType[];
+}) {
+  return {
+    event: 'diagnostic.quiz.generation.context',
+    flowName: FLOW_NAME,
+    provider: input.metadata.provider,
+    model: input.metadata.model,
+    generationVersion: input.generationVersion,
+    requestedQuestionCount: resolveDiagnosticQuizQuestionCount(
+      input.input.questionCount,
+    ),
+    explicitQuestionCount: input.input.questionCount !== undefined,
+    hasSourcedContext: input.chunks.length > 0,
+    providedChunkCount: input.input.chunks?.length ?? 0,
+    selectedChunkCount: input.chunks.length,
+    selectedChunkCharCount: input.chunks.reduce(
+      (total, chunk) => total + chunk.text.length,
+      0,
+    ),
+    knowledgeUnitSourceCount:
+      input.input.knowledgeUnit.sourceChunkIds?.length ?? 0,
+    requestedSelectionModes: input.allowedSelectionModes,
+    requestedVisualTypes: input.allowedVisualTypes,
+    visualsEnabled: input.input.visualsEnabled === true,
+    inputSize: input.inputSize,
+    documentId: input.input.documentId ?? undefined,
+    subjectId: input.input.subjectId ?? input.input.knowledgeUnit.subjectId,
+    knowledgeUnitId: input.input.knowledgeUnit.id,
+  };
+}
+
+function buildDiagnosticQuizOutputLog(input: {
+  input: DiagnosticQuizGenerationInput;
+  quiz: GeneratedDiagnosticQuiz;
+  metadata: ResolvedGenkitMetadata;
+  generationVersion: DiagnosticQuizGenerationVersion;
+}) {
+  const summary = summarizeDiagnosticQuizOutput(input.quiz);
+
+  return {
+    event: 'diagnostic.quiz.generation.output',
+    flowName: FLOW_NAME,
+    provider: input.metadata.provider,
+    model: input.metadata.model,
+    generationVersion: input.generationVersion,
+    outputVersion: input.quiz.version ?? null,
+    outputQuestionCount: input.quiz.questions.length,
+    difficultyCounts: summary.difficultyCounts,
+    selectionModeCounts: summary.selectionModeCounts,
+    visualCounts: summary.visualCounts,
+    sourcedQuestionCount: summary.sourcedQuestionCount,
+    visualQuestionCount: summary.visualQuestionCount,
+    basicPromptHeuristicCount: summary.basicPromptHeuristicCount,
+    documentId: input.input.documentId ?? undefined,
+    subjectId: input.input.subjectId ?? input.input.knowledgeUnit.subjectId,
+    knowledgeUnitId: input.input.knowledgeUnit.id,
+  };
+}
+
+function buildDiagnosticQuizErrorLog(input: {
+  input: DiagnosticQuizGenerationInput;
+  metadata: ResolvedGenkitMetadata;
+  generationVersion: DiagnosticQuizGenerationVersion;
+  errorCode: string;
+}) {
+  return {
+    event: 'diagnostic.quiz.generation.error',
+    flowName: FLOW_NAME,
+    provider: input.metadata.provider,
+    model: input.metadata.model,
+    generationVersion: input.generationVersion,
+    errorCode: input.errorCode,
+    documentId: input.input.documentId ?? undefined,
+    subjectId: input.input.subjectId ?? input.input.knowledgeUnit.subjectId,
+    knowledgeUnitId: input.input.knowledgeUnit.id,
+  };
+}
+
+function summarizeDiagnosticQuizOutput(quiz: GeneratedDiagnosticQuiz) {
+  const difficultyCounts = {
+    LOW: 0,
+    MEDIUM: 0,
+    HIGH: 0,
+    UNKNOWN: 0,
+  };
+  const selectionModeCounts = {
+    single: 0,
+    multiple: 0,
+  };
+  const visualCounts = {
+    CHART: 0,
+    DIAGRAM: 0,
+  };
+  let sourcedQuestionCount = 0;
+  let visualQuestionCount = 0;
+  let basicPromptHeuristicCount = 0;
+
+  for (const question of quiz.questions) {
+    const difficulty = question.difficulty ?? 'UNKNOWN';
+    difficultyCounts[difficulty] += 1;
+
+    const selectionMode = question.selectionMode ?? 'single';
+    selectionModeCounts[selectionMode] += 1;
+
+    if ((question.sourceChunkIds ?? []).length > 0) {
+      sourcedQuestionCount += 1;
+    }
+
+    if ((question.visuals ?? []).length > 0) {
+      visualQuestionCount += 1;
+    }
+
+    if (isLikelyBasicQuestion(question.prompt)) {
+      basicPromptHeuristicCount += 1;
+    }
+
+    for (const visual of question.visuals ?? []) {
+      if (visual.type === 'CHART' || visual.type === 'DIAGRAM') {
+        visualCounts[visual.type] += 1;
+      }
+    }
+  }
+
+  return {
+    difficultyCounts,
+    selectionModeCounts,
+    visualCounts,
+    sourcedQuestionCount,
+    visualQuestionCount,
+    basicPromptHeuristicCount,
+  };
+}
+
+function isLikelyBasicQuestion(prompt: string): boolean {
+  const normalized = prompt
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .trim()
+    .toLowerCase();
+
+  return [
+    /^qui\b/,
+    /^quand\b/,
+    /^quel auteur\b/,
+    /^quelle date\b/,
+    /^quel est le nom\b/,
+    /^comment s appelle\b/,
+    /^quelle est la definition\b/,
+    /^quel terme designe\b/,
+  ].some((pattern) => pattern.test(normalized));
 }
 
 function resolveAllowedSelectionModes(
