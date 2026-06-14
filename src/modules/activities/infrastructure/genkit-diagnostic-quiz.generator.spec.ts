@@ -12,9 +12,11 @@ type GenerateResult = {
     title: string;
     questions: Array<{
       prompt: string;
-      choices: Array<{ id: string; label: string }>;
+      difficulty?: 'LOW' | 'MEDIUM' | 'HIGH' | null;
+      choices: Array<{ id: string; label: string; feedback?: string | null }>;
       correctChoiceId: string;
       explanation: string;
+      sourceChunkIds?: string[];
     }>;
   };
 };
@@ -67,12 +69,16 @@ describe('GenkitDiagnosticQuizGenerator', () => {
   const originalMistralApiKey = process.env.MISTRAL_API_KEY;
   const originalMistralModel = process.env.MISTRAL_MODEL;
   const originalGenkitModel = process.env.GENKIT_MODEL;
+  const originalMaxChunks = process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS;
+  const originalMaxChars = process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS;
 
   afterEach(() => {
     restoreEnv('AI_PROVIDER', originalAiProvider);
     restoreEnv('MISTRAL_API_KEY', originalMistralApiKey);
     restoreEnv('MISTRAL_MODEL', originalMistralModel);
     restoreEnv('GENKIT_MODEL', originalGenkitModel);
+    restoreEnv('DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS', originalMaxChunks);
+    restoreEnv('DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS', originalMaxChars);
     mockOpenAICompatible.mockClear();
     mockGoogleAI.mockClear();
     mockGenkit.mockClear();
@@ -119,8 +125,303 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(generateInput?.prompt).toContain('Revision constitutionnelle');
     expect(generateInput?.prompt).toContain('forme republicaine');
     expect(generateInput?.prompt).not.toContain('contraction cardiaque');
+    expect(generateInput?.prompt).toContain('correctChoiceId');
     expect(generateInput?.output.schema).toBeDefined();
     expect(quiz).toEqual(generatedQuiz());
+  });
+
+  it('generates a sourced v2 quiz from the selected knowledge unit chunks', async () => {
+    process.env.AI_PROVIDER = 'google';
+    process.env.GENKIT_MODEL = 'googleai/custom-model';
+    process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS = '1';
+    process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS = '300';
+    mockGenerate.mockResolvedValue({
+      output: generatedSourcedQuiz(),
+    });
+    const observer = createObserver();
+
+    const quiz = await new GenkitDiagnosticQuizGenerator(observer).generate({
+      documentId: 'document-1',
+      subjectId: 'subject-1',
+      questionCount: 2,
+      knowledgeUnit: sourcedKnowledgeUnit(),
+      chunks: [
+        {
+          id: 'chunk-unused',
+          index: 0,
+          text: 'SENTINEL_UNUSED_CHUNK_TEXT',
+          pageNumber: null,
+        },
+        {
+          id: 'chunk-source',
+          index: 1,
+          text: 'SENTINEL_SOURCE_CHUNK_TEXT Article 89 organise la revision.',
+          pageNumber: 2,
+        },
+      ],
+    });
+
+    const [generateInput] = mockGenerate.mock.calls[0] ?? [];
+    expect(generateInput?.prompt).toContain('chunk-source');
+    expect(generateInput?.prompt).toContain('SENTINEL_SOURCE_CHUNK_TEXT');
+    expect(generateInput?.prompt).not.toContain('SENTINEL_UNUSED_CHUNK_TEXT');
+    expect(quiz).toEqual({
+      ...generatedSourcedQuiz(),
+      version: 2,
+      metadata: {
+        flowName: 'diagnosticQuizGeneration',
+        provider: 'google-genai',
+        model: 'googleai/custom-model',
+        promptVersion: 'diagnostic-quiz-v2',
+        schemaVersion: 'diagnostic-quiz-v2',
+        inputSize: generateInput?.prompt.length,
+      },
+    });
+
+    const observation = getObservedObservation(observer);
+    expect(observation).toEqual({
+      flowName: 'diagnosticQuizGeneration',
+      provider: 'google-genai',
+      model: 'googleai/custom-model',
+      promptVersion: 'diagnostic-quiz-v2',
+      schemaVersion: 'diagnostic-quiz-v2',
+      inputSize: generateInput?.prompt.length,
+      durationMs: observation.durationMs,
+      status: 'success',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-source',
+      subjectId: 'subject-1',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('SENTINEL_SOURCE_CHUNK_TEXT');
+    expect(observedPayload).not.toContain('SENTINEL_UNUSED_CHUNK_TEXT');
+    expect(observedPayload).not.toContain('La forme republicaine');
+    expect(observedPayload).not.toContain('correct-source');
+    expect(observedPayload).not.toContain('Explication sourcee');
+  });
+
+  it('rejects sourced v2 quiz output that references an unknown chunk', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedSourcedQuiz(),
+        questions: [
+          {
+            ...generatedSourcedQuiz().questions[0],
+            sourceChunkIds: ['missing-chunk'],
+          },
+        ],
+      },
+    });
+    const observer = createObserver();
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator(observer).generate({
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        knowledgeUnit: sourcedKnowledgeUnit(),
+        chunks: [
+          {
+            id: 'chunk-source',
+            index: 1,
+            text: 'Article 89 organise la revision.',
+            pageNumber: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow('DIAGNOSTIC_QUIZ_SOURCE_INVALID');
+
+    const observation = getObservedObservation(observer);
+    expect(observation.status).toBe('error');
+    expect(observation.errorCode).toBe('DIAGNOSTIC_QUIZ_SOURCE_INVALID');
+    expect(observation.documentId).toBe('document-1');
+    expect(observation.knowledgeUnitId).toBe('unit-source');
+  });
+
+  it('rejects sourced v2 quiz output without question sources', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedSourcedQuiz(),
+        questions: [
+          {
+            ...generatedSourcedQuiz().questions[0],
+            sourceChunkIds: [],
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator().generate({
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        knowledgeUnit: sourcedKnowledgeUnit(),
+        chunks: [
+          {
+            id: 'chunk-source',
+            index: 1,
+            text: 'Article 89 organise la revision.',
+            pageNumber: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow('DIAGNOSTIC_QUIZ_SOURCE_INVALID');
+  });
+
+  it('rejects v2 quiz output with an invalid correct choice id', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedSourcedQuiz(),
+        questions: [
+          {
+            ...generatedSourcedQuiz().questions[0],
+            correctChoiceId: 'missing-choice',
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator().generate({
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        knowledgeUnit: sourcedKnowledgeUnit(),
+        chunks: [
+          {
+            id: 'chunk-source',
+            index: 1,
+            text: 'Article 89 organise la revision.',
+            pageNumber: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('rejects v2 quiz output with duplicate choice ids', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedSourcedQuiz(),
+        questions: [
+          {
+            ...generatedSourcedQuiz().questions[0],
+            choices: [
+              { id: 'same-choice', label: 'Choix A' },
+              { id: 'same-choice', label: 'Choix B' },
+            ],
+            correctChoiceId: 'same-choice',
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator().generate({
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        knowledgeUnit: sourcedKnowledgeUnit(),
+        chunks: [
+          {
+            id: 'chunk-source',
+            index: 1,
+            text: 'Article 89 organise la revision.',
+            pageNumber: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('rejects v2 quiz output with insufficient choices', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedSourcedQuiz(),
+        questions: [
+          {
+            ...generatedSourcedQuiz().questions[0],
+            choices: [{ id: 'only-choice', label: 'Choix unique' }],
+            correctChoiceId: 'only-choice',
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator().generate({
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        knowledgeUnit: sourcedKnowledgeUnit(),
+        chunks: [
+          {
+            id: 'chunk-source',
+            index: 1,
+            text: 'Article 89 organise la revision.',
+            pageNumber: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('rejects v2 quiz output without a pedagogical explanation', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedSourcedQuiz(),
+        questions: [
+          {
+            ...generatedSourcedQuiz().questions[0],
+            explanation: '',
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator().generate({
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        knowledgeUnit: sourcedKnowledgeUnit(),
+        chunks: [
+          {
+            id: 'chunk-source',
+            index: 1,
+            text: 'Article 89 organise la revision.',
+            pageNumber: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow();
+  });
+
+  it('rejects unknown fields in v2 quiz output', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedSourcedQuiz(),
+        unexpectedField: 'not allowed',
+      } as never,
+    });
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator().generate({
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        knowledgeUnit: sourcedKnowledgeUnit(),
+        chunks: [
+          {
+            id: 'chunk-source',
+            index: 1,
+            text: 'Article 89 organise la revision.',
+            pageNumber: 2,
+          },
+        ],
+      }),
+    ).rejects.toThrow();
   });
 
   it('uses the Google Genkit provider when Mistral is not configured', async () => {
@@ -187,14 +488,17 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       flowName: 'diagnosticQuizGeneration',
       provider: 'google-genai',
       model: 'googleai/custom-model',
-      promptVersion: 'diagnostic-quiz-v1',
-      schemaVersion: 'diagnostic-quiz-v1',
-      inputSize: 'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
+      promptVersion: 'diagnostic-quiz-v2',
+      schemaVersion: 'diagnostic-quiz-v2',
+      inputSize: observation.inputSize,
       durationMs: observation.durationMs,
       status: 'success',
       knowledgeUnitId: 'unit-1',
       subjectId: 'subject-1',
     });
+    expect(observation.inputSize).toBeGreaterThan(
+      'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
+    );
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
     expect(observedPayload).not.toContain('SENTINEL_UNIT_TITLE');
     expect(observedPayload).not.toContain('SENTINEL_UNIT_SUMMARY');
@@ -226,15 +530,18 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       flowName: 'diagnosticQuizGeneration',
       provider: 'mistral',
       model: 'mistral/mistral-small-latest',
-      promptVersion: 'diagnostic-quiz-v1',
-      schemaVersion: 'diagnostic-quiz-v1',
-      inputSize: 'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
+      promptVersion: 'diagnostic-quiz-v2',
+      schemaVersion: 'diagnostic-quiz-v2',
+      inputSize: observation.inputSize,
       durationMs: observation.durationMs,
       status: 'error',
       errorCode: 'GENKIT_GENERATION_FAILED',
       knowledgeUnitId: 'unit-1',
       subjectId: 'subject-1',
     });
+    expect(observation.inputSize).toBeGreaterThan(
+      'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
+    );
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
     expect(observedPayload).not.toContain('SENTINEL_UNIT_TITLE');
     expect(observedPayload).not.toContain('SENTINEL_UNIT_SUMMARY');
@@ -266,9 +573,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       flowName: 'diagnosticQuizGeneration',
       provider: 'mistral',
       model: 'mistral/mistral-small-latest',
-      promptVersion: 'diagnostic-quiz-v1',
-      schemaVersion: 'diagnostic-quiz-v1',
-      inputSize: 'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
+      promptVersion: 'diagnostic-quiz-v2',
+      schemaVersion: 'diagnostic-quiz-v2',
+      inputSize: observation.inputSize,
       durationMs: observation.durationMs,
       status: 'error',
       errorCode: 'GENKIT_GENERATION_FAILED',
@@ -299,6 +606,52 @@ function generatedQuiz() {
       },
     ],
   };
+}
+
+function generatedSourcedQuiz() {
+  return {
+    title: 'Diagnostic constitutionnel source',
+    questions: [
+      {
+        prompt:
+          'Quelle limite materielle encadre la revision constitutionnelle en France ?',
+        difficulty: 'MEDIUM' as const,
+        choices: [
+          {
+            id: 'correct-source',
+            label: 'La forme republicaine du gouvernement',
+            feedback:
+              'Ce choix reprend la limite materielle explicitement mentionnee.',
+          },
+          {
+            id: 'wrong-source',
+            label: 'La suppression automatique du Parlement',
+            feedback: 'Ce choix n est pas fonde par le cours fourni.',
+          },
+        ],
+        correctChoiceId: 'correct-source',
+        explanation:
+          'Explication sourcee: la revision ne peut pas porter atteinte a cette limite.',
+        sourceChunkIds: ['chunk-source'],
+      },
+    ],
+  };
+}
+
+function sourcedKnowledgeUnit() {
+  return Object.assign(
+    new KnowledgeUnit({
+      id: 'unit-source',
+      subjectId: 'subject-1',
+      title: 'Revision constitutionnelle',
+      summary:
+        'La Constitution encadre la procedure de revision et ses limites.',
+    }),
+    {
+      difficulty: 'MEDIUM' as const,
+      sourceChunkIds: ['chunk-source'],
+    },
+  );
 }
 
 function restoreEnv(name: string, value: string | undefined): void {
