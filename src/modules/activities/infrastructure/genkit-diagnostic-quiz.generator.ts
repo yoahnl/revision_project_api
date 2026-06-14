@@ -15,6 +15,11 @@ import {
   type AiGenerationObserver,
   noopAiGenerationObserver,
 } from '../../ai/application/ai-generation-observer';
+import {
+  isInvalidAiOutputError,
+  normalizeMistralModelName,
+  resolveMistralFallbackModel,
+} from '../../ai/infrastructure/mistral-model-fallback';
 
 const MISTRAL_PLUGIN_NAME = 'mistral';
 const MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
@@ -74,8 +79,7 @@ const GeneratedDiagnosticQuizSchema = z
 
 @Injectable()
 export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
-  private ai?: ReturnType<typeof genkit>;
-  private resolvedConfig?: ResolvedGenkitConfig;
+  private readonly aiByModel = new Map<string, ReturnType<typeof genkit>>();
   private resolvedMetadata?: ResolvedGenkitMetadata;
 
   constructor(
@@ -86,21 +90,57 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
   async generate(
     input: DiagnosticQuizGenerationInput,
   ): Promise<GeneratedDiagnosticQuiz> {
-    const metadata = this.resolveMetadata();
+    const primaryMetadata = this.resolveMetadata();
+    const fallbackMetadata =
+      resolveDiagnosticQuizMistralFallbackMetadata(primaryMetadata);
+    const attempts = fallbackMetadata
+      ? [primaryMetadata, fallbackMetadata]
+      : [primaryMetadata];
     const chunks = selectDiagnosticQuizChunks(input);
     const prompt = buildPrompt(input, chunks);
     const inputSize = prompt.length;
-    const startedAt = Date.now();
 
-    try {
-      const { output } = await this.getAi().generate({
-        prompt,
-        output: {
-          schema: GeneratedDiagnosticQuizSchema,
-        },
-      });
+    for (const [index, metadata] of attempts.entries()) {
+      const startedAt = Date.now();
 
-      if (!output) {
+      try {
+        const { output } = await this.getAi(metadata).generate({
+          prompt,
+          output: {
+            schema: GeneratedDiagnosticQuizSchema,
+          },
+        });
+
+        if (!output) {
+          throw new Error('Generated diagnostic quiz is empty');
+        }
+
+        const quiz = normalizeGeneratedQuiz({
+          output: GeneratedDiagnosticQuizSchema.parse(output),
+          chunks,
+          metadata: {
+            provider: metadata.provider,
+            model: metadata.model,
+            inputSize,
+          },
+        });
+
+        this.observer.observe({
+          flowName: FLOW_NAME,
+          provider: metadata.provider,
+          model: metadata.model,
+          promptVersion: PROMPT_VERSION,
+          schemaVersion: SCHEMA_VERSION,
+          inputSize,
+          durationMs: Date.now() - startedAt,
+          status: 'success',
+          knowledgeUnitId: input.knowledgeUnit.id,
+          subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
+          documentId: input.documentId ?? undefined,
+        });
+
+        return quiz;
+      } catch (error) {
         this.observer.observe({
           flowName: FLOW_NAME,
           provider: metadata.provider,
@@ -110,82 +150,47 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           inputSize,
           durationMs: Date.now() - startedAt,
           status: 'error',
-          errorCode: EMPTY_OUTPUT_ERROR_CODE,
+          errorCode: resolveDiagnosticQuizGenerationErrorCode(error),
           knowledgeUnitId: input.knowledgeUnit.id,
-          subjectId: input.knowledgeUnit.subjectId,
+          subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
           documentId: input.documentId ?? undefined,
         });
-        throw new Error('Generated diagnostic quiz is empty');
-      }
 
-      const quiz = normalizeGeneratedQuiz({
-        output: GeneratedDiagnosticQuizSchema.parse(output),
-        chunks,
-        metadata: {
-          provider: metadata.provider,
-          model: metadata.model,
-          inputSize,
-        },
-      });
+        if (
+          index === 0 &&
+          attempts.length > 1 &&
+          isInvalidAiOutputError(error, [
+            SOURCE_INVALID_ERROR_CODE,
+            'Generated diagnostic quiz is empty',
+          ])
+        ) {
+          continue;
+        }
 
-      this.observer.observe({
-        flowName: FLOW_NAME,
-        provider: metadata.provider,
-        model: metadata.model,
-        promptVersion: PROMPT_VERSION,
-        schemaVersion: SCHEMA_VERSION,
-        inputSize,
-        durationMs: Date.now() - startedAt,
-        status: 'success',
-        knowledgeUnitId: input.knowledgeUnit.id,
-        subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
-        documentId: input.documentId ?? undefined,
-      });
-
-      return quiz;
-    } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === 'Generated diagnostic quiz is empty'
-      ) {
         throw error;
       }
-
-      this.observer.observe({
-        flowName: FLOW_NAME,
-        provider: metadata.provider,
-        model: metadata.model,
-        promptVersion: PROMPT_VERSION,
-        schemaVersion: SCHEMA_VERSION,
-        inputSize,
-        durationMs: Date.now() - startedAt,
-        status: 'error',
-        errorCode:
-          error instanceof Error && error.message === SOURCE_INVALID_ERROR_CODE
-            ? SOURCE_INVALID_ERROR_CODE
-            : GENERATION_FAILED_ERROR_CODE,
-        knowledgeUnitId: input.knowledgeUnit.id,
-        subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
-        documentId: input.documentId ?? undefined,
-      });
-      throw error;
     }
+
+    throw new Error(GENERATION_FAILED_ERROR_CODE);
   }
 
-  private getAi(): ReturnType<typeof genkit> {
-    this.ai ??= genkit(this.resolveConfig().config);
+  private getAi(metadata: ResolvedGenkitMetadata): ReturnType<typeof genkit> {
+    const cacheKey = `${metadata.provider}:${metadata.model}`;
+    const existingAi = this.aiByModel.get(cacheKey);
 
-    return this.ai;
+    if (existingAi) {
+      return existingAi;
+    }
+
+    const ai = genkit(resolveGenkitConfig(metadata).config);
+    this.aiByModel.set(cacheKey, ai);
+
+    return ai;
   }
 
   private resolveMetadata(): ResolvedGenkitMetadata {
     this.resolvedMetadata ??= resolveGenkitMetadata();
     return this.resolvedMetadata;
-  }
-
-  private resolveConfig(): ResolvedGenkitConfig {
-    this.resolvedConfig ??= resolveGenkitConfig(this.resolveMetadata());
-    return this.resolvedConfig;
   }
 }
 
@@ -445,6 +450,28 @@ function resolveGenkitMetadata(): ResolvedGenkitMetadata {
   };
 }
 
+function resolveDiagnosticQuizMistralFallbackMetadata(
+  metadata: ResolvedGenkitMetadata,
+): ResolvedGenkitMetadata | null {
+  if (!metadata.useMistral) {
+    return null;
+  }
+
+  const fallbackModel = resolveMistralFallbackModel({
+    primaryModel: metadata.model,
+    specificFallbackEnv: 'MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL',
+  });
+
+  if (!fallbackModel) {
+    return null;
+  }
+
+  return {
+    ...metadata,
+    model: fallbackModel,
+  };
+}
+
 function resolveGenkitConfig(
   metadata: ResolvedGenkitMetadata,
 ): ResolvedGenkitConfig {
@@ -489,13 +516,24 @@ function resolveMistralModel(): string {
   const configuredModel = process.env.MISTRAL_MODEL?.trim();
   const model = configuredModel || DEFAULT_MISTRAL_MODEL;
 
-  if (model.startsWith(`${MISTRAL_PLUGIN_NAME}/`)) {
-    return model;
-  }
-
-  return `${MISTRAL_PLUGIN_NAME}/${model}`;
+  return normalizeMistralModelName(model);
 }
 
 function hasValue(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function resolveDiagnosticQuizGenerationErrorCode(error: unknown): string {
+  if (
+    error instanceof Error &&
+    error.message === 'Generated diagnostic quiz is empty'
+  ) {
+    return EMPTY_OUTPUT_ERROR_CODE;
+  }
+
+  if (error instanceof Error && error.message === SOURCE_INVALID_ERROR_CODE) {
+    return SOURCE_INVALID_ERROR_CODE;
+  }
+
+  return GENERATION_FAILED_ERROR_CODE;
 }

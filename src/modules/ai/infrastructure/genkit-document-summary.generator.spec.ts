@@ -57,6 +57,9 @@ describe('GenkitDocumentSummaryGenerator', () => {
   const originalGoogleApiKey = process.env.GOOGLE_GENAI_API_KEY;
   const originalMistralApiKey = process.env.MISTRAL_API_KEY;
   const originalMistralModel = process.env.MISTRAL_MODEL;
+  const originalMistralFallbackModel = process.env.MISTRAL_FALLBACK_MODEL;
+  const originalMistralSummaryFallbackModel =
+    process.env.MISTRAL_SUMMARY_FALLBACK_MODEL;
   const originalModel = process.env.GENKIT_MODEL;
   const originalMaxChunks = process.env.SUMMARY_GENERATION_MAX_CHUNKS;
   const originalMaxChars = process.env.SUMMARY_GENERATION_MAX_CHARS;
@@ -66,6 +69,11 @@ describe('GenkitDocumentSummaryGenerator', () => {
     restoreEnv('GOOGLE_GENAI_API_KEY', originalGoogleApiKey);
     restoreEnv('MISTRAL_API_KEY', originalMistralApiKey);
     restoreEnv('MISTRAL_MODEL', originalMistralModel);
+    restoreEnv('MISTRAL_FALLBACK_MODEL', originalMistralFallbackModel);
+    restoreEnv(
+      'MISTRAL_SUMMARY_FALLBACK_MODEL',
+      originalMistralSummaryFallbackModel,
+    );
     restoreEnv('GENKIT_MODEL', originalModel);
     restoreEnv('SUMMARY_GENERATION_MAX_CHUNKS', originalMaxChunks);
     restoreEnv('SUMMARY_GENERATION_MAX_CHARS', originalMaxChars);
@@ -221,6 +229,68 @@ describe('GenkitDocumentSummaryGenerator', () => {
         knowledgeUnits: [],
       }),
     ).rejects.toThrow('SUMMARY_SOURCE_INVALID');
+  });
+
+  it('retries summary generation with the global Mistral fallback model after invalid sources', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_MODEL = 'mistral-small-latest';
+    process.env.MISTRAL_FALLBACK_MODEL = 'mistral-large-latest';
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate
+      .mockResolvedValueOnce({
+        output: {
+          title: 'Résumé invalide',
+          content: 'Synthèse courte.',
+          keyPoints: ['Point clé'],
+          sourceChunkIds: ['chunk-unknown'],
+        },
+      })
+      .mockResolvedValueOnce({
+        output: {
+          title: 'Résumé valide',
+          content: 'Synthèse courte.',
+          keyPoints: ['Point clé'],
+          sourceChunkIds: ['chunk-1'],
+        },
+      });
+    const observer = createObserver();
+
+    const summary = await new GenkitDocumentSummaryGenerator(observer).generate(
+      {
+        documentId: 'document-1',
+        chunks: [{ id: 'chunk-1', index: 0, text: 'Texte.', pageNumber: null }],
+        knowledgeUnits: [],
+      },
+    );
+
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenkit).toHaveBeenNthCalledWith(1, {
+      plugins: [mockPlugin],
+      model: 'mistral/mistral-small-latest',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(2, {
+      plugins: [mockPlugin],
+      model: 'mistral/mistral-large-latest',
+    });
+    expect(summary.title).toBe('Résumé valide');
+    expect(summary.metadata.model).toBe('mistral/mistral-large-latest');
+    expect(observer.observe.mock.calls).toHaveLength(2);
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      status: 'error',
+      model: 'mistral/mistral-small-latest',
+      errorCode: 'SUMMARY_SOURCE_INVALID',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      status: 'success',
+      model: 'mistral/mistral-large-latest',
+    });
+    expect(JSON.stringify(observer.observe.mock.calls)).not.toContain('Texte.');
+    expect(JSON.stringify(observer.observe.mock.calls)).not.toContain(
+      'Synthèse courte.',
+    );
   });
 
   it('rejects summaries without sources', async () => {

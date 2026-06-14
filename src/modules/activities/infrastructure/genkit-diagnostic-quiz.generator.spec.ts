@@ -68,6 +68,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
   const originalAiProvider = process.env.AI_PROVIDER;
   const originalMistralApiKey = process.env.MISTRAL_API_KEY;
   const originalMistralModel = process.env.MISTRAL_MODEL;
+  const originalMistralFallbackModel = process.env.MISTRAL_FALLBACK_MODEL;
+  const originalMistralDiagnosticQuizFallbackModel =
+    process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL;
   const originalGenkitModel = process.env.GENKIT_MODEL;
   const originalMaxChunks = process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS;
   const originalMaxChars = process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS;
@@ -76,6 +79,11 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     restoreEnv('AI_PROVIDER', originalAiProvider);
     restoreEnv('MISTRAL_API_KEY', originalMistralApiKey);
     restoreEnv('MISTRAL_MODEL', originalMistralModel);
+    restoreEnv('MISTRAL_FALLBACK_MODEL', originalMistralFallbackModel);
+    restoreEnv(
+      'MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL',
+      originalMistralDiagnosticQuizFallbackModel,
+    );
     restoreEnv('GENKIT_MODEL', originalGenkitModel);
     restoreEnv('DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS', originalMaxChunks);
     restoreEnv('DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS', originalMaxChars);
@@ -236,6 +244,70 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(observation.errorCode).toBe('DIAGNOSTIC_QUIZ_SOURCE_INVALID');
     expect(observation.documentId).toBe('document-1');
     expect(observation.knowledgeUnitId).toBe('unit-source');
+  });
+
+  it('retries sourced v2 quiz generation with a specific Mistral fallback model after invalid sources', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_MODEL = 'mistral-small-latest';
+    process.env.MISTRAL_FALLBACK_MODEL = 'mistral-global-fallback';
+    process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL = 'mistral-large-latest';
+    mockGenerate
+      .mockResolvedValueOnce({
+        output: {
+          ...generatedSourcedQuiz(),
+          questions: [
+            {
+              ...generatedSourcedQuiz().questions[0],
+              sourceChunkIds: ['missing-chunk'],
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        output: generatedSourcedQuiz(),
+      });
+    const observer = createObserver();
+
+    const quiz = await new GenkitDiagnosticQuizGenerator(observer).generate({
+      documentId: 'document-1',
+      subjectId: 'subject-1',
+      knowledgeUnit: sourcedKnowledgeUnit(),
+      chunks: [
+        {
+          id: 'chunk-source',
+          index: 1,
+          text: 'SENTINEL_SOURCE_CHUNK_TEXT Article 89 organise la revision.',
+          pageNumber: 2,
+        },
+      ],
+    });
+
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenkit).toHaveBeenNthCalledWith(1, {
+      plugins: [mockMistralPlugin],
+      model: 'mistral/mistral-small-latest',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(2, {
+      plugins: [mockMistralPlugin],
+      model: 'mistral/mistral-large-latest',
+    });
+    expect(quiz.metadata?.model).toBe('mistral/mistral-large-latest');
+    expect(observer.observe.mock.calls).toHaveLength(2);
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      status: 'error',
+      model: 'mistral/mistral-small-latest',
+      errorCode: 'DIAGNOSTIC_QUIZ_SOURCE_INVALID',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      status: 'success',
+      model: 'mistral/mistral-large-latest',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('SENTINEL_SOURCE_CHUNK_TEXT');
+    expect(observedPayload).not.toContain('correct-source');
+    expect(observedPayload).not.toContain('Explication sourcee');
+    expect(observedPayload).not.toContain('Ce choix est correct');
   });
 
   it('rejects sourced v2 quiz output without question sources', async () => {

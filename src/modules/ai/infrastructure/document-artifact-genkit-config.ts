@@ -1,6 +1,10 @@
 import openAICompatible from '@genkit-ai/compat-oai';
 import { googleAI } from '@genkit-ai/google-genai';
 import type { genkit } from 'genkit';
+import {
+  normalizeMistralModelName,
+  resolveMistralFallbackModel,
+} from './mistral-model-fallback';
 
 const MISTRAL_PLUGIN_NAME = 'mistral';
 const MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
@@ -9,7 +13,7 @@ const DEFAULT_GENKIT_MODEL = 'googleai/gemini-2.5-flash';
 export const GOOGLE_PROVIDER = 'google-genai';
 export const MISTRAL_PROVIDER = 'mistral';
 
-type ResolvedArtifactGenkitMetadata = {
+export type ResolvedArtifactGenkitMetadata = {
   provider: string;
   model: string;
   useMistral: boolean;
@@ -73,6 +77,29 @@ export function resolveArtifactGenkitConfig(
   };
 }
 
+export function resolveArtifactMistralFallbackMetadata(
+  metadata: ResolvedArtifactGenkitMetadata,
+  specificFallbackEnv: string,
+): ResolvedArtifactGenkitMetadata | null {
+  if (!metadata.useMistral) {
+    return null;
+  }
+
+  const fallbackModel = resolveMistralFallbackModel({
+    primaryModel: metadata.model,
+    specificFallbackEnv,
+  });
+
+  if (!fallbackModel) {
+    return null;
+  }
+
+  return {
+    ...metadata,
+    model: fallbackModel,
+  };
+}
+
 function resolveMistralApiKey(): string {
   const apiKey = process.env.MISTRAL_API_KEY?.trim();
 
@@ -87,11 +114,7 @@ function resolveMistralModel(): string {
   const configuredModel = process.env.MISTRAL_MODEL?.trim();
   const model = configuredModel || DEFAULT_MISTRAL_MODEL;
 
-  if (model.startsWith(`${MISTRAL_PLUGIN_NAME}/`)) {
-    return model;
-  }
-
-  return `${MISTRAL_PLUGIN_NAME}/${model}`;
+  return normalizeMistralModelName(model);
 }
 
 function hasValue(value: string | undefined): boolean {

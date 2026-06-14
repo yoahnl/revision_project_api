@@ -18,10 +18,13 @@ import {
   selectDocumentArtifactChunks,
 } from './document-artifact-generation-input';
 import {
+  type ResolvedArtifactGenkitMetadata,
+  resolveArtifactMistralFallbackMetadata,
   resolveArtifactGenkitConfig,
   resolveArtifactGenkitMetadata,
 } from './document-artifact-genkit-config';
 import { GeneratedRevisionSheetSchema } from './document-artifact-output.schema';
+import { isInvalidAiOutputError } from './mistral-model-fallback';
 
 const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
 const REVISION_SHEET_SOURCE_INVALID_ERROR_CODE =
@@ -29,7 +32,7 @@ const REVISION_SHEET_SOURCE_INVALID_ERROR_CODE =
 
 @Injectable()
 export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
-  private ai?: ReturnType<typeof genkit>;
+  private readonly aiByModel = new Map<string, ReturnType<typeof genkit>>();
   private resolvedMetadata?: ReturnType<typeof resolveArtifactGenkitMetadata>;
 
   constructor(
@@ -40,7 +43,14 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
   async generate(
     input: Parameters<RevisionSheetGenerator['generate']>[0],
   ): Promise<GeneratedRevisionSheet> {
-    const metadata = this.resolveMetadata();
+    const primaryMetadata = this.resolveMetadata();
+    const fallbackMetadata = resolveArtifactMistralFallbackMetadata(
+      primaryMetadata,
+      'MISTRAL_REVISION_SHEET_FALLBACK_MODEL',
+    );
+    const attempts = fallbackMetadata
+      ? [primaryMetadata, fallbackMetadata]
+      : [primaryMetadata];
     const chunks = selectDocumentArtifactChunks(input.chunks, {
       maxChunksEnv: 'REVISION_SHEET_GENERATION_MAX_CHUNKS',
       maxCharsEnv: 'REVISION_SHEET_GENERATION_MAX_CHARS',
@@ -52,92 +62,123 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
       chunks,
       knowledgeUnits: input.knowledgeUnits,
     });
-    const startedAt = Date.now();
 
-    try {
-      const { output } = await this.getAi().generate({
-        prompt,
-        output: {
-          schema: GeneratedRevisionSheetSchema,
-        },
-      });
-      const parsed = GeneratedRevisionSheetSchema.parse(output);
-      const knownChunkIds = new Set(chunks.map((chunk) => chunk.id));
-      const sections = parsed.sections.map((section, index) => ({
-        displayOrder: index,
-        title: section.title,
-        content: section.content,
-        sourceChunkIds: normalizeSourceChunkIds({
-          sourceChunkIds: section.sourceChunkIds,
-          knownChunkIds,
-          errorMessage: REVISION_SHEET_SOURCE_INVALID_ERROR_CODE,
-        }),
-      }));
-      const generatedAt = new Date();
-      const durationMs = Date.now() - startedAt;
+    for (const [index, metadata] of attempts.entries()) {
+      const startedAt = Date.now();
 
-      this.observer.observe({
-        flowName: REVISION_SHEET_FLOW_NAME,
-        provider: metadata.provider,
-        model: metadata.model,
-        promptVersion: REVISION_SHEET_PROMPT_VERSION,
-        schemaVersion: REVISION_SHEET_SCHEMA_VERSION,
-        inputSize: prompt.length,
-        durationMs,
-        status: 'success',
-        documentId: input.documentId,
-      });
+      try {
+        const { output } = await this.getAi(metadata).generate({
+          prompt,
+          output: {
+            schema: GeneratedRevisionSheetSchema,
+          },
+        });
+        const parsed = GeneratedRevisionSheetSchema.parse(output);
+        const knownChunkIds = new Set(chunks.map((chunk) => chunk.id));
+        const sections = parsed.sections.map((section, sectionIndex) => ({
+          displayOrder: sectionIndex,
+          title: section.title,
+          content: section.content,
+          sourceChunkIds: normalizeSourceChunkIds({
+            sourceChunkIds: section.sourceChunkIds,
+            knownChunkIds,
+            errorMessage: REVISION_SHEET_SOURCE_INVALID_ERROR_CODE,
+          }),
+        }));
+        const generatedAt = new Date();
+        const durationMs = Date.now() - startedAt;
 
-      return {
-        title: parsed.title,
-        introduction: parsed.introduction ?? null,
-        sections,
-        keyPoints: parsed.keyPoints,
-        commonMistakes: parsed.commonMistakes ?? [],
-        mustKnow: parsed.mustKnow ?? [],
-        practiceSuggestions: parsed.practiceSuggestions ?? [],
-        metadata: {
+        this.observer.observe({
           flowName: REVISION_SHEET_FLOW_NAME,
           provider: metadata.provider,
           model: metadata.model,
           promptVersion: REVISION_SHEET_PROMPT_VERSION,
           schemaVersion: REVISION_SHEET_SCHEMA_VERSION,
-          generatedAt,
           inputSize: prompt.length,
-          sourceStrategy: 'DOCUMENT_CHUNKS_AND_KNOWLEDGE_UNITS',
-        },
-      };
-    } catch (error) {
-      this.observer.observe({
-        flowName: REVISION_SHEET_FLOW_NAME,
-        provider: metadata.provider,
-        model: metadata.model,
-        promptVersion: REVISION_SHEET_PROMPT_VERSION,
-        schemaVersion: REVISION_SHEET_SCHEMA_VERSION,
-        inputSize: prompt.length,
-        durationMs: Date.now() - startedAt,
-        status: 'error',
-        errorCode:
-          error instanceof Error &&
-          error.message === REVISION_SHEET_SOURCE_INVALID_ERROR_CODE
-            ? REVISION_SHEET_SOURCE_INVALID_ERROR_CODE
-            : GENERATION_FAILED_ERROR_CODE,
-        documentId: input.documentId,
-      });
-      throw error;
+          durationMs,
+          status: 'success',
+          documentId: input.documentId,
+        });
+
+        return {
+          title: parsed.title,
+          introduction: parsed.introduction ?? null,
+          sections,
+          keyPoints: parsed.keyPoints,
+          commonMistakes: parsed.commonMistakes ?? [],
+          mustKnow: parsed.mustKnow ?? [],
+          practiceSuggestions: parsed.practiceSuggestions ?? [],
+          metadata: {
+            flowName: REVISION_SHEET_FLOW_NAME,
+            provider: metadata.provider,
+            model: metadata.model,
+            promptVersion: REVISION_SHEET_PROMPT_VERSION,
+            schemaVersion: REVISION_SHEET_SCHEMA_VERSION,
+            generatedAt,
+            inputSize: prompt.length,
+            sourceStrategy: 'DOCUMENT_CHUNKS_AND_KNOWLEDGE_UNITS',
+          },
+        };
+      } catch (error) {
+        this.observer.observe({
+          flowName: REVISION_SHEET_FLOW_NAME,
+          provider: metadata.provider,
+          model: metadata.model,
+          promptVersion: REVISION_SHEET_PROMPT_VERSION,
+          schemaVersion: REVISION_SHEET_SCHEMA_VERSION,
+          inputSize: prompt.length,
+          durationMs: Date.now() - startedAt,
+          status: 'error',
+          errorCode: resolveRevisionSheetGenerationErrorCode(error),
+          documentId: input.documentId,
+        });
+
+        if (
+          index === 0 &&
+          attempts.length > 1 &&
+          isInvalidAiOutputError(error, [
+            REVISION_SHEET_SOURCE_INVALID_ERROR_CODE,
+          ])
+        ) {
+          continue;
+        }
+
+        throw error;
+      }
     }
+
+    throw new Error(GENERATION_FAILED_ERROR_CODE);
   }
 
-  private getAi(): ReturnType<typeof genkit> {
-    this.ai ??= genkit(
-      resolveArtifactGenkitConfig(this.resolveMetadata()).config,
-    );
+  private getAi(
+    metadata: ResolvedArtifactGenkitMetadata,
+  ): ReturnType<typeof genkit> {
+    const cacheKey = `${metadata.provider}:${metadata.model}`;
+    const existingAi = this.aiByModel.get(cacheKey);
 
-    return this.ai;
+    if (existingAi) {
+      return existingAi;
+    }
+
+    const ai = genkit(resolveArtifactGenkitConfig(metadata).config);
+    this.aiByModel.set(cacheKey, ai);
+
+    return ai;
   }
 
   private resolveMetadata(): ReturnType<typeof resolveArtifactGenkitMetadata> {
     this.resolvedMetadata ??= resolveArtifactGenkitMetadata();
     return this.resolvedMetadata;
   }
+}
+
+function resolveRevisionSheetGenerationErrorCode(error: unknown): string {
+  if (
+    error instanceof Error &&
+    error.message === REVISION_SHEET_SOURCE_INVALID_ERROR_CODE
+  ) {
+    return REVISION_SHEET_SOURCE_INVALID_ERROR_CODE;
+  }
+
+  return GENERATION_FAILED_ERROR_CODE;
 }

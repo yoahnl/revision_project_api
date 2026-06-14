@@ -65,6 +65,10 @@ Variables requises en production :
 - `GENKIT_MODEL` optionnel, defaut `googleai/gemini-2.5-flash`
 - `MISTRAL_API_KEY` requis avec `AI_PROVIDER=mistral`
 - `MISTRAL_MODEL` optionnel, defaut `mistral-small-latest`
+- `MISTRAL_FALLBACK_MODEL` optionnel, fallback global Mistral pour les sorties IA invalides
+- `MISTRAL_SUMMARY_FALLBACK_MODEL` optionnel, fallback Mistral prioritaire pour les resumes
+- `MISTRAL_REVISION_SHEET_FALLBACK_MODEL` optionnel, fallback Mistral prioritaire pour les fiches
+- `MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL` optionnel, fallback Mistral prioritaire pour les QCM sourcés
 - `RUN_PRISMA_MIGRATIONS=true` pour appliquer `prisma migrate deploy` au demarrage Dokploy
 
 Le conteneur ecoute sur `PORT=8080` par defaut. Sur Dokploy, monter un volume
@@ -74,3 +78,9 @@ comme deux applications separees, les deux doivent lire/ecrire le meme volume.
 Si `AI_PROVIDER` n'est pas configure et que seule `MISTRAL_API_KEY` est
 presente, l'API utilise automatiquement le plugin Genkit Mistral pour eviter un
 echec Google GenAI lie a une cle absente.
+
+Les variables `MISTRAL_*_FALLBACK_MODEL` ne changent jamais de provider. Elles
+servent uniquement a retenter une generation Mistral avec un autre modele quand
+la sortie IA est invalide, par exemple JSON/schema invalide ou sources inconnues.
+Le modele fallback doit etre choisi et verifie cote exploitation selon les
+modeles disponibles sur le compte Mistral.

@@ -62,6 +62,9 @@ describe('GenkitRevisionSheetGenerator', () => {
   const originalAiProvider = process.env.AI_PROVIDER;
   const originalMistralApiKey = process.env.MISTRAL_API_KEY;
   const originalMistralModel = process.env.MISTRAL_MODEL;
+  const originalMistralFallbackModel = process.env.MISTRAL_FALLBACK_MODEL;
+  const originalMistralRevisionSheetFallbackModel =
+    process.env.MISTRAL_REVISION_SHEET_FALLBACK_MODEL;
   const originalMaxChunks = process.env.REVISION_SHEET_GENERATION_MAX_CHUNKS;
   const originalMaxChars = process.env.REVISION_SHEET_GENERATION_MAX_CHARS;
 
@@ -69,6 +72,11 @@ describe('GenkitRevisionSheetGenerator', () => {
     restoreEnv('AI_PROVIDER', originalAiProvider);
     restoreEnv('MISTRAL_API_KEY', originalMistralApiKey);
     restoreEnv('MISTRAL_MODEL', originalMistralModel);
+    restoreEnv('MISTRAL_FALLBACK_MODEL', originalMistralFallbackModel);
+    restoreEnv(
+      'MISTRAL_REVISION_SHEET_FALLBACK_MODEL',
+      originalMistralRevisionSheetFallbackModel,
+    );
     restoreEnv('REVISION_SHEET_GENERATION_MAX_CHUNKS', originalMaxChunks);
     restoreEnv('REVISION_SHEET_GENERATION_MAX_CHARS', originalMaxChars);
   });
@@ -255,6 +263,108 @@ describe('GenkitRevisionSheetGenerator', () => {
         knowledgeUnits: [],
       }),
     ).rejects.toThrow('REVISION_SHEET_SOURCE_INVALID');
+  });
+
+  it('retries sourced revision sheet generation with a specific Mistral fallback model after invalid sources', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_MODEL = 'mistral-small-latest';
+    process.env.MISTRAL_FALLBACK_MODEL = 'mistral-global-fallback';
+    process.env.MISTRAL_REVISION_SHEET_FALLBACK_MODEL = 'mistral-large-latest';
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate
+      .mockResolvedValueOnce({
+        output: {
+          title: 'Fiche invalide',
+          sections: [
+            {
+              title: 'Principe',
+              content: 'Contenu.',
+              sourceChunkIds: ['chunk-unknown'],
+            },
+          ],
+          keyPoints: ['Point clé'],
+        },
+      })
+      .mockResolvedValueOnce({
+        output: {
+          title: 'Fiche valide',
+          sections: [
+            {
+              title: 'Principe',
+              content: 'Contenu structuré.',
+              sourceChunkIds: ['chunk-1'],
+            },
+          ],
+          keyPoints: ['Point clé'],
+        },
+      });
+    const observer = createObserver();
+
+    const sheet = await new GenkitRevisionSheetGenerator(observer).generate({
+      documentId: 'document-1',
+      chunks: [{ id: 'chunk-1', index: 0, text: 'Texte.', pageNumber: null }],
+      knowledgeUnits: [],
+    });
+
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenkit).toHaveBeenNthCalledWith(1, {
+      plugins: [mockPlugin],
+      model: 'mistral/mistral-small-latest',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(2, {
+      plugins: [mockPlugin],
+      model: 'mistral/mistral-large-latest',
+    });
+    expect(sheet.title).toBe('Fiche valide');
+    expect(sheet.metadata.model).toBe('mistral/mistral-large-latest');
+    expect(observer.observe.mock.calls).toHaveLength(2);
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      status: 'error',
+      model: 'mistral/mistral-small-latest',
+      errorCode: 'REVISION_SHEET_SOURCE_INVALID',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      status: 'success',
+      model: 'mistral/mistral-large-latest',
+    });
+    expect(JSON.stringify(observer.observe.mock.calls)).not.toContain('Texte.');
+    expect(JSON.stringify(observer.observe.mock.calls)).not.toContain(
+      'Contenu structuré.',
+    );
+  });
+
+  it('does not retry revision sheet generation when fallback model resolves to the primary model', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_MODEL = 'mistral-small-latest';
+    process.env.MISTRAL_REVISION_SHEET_FALLBACK_MODEL = 'mistral-small-latest';
+    mockGenerate.mockReset();
+    mockGenerate.mockResolvedValue({
+      output: {
+        title: 'Fiche',
+        sections: [
+          {
+            title: 'Principe',
+            content: 'Contenu structuré.',
+            sourceChunkIds: ['chunk-unknown'],
+          },
+        ],
+        keyPoints: ['Point clé'],
+      },
+    });
+
+    await expect(
+      new GenkitRevisionSheetGenerator().generate({
+        documentId: 'document-1',
+        chunks: [{ id: 'chunk-1', index: 0, text: 'Texte.', pageNumber: null }],
+        knowledgeUnits: [],
+      }),
+    ).rejects.toThrow('REVISION_SHEET_SOURCE_INVALID');
+
+    expect(mockGenerate).toHaveBeenCalledTimes(1);
   });
 
   it('limits revision sheet input before prompting', async () => {
