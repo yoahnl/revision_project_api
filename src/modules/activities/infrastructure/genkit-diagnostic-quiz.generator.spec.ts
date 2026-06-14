@@ -57,6 +57,10 @@ jest.mock('@genkit-ai/google-genai', () => ({
 }));
 
 import { GenkitDiagnosticQuizGenerator } from './genkit-diagnostic-quiz.generator';
+import type {
+  AiGenerationObservation,
+  AiGenerationObserver,
+} from '../../ai/application/ai-generation-observer';
 
 describe('GenkitDiagnosticQuizGenerator', () => {
   const originalAiProvider = process.env.AI_PROVIDER;
@@ -159,6 +163,123 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       }),
     ).rejects.toThrow('Generated diagnostic quiz is empty');
   });
+
+  it('observes successful quiz generations without sending knowledge unit content', async () => {
+    process.env.AI_PROVIDER = 'google';
+    process.env.GENKIT_MODEL = 'googleai/custom-model';
+    mockGenerate.mockResolvedValue({
+      output: generatedQuiz(),
+    });
+    const observer = createObserver();
+
+    await new GenkitDiagnosticQuizGenerator(observer).generate({
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-1',
+        subjectId: 'subject-1',
+        title: 'SENTINEL_UNIT_TITLE',
+        summary: 'SENTINEL_UNIT_SUMMARY',
+      }),
+    });
+
+    const observation = getObservedObservation(observer);
+    expect(observation.durationMs).toEqual(expect.any(Number));
+    expect(observation).toEqual({
+      flowName: 'diagnosticQuizGeneration',
+      provider: 'google-genai',
+      model: 'googleai/custom-model',
+      promptVersion: 'diagnostic-quiz-v1',
+      schemaVersion: 'diagnostic-quiz-v1',
+      inputSize: 'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
+      durationMs: observation.durationMs,
+      status: 'success',
+      knowledgeUnitId: 'unit-1',
+      subjectId: 'subject-1',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('SENTINEL_UNIT_TITLE');
+    expect(observedPayload).not.toContain('SENTINEL_UNIT_SUMMARY');
+    expect(observedPayload).not.toContain('forme republicaine');
+  });
+
+  it('observes quiz generation errors without logging provider messages', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'secret-test-key';
+    mockGenerate.mockRejectedValue(
+      new Error('SENTINEL_PROVIDER_ERROR_WITH_UNIT_CONTENT'),
+    );
+    const observer = createObserver();
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator(observer).generate({
+        knowledgeUnit: new KnowledgeUnit({
+          id: 'unit-1',
+          subjectId: 'subject-1',
+          title: 'SENTINEL_UNIT_TITLE',
+          summary: 'SENTINEL_UNIT_SUMMARY',
+        }),
+      }),
+    ).rejects.toThrow('SENTINEL_PROVIDER_ERROR_WITH_UNIT_CONTENT');
+
+    const observation = getObservedObservation(observer);
+    expect(observation.durationMs).toEqual(expect.any(Number));
+    expect(observation).toEqual({
+      flowName: 'diagnosticQuizGeneration',
+      provider: 'mistral',
+      model: 'mistral/mistral-small-latest',
+      promptVersion: 'diagnostic-quiz-v1',
+      schemaVersion: 'diagnostic-quiz-v1',
+      inputSize: 'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
+      durationMs: observation.durationMs,
+      status: 'error',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+      knowledgeUnitId: 'unit-1',
+      subjectId: 'subject-1',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('SENTINEL_UNIT_TITLE');
+    expect(observedPayload).not.toContain('SENTINEL_UNIT_SUMMARY');
+    expect(observedPayload).not.toContain('secret-test-key');
+    expect(observedPayload).not.toContain(
+      'SENTINEL_PROVIDER_ERROR_WITH_UNIT_CONTENT',
+    );
+  });
+
+  it('observes provider configuration errors before rethrowing them', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    delete process.env.MISTRAL_API_KEY;
+    const observer = createObserver();
+
+    await expect(
+      new GenkitDiagnosticQuizGenerator(observer).generate({
+        knowledgeUnit: new KnowledgeUnit({
+          id: 'unit-1',
+          subjectId: 'subject-1',
+          title: 'SENTINEL_UNIT_TITLE',
+          summary: 'SENTINEL_UNIT_SUMMARY',
+        }),
+      }),
+    ).rejects.toThrow('MISTRAL_API_KEY is required');
+
+    const observation = getObservedObservation(observer);
+    expect(observation.durationMs).toEqual(expect.any(Number));
+    expect(observation).toEqual({
+      flowName: 'diagnosticQuizGeneration',
+      provider: 'mistral',
+      model: 'mistral/mistral-small-latest',
+      promptVersion: 'diagnostic-quiz-v1',
+      schemaVersion: 'diagnostic-quiz-v1',
+      inputSize: 'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
+      durationMs: observation.durationMs,
+      status: 'error',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+      knowledgeUnitId: 'unit-1',
+      subjectId: 'subject-1',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('SENTINEL_UNIT_TITLE');
+    expect(observedPayload).not.toContain('SENTINEL_UNIT_SUMMARY');
+    expect(observedPayload).not.toContain('MISTRAL_API_KEY is required');
+  });
 });
 
 function generatedQuiz() {
@@ -186,4 +307,24 @@ function restoreEnv(name: string, value: string | undefined): void {
   } else {
     process.env[name] = value;
   }
+}
+
+type TestAiGenerationObserver = {
+  observe: jest.Mock<void, [AiGenerationObservation]>;
+} & AiGenerationObserver;
+
+function createObserver(): TestAiGenerationObserver {
+  return {
+    observe: jest.fn(),
+  };
+}
+
+function getObservedObservation(
+  observer: TestAiGenerationObserver,
+): AiGenerationObservation {
+  const [call] = observer.observe.mock.calls;
+  if (!call) {
+    throw new Error('Expected an AI generation observation');
+  }
+  return call[0];
 }

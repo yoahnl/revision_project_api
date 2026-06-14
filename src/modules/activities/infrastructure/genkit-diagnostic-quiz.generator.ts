@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import openAICompatible from '@genkit-ai/compat-oai';
 import { googleAI } from '@genkit-ai/google-genai';
 import { genkit, z } from 'genkit';
@@ -7,11 +7,23 @@ import type {
   GeneratedDiagnosticQuiz,
 } from '../application/diagnostic-quiz-generator';
 import type { KnowledgeUnit } from '../../revision/domain/knowledge-unit.entity';
+import {
+  AI_GENERATION_OBSERVER,
+  type AiGenerationObserver,
+  noopAiGenerationObserver,
+} from '../../ai/application/ai-generation-observer';
 
 const MISTRAL_PLUGIN_NAME = 'mistral';
 const MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
 const DEFAULT_MISTRAL_MODEL = 'mistral-small-latest';
 const DEFAULT_GENKIT_MODEL = 'googleai/gemini-2.5-flash';
+const FLOW_NAME = 'diagnosticQuizGeneration';
+const GOOGLE_PROVIDER = 'google-genai';
+const MISTRAL_PROVIDER = 'mistral';
+const PROMPT_VERSION = 'diagnostic-quiz-v1';
+const SCHEMA_VERSION = 'diagnostic-quiz-v1';
+const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
+const EMPTY_OUTPUT_ERROR_CODE = 'GENKIT_EMPTY_OUTPUT';
 
 const GeneratedDiagnosticQuizChoiceSchema = z
   .object({
@@ -49,30 +61,120 @@ const GeneratedDiagnosticQuizSchema = z
 @Injectable()
 export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
   private ai?: ReturnType<typeof genkit>;
+  private resolvedConfig?: ResolvedGenkitConfig;
+  private resolvedMetadata?: ResolvedGenkitMetadata;
+
+  constructor(
+    @Inject(AI_GENERATION_OBSERVER)
+    private readonly observer: AiGenerationObserver = noopAiGenerationObserver,
+  ) {}
 
   async generate(input: {
     knowledgeUnit: KnowledgeUnit;
   }): Promise<GeneratedDiagnosticQuiz> {
-    const { output } = await this.getAi().generate({
-      prompt: buildPrompt(input.knowledgeUnit),
-      output: {
-        schema: GeneratedDiagnosticQuizSchema,
-      },
-    });
+    const metadata = this.resolveMetadata();
+    const inputSize =
+      input.knowledgeUnit.title.length + input.knowledgeUnit.summary.length;
+    const startedAt = Date.now();
 
-    if (!output) {
-      throw new Error('Generated diagnostic quiz is empty');
+    try {
+      const { output } = await this.getAi().generate({
+        prompt: buildPrompt(input.knowledgeUnit),
+        output: {
+          schema: GeneratedDiagnosticQuizSchema,
+        },
+      });
+
+      if (!output) {
+        // Empty output is a controlled generation failure: observable as a code,
+        // still propagated as the existing domain error message.
+        this.observer.observe({
+          flowName: FLOW_NAME,
+          provider: metadata.provider,
+          model: metadata.model,
+          promptVersion: PROMPT_VERSION,
+          schemaVersion: SCHEMA_VERSION,
+          inputSize,
+          durationMs: Date.now() - startedAt,
+          status: 'error',
+          errorCode: EMPTY_OUTPUT_ERROR_CODE,
+          knowledgeUnitId: input.knowledgeUnit.id,
+          subjectId: input.knowledgeUnit.subjectId,
+        });
+        throw new Error('Generated diagnostic quiz is empty');
+      }
+
+      // The quiz prompt contains the unit title and summary, so observability is
+      // limited to their combined length and stable IDs.
+      this.observer.observe({
+        flowName: FLOW_NAME,
+        provider: metadata.provider,
+        model: metadata.model,
+        promptVersion: PROMPT_VERSION,
+        schemaVersion: SCHEMA_VERSION,
+        inputSize,
+        durationMs: Date.now() - startedAt,
+        status: 'success',
+        knowledgeUnitId: input.knowledgeUnit.id,
+        subjectId: input.knowledgeUnit.subjectId,
+      });
+
+      return output;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === 'Generated diagnostic quiz is empty'
+      ) {
+        throw error;
+      }
+
+      // Do not forward provider messages to logs; they can contain prompt or
+      // model output fragments. Preserve behavior by rethrowing the original.
+      this.observer.observe({
+        flowName: FLOW_NAME,
+        provider: metadata.provider,
+        model: metadata.model,
+        promptVersion: PROMPT_VERSION,
+        schemaVersion: SCHEMA_VERSION,
+        inputSize,
+        durationMs: Date.now() - startedAt,
+        status: 'error',
+        errorCode: GENERATION_FAILED_ERROR_CODE,
+        knowledgeUnitId: input.knowledgeUnit.id,
+        subjectId: input.knowledgeUnit.subjectId,
+      });
+      throw error;
     }
-
-    return output;
   }
 
   private getAi(): ReturnType<typeof genkit> {
-    this.ai ??= genkit(resolveGenkitConfig());
+    this.ai ??= genkit(this.resolveConfig().config);
 
     return this.ai;
   }
+
+  private resolveMetadata(): ResolvedGenkitMetadata {
+    this.resolvedMetadata ??= resolveGenkitMetadata();
+    return this.resolvedMetadata;
+  }
+
+  private resolveConfig(): ResolvedGenkitConfig {
+    this.resolvedConfig ??= resolveGenkitConfig(this.resolveMetadata());
+    return this.resolvedConfig;
+  }
 }
+
+type ResolvedGenkitMetadata = {
+  provider: string;
+  model: string;
+  useMistral: boolean;
+};
+
+type ResolvedGenkitConfig = {
+  config: Parameters<typeof genkit>[0];
+  provider: string;
+  model: string;
+};
 
 function buildPrompt(knowledgeUnit: KnowledgeUnit): string {
   return [
@@ -87,7 +189,7 @@ function buildPrompt(knowledgeUnit: KnowledgeUnit): string {
   ].join('\n\n');
 }
 
-function resolveGenkitConfig(): Parameters<typeof genkit>[0] {
+function resolveGenkitMetadata(): ResolvedGenkitMetadata {
   const provider = process.env.AI_PROVIDER?.trim().toLowerCase();
 
   if (
@@ -96,20 +198,46 @@ function resolveGenkitConfig(): Parameters<typeof genkit>[0] {
       hasValue(process.env.MISTRAL_API_KEY))
   ) {
     return {
-      plugins: [
-        openAICompatible({
-          name: MISTRAL_PLUGIN_NAME,
-          apiKey: resolveMistralApiKey(),
-          baseURL: MISTRAL_BASE_URL,
-        }),
-      ],
+      provider: MISTRAL_PROVIDER,
       model: resolveMistralModel(),
+      useMistral: true,
     };
   }
 
   return {
-    plugins: [googleAI()],
+    provider: GOOGLE_PROVIDER,
     model: process.env.GENKIT_MODEL ?? DEFAULT_GENKIT_MODEL,
+    useMistral: false,
+  };
+}
+
+function resolveGenkitConfig(
+  metadata: ResolvedGenkitMetadata,
+): ResolvedGenkitConfig {
+  if (metadata.useMistral) {
+    return {
+      config: {
+        plugins: [
+          openAICompatible({
+            name: MISTRAL_PLUGIN_NAME,
+            apiKey: resolveMistralApiKey(),
+            baseURL: MISTRAL_BASE_URL,
+          }),
+        ],
+        model: metadata.model,
+      },
+      provider: metadata.provider,
+      model: metadata.model,
+    };
+  }
+
+  return {
+    config: {
+      plugins: [googleAI()],
+      model: metadata.model,
+    },
+    provider: metadata.provider,
+    model: metadata.model,
   };
 }
 

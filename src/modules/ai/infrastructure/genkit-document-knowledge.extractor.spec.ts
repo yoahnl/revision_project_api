@@ -27,6 +27,10 @@ jest.mock('genkit', () => ({
 }));
 
 import { GenkitDocumentKnowledgeExtractor } from './genkit-document-knowledge.extractor';
+import type {
+  AiGenerationObservation,
+  AiGenerationObserver,
+} from '../application/ai-generation-observer';
 
 describe('GenkitDocumentKnowledgeExtractor', () => {
   const originalGenkitModel = process.env.GENKIT_MODEL;
@@ -110,4 +114,103 @@ describe('GenkitDocumentKnowledgeExtractor', () => {
       expect.objectContaining({ model: 'googleai/custom-model' }),
     );
   });
+
+  it('observes successful extractions without sending document text', async () => {
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate.mockResolvedValue({
+      output: {
+        units: [
+          {
+            title: 'SENTINEL_OUTPUT_TITLE',
+            summary: 'SENTINEL_OUTPUT_SUMMARY',
+          },
+        ],
+      },
+    });
+    const observer = createObserver();
+
+    await new GenkitDocumentKnowledgeExtractor(observer).extract({
+      documentId: 'document-1',
+      fileName: 'secret-file-name.pdf',
+      text: 'SENTINEL_FULL_DOCUMENT_TEXT',
+    });
+
+    const observation = getObservedObservation(observer);
+    expect(observation.durationMs).toEqual(expect.any(Number));
+    expect(observation).toEqual({
+      flowName: 'documentKnowledgeExtraction',
+      provider: 'google-genai',
+      model: 'googleai/gemini-2.5-flash',
+      promptVersion: 'document-knowledge-v1',
+      schemaVersion: 'extracted-knowledge-v1',
+      inputSize: 'SENTINEL_FULL_DOCUMENT_TEXT'.length,
+      durationMs: observation.durationMs,
+      status: 'success',
+      documentId: 'document-1',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('SENTINEL_FULL_DOCUMENT_TEXT');
+    expect(observedPayload).not.toContain('secret-file-name.pdf');
+    expect(observedPayload).not.toContain('SENTINEL_OUTPUT_TITLE');
+    expect(observedPayload).not.toContain('SENTINEL_OUTPUT_SUMMARY');
+  });
+
+  it('observes extraction errors without logging provider error messages', async () => {
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate.mockRejectedValue(
+      new Error('SENTINEL_PROVIDER_ERROR_WITH_COURSE_TEXT'),
+    );
+    const observer = createObserver();
+
+    await expect(
+      new GenkitDocumentKnowledgeExtractor(observer).extract({
+        documentId: 'document-1',
+        fileName: 'secret-file-name.pdf',
+        text: 'SENTINEL_FULL_DOCUMENT_TEXT',
+      }),
+    ).rejects.toThrow('SENTINEL_PROVIDER_ERROR_WITH_COURSE_TEXT');
+
+    const observation = getObservedObservation(observer);
+    expect(observation.durationMs).toEqual(expect.any(Number));
+    expect(observation).toEqual({
+      flowName: 'documentKnowledgeExtraction',
+      provider: 'google-genai',
+      model: 'googleai/gemini-2.5-flash',
+      promptVersion: 'document-knowledge-v1',
+      schemaVersion: 'extracted-knowledge-v1',
+      inputSize: 'SENTINEL_FULL_DOCUMENT_TEXT'.length,
+      durationMs: observation.durationMs,
+      status: 'error',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+      documentId: 'document-1',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('SENTINEL_FULL_DOCUMENT_TEXT');
+    expect(observedPayload).not.toContain('secret-file-name.pdf');
+    expect(observedPayload).not.toContain(
+      'SENTINEL_PROVIDER_ERROR_WITH_COURSE_TEXT',
+    );
+  });
 });
+
+type TestAiGenerationObserver = {
+  observe: jest.Mock<void, [AiGenerationObservation]>;
+} & AiGenerationObserver;
+
+function createObserver(): TestAiGenerationObserver {
+  return {
+    observe: jest.fn(),
+  };
+}
+
+function getObservedObservation(
+  observer: TestAiGenerationObserver,
+): AiGenerationObservation {
+  const [call] = observer.observe.mock.calls;
+  if (!call) {
+    throw new Error('Expected an AI generation observation');
+  }
+  return call[0];
+}

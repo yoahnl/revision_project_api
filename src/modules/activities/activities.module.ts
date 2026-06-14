@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AiModule } from '../ai/ai.module';
 import { AuthModule } from '../auth/auth.module';
 import { AdaptivePlanService } from '../revision/domain/adaptive-plan.service';
 import { RevisionModule } from '../revision/revision.module';
@@ -12,7 +13,7 @@ import { PrismaActivitiesRepository } from './infrastructure/prisma-activities.r
 import { ActivitiesController } from './interfaces/activities.controller';
 
 @Module({
-  imports: [AuthModule, PrismaModule, RevisionModule],
+  imports: [AiModule, AuthModule, PrismaModule, RevisionModule],
   controllers: [ActivitiesController],
   providers: [
     AdaptivePlanService,

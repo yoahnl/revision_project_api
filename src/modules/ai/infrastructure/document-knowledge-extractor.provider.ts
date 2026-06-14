@@ -1,3 +1,7 @@
+import {
+  type AiGenerationObserver,
+  noopAiGenerationObserver,
+} from '../application/ai-generation-observer';
 import type { DocumentKnowledgeExtractor } from '../application/document-knowledge-extractor';
 import { GenkitDocumentKnowledgeExtractor } from './genkit-document-knowledge.extractor';
 import { GenkitMistralDocumentKnowledgeExtractor } from './genkit-mistral-document-knowledge.extractor';
@@ -10,22 +14,23 @@ type AiProviderEnv = {
 
 export function createDocumentKnowledgeExtractor(
   env: AiProviderEnv = process.env,
+  observer: AiGenerationObserver = noopAiGenerationObserver,
 ): DocumentKnowledgeExtractor {
   const configuredProvider = env.AI_PROVIDER?.trim().toLowerCase();
 
   if (configuredProvider === 'mistral') {
-    return new GenkitMistralDocumentKnowledgeExtractor();
+    return new GenkitMistralDocumentKnowledgeExtractor(observer);
   }
 
   if (configuredProvider === 'genkit' || configuredProvider === 'google') {
-    return new GenkitDocumentKnowledgeExtractor();
+    return new GenkitDocumentKnowledgeExtractor(observer);
   }
 
   if (!hasValue(env.GOOGLE_GENAI_API_KEY) && hasValue(env.MISTRAL_API_KEY)) {
-    return new GenkitMistralDocumentKnowledgeExtractor();
+    return new GenkitMistralDocumentKnowledgeExtractor(observer);
   }
 
-  return new GenkitDocumentKnowledgeExtractor();
+  return new GenkitDocumentKnowledgeExtractor(observer);
 }
 
 function hasValue(value: string | undefined): boolean {
