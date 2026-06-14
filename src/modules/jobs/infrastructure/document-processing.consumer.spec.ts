@@ -1,6 +1,7 @@
 import { Job } from 'bullmq';
 import type { DocumentKnowledgeExtractor } from '../../ai/application/document-knowledge-extractor';
 import type { DocumentContentReader } from '../../documents/application/document-content-reader';
+import type { DocumentTextChunker } from '../../documents/application/document-text-chunker';
 import type { DocumentTextExtractor } from '../../documents/application/document-text-extractor';
 import type {
   DocumentsRepository,
@@ -14,11 +15,13 @@ describe('DocumentProcessingConsumer', () => {
     const extractor = createExtractor();
     const contentReader = createContentReader();
     const textExtractor = createTextExtractor();
+    const chunker = createChunker();
     const consumer = new DocumentProcessingConsumer(
       documentsRepository.service,
       extractor.service,
       contentReader.service,
       textExtractor.service,
+      chunker.service,
     );
     const invalidJobs = [
       { data: null },
@@ -47,6 +50,7 @@ describe('DocumentProcessingConsumer', () => {
     const extractor = createExtractor();
     const contentReader = createContentReader();
     const textExtractor = createTextExtractor();
+    const chunker = createChunker();
     extractor.extract.mockResolvedValue([
       {
         title: 'Cycle cardiaque',
@@ -59,6 +63,7 @@ describe('DocumentProcessingConsumer', () => {
       extractor.service,
       contentReader.service,
       textExtractor.service,
+      chunker.service,
     );
 
     await consumer.process({
@@ -82,6 +87,21 @@ describe('DocumentProcessingConsumer', () => {
       fileName: 'cours.pdf',
       text: 'Contenu PDF exploitable.',
     });
+    expect(documentsRepository.replaceChunks).toHaveBeenCalledWith({
+      documentId: 'document-1',
+      chunks: [
+        {
+          index: 0,
+          text: 'Contenu PDF exploitable.',
+          charStart: 0,
+          charEnd: 23,
+          pageNumber: null,
+        },
+      ],
+    });
+    expect(
+      documentsRepository.replaceChunks.mock.invocationCallOrder[0],
+    ).toBeLessThan(extractor.extract.mock.invocationCallOrder[0]);
     expect(
       documentsRepository.markReadyWithKnowledgeUnits,
     ).toHaveBeenCalledWith({
@@ -101,6 +121,7 @@ describe('DocumentProcessingConsumer', () => {
     const extractor = createExtractor();
     const contentReader = createContentReader();
     const textExtractor = createTextExtractor();
+    const chunker = createChunker();
     const extractionError = new Error('Gemini unavailable');
     extractor.extract.mockRejectedValue(extractionError);
 
@@ -109,6 +130,7 @@ describe('DocumentProcessingConsumer', () => {
       extractor.service,
       contentReader.service,
       textExtractor.service,
+      chunker.service,
     );
 
     await expect(
@@ -133,6 +155,7 @@ describe('DocumentProcessingConsumer', () => {
     const extractor = createExtractor();
     const contentReader = createContentReader();
     const textExtractor = createTextExtractor();
+    const chunker = createChunker();
     const extractionError = new Error('Gemini unavailable');
     extractor.extract.mockRejectedValue(extractionError);
 
@@ -141,6 +164,7 @@ describe('DocumentProcessingConsumer', () => {
       extractor.service,
       contentReader.service,
       textExtractor.service,
+      chunker.service,
     );
 
     await expect(
@@ -166,6 +190,7 @@ describe('DocumentProcessingConsumer', () => {
     const extractor = createExtractor();
     const contentReader = createContentReader();
     const textExtractor = createTextExtractor();
+    const chunker = createChunker();
     textExtractor.extractText.mockResolvedValue('   ');
 
     const consumer = new DocumentProcessingConsumer(
@@ -173,6 +198,7 @@ describe('DocumentProcessingConsumer', () => {
       extractor.service,
       contentReader.service,
       textExtractor.service,
+      chunker.service,
     );
 
     await expect(
@@ -195,6 +221,7 @@ describe('DocumentProcessingConsumer', () => {
     const extractor = createExtractor();
     const contentReader = createContentReader();
     const textExtractor = createTextExtractor();
+    const chunker = createChunker();
     textExtractor.extractText.mockRejectedValue(new Error('Invalid PDF'));
 
     const consumer = new DocumentProcessingConsumer(
@@ -202,6 +229,7 @@ describe('DocumentProcessingConsumer', () => {
       extractor.service,
       contentReader.service,
       textExtractor.service,
+      chunker.service,
     );
 
     await expect(
@@ -223,6 +251,7 @@ describe('DocumentProcessingConsumer', () => {
     const extractor = createExtractor();
     const contentReader = createContentReader();
     const textExtractor = createTextExtractor();
+    const chunker = createChunker();
     extractor.extract.mockResolvedValue([]);
 
     const consumer = new DocumentProcessingConsumer(
@@ -230,6 +259,7 @@ describe('DocumentProcessingConsumer', () => {
       extractor.service,
       contentReader.service,
       textExtractor.service,
+      chunker.service,
     );
 
     await expect(
@@ -249,6 +279,37 @@ describe('DocumentProcessingConsumer', () => {
       documentsRepository.markReadyWithKnowledgeUnits,
     ).not.toHaveBeenCalled();
   });
+
+  it('fails empty chunks without calling Genkit on the final attempt', async () => {
+    const documentsRepository = createDocumentsRepository();
+    const extractor = createExtractor();
+    const contentReader = createContentReader();
+    const textExtractor = createTextExtractor();
+    const chunker = createChunker([]);
+
+    const consumer = new DocumentProcessingConsumer(
+      documentsRepository.service,
+      extractor.service,
+      contentReader.service,
+      textExtractor.service,
+      chunker.service,
+    );
+
+    await expect(
+      consumer.process({
+        data: { documentId: 'document-1' },
+        attemptsMade: 2,
+        opts: { attempts: 3 },
+      } as Job<{ documentId: string }>),
+    ).rejects.toThrow('Document chunking returned no chunks');
+
+    expect(documentsRepository.replaceChunks).not.toHaveBeenCalled();
+    expect(extractor.extract).not.toHaveBeenCalled();
+    expect(documentsRepository.markFailed).toHaveBeenCalledWith({
+      documentId: 'document-1',
+      errorCode: 'DOCUMENT_CHUNKS_EMPTY',
+    });
+  });
 });
 
 function createDocumentsRepository(): {
@@ -257,11 +318,13 @@ function createDocumentsRepository(): {
   markReadyWithKnowledgeUnits: jest.Mock;
   markFailed: jest.Mock;
   findById: jest.Mock;
+  replaceChunks: jest.Mock;
 } {
   const markProcessing = jest.fn().mockResolvedValue(undefined);
   const markReadyWithKnowledgeUnits = jest.fn().mockResolvedValue(undefined);
   const markFailed = jest.fn().mockResolvedValue(undefined);
   const findById = jest.fn().mockResolvedValue(documentRecord());
+  const replaceChunks = jest.fn().mockResolvedValue(undefined);
 
   return {
     service: {
@@ -272,11 +335,15 @@ function createDocumentsRepository(): {
       markProcessing,
       markReadyWithKnowledgeUnits,
       markFailed,
+      replaceChunks,
+      findChunksByDocumentId: jest.fn(),
+      replaceKnowledgeUnitSources: jest.fn(),
     },
     markProcessing,
     markReadyWithKnowledgeUnits,
     markFailed,
     findById,
+    replaceChunks,
   };
 }
 
@@ -313,6 +380,28 @@ function createTextExtractor(): {
   return {
     service: { extractText },
     extractText,
+  };
+}
+
+function createChunker(
+  chunks = [
+    {
+      index: 0,
+      text: 'Contenu PDF exploitable.',
+      charStart: 0,
+      charEnd: 23,
+      pageNumber: null,
+    },
+  ],
+): {
+  service: DocumentTextChunker;
+  chunk: jest.Mock;
+} {
+  const chunk = jest.fn().mockReturnValue(chunks);
+
+  return {
+    service: { chunk },
+    chunk,
   };
 }
 

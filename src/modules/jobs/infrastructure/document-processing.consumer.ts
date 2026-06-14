@@ -10,6 +10,10 @@ import {
   type DocumentContentReader,
 } from '../../documents/application/document-content-reader';
 import {
+  DOCUMENT_TEXT_CHUNKER,
+  type DocumentTextChunker,
+} from '../../documents/application/document-text-chunker';
+import {
   DOCUMENT_TEXT_EXTRACTOR,
   type DocumentTextExtractor,
 } from '../../documents/application/document-text-extractor';
@@ -31,6 +35,8 @@ export class DocumentProcessingConsumer extends WorkerHost {
     private readonly contentReader: DocumentContentReader,
     @Inject(DOCUMENT_TEXT_EXTRACTOR)
     private readonly textExtractor: DocumentTextExtractor,
+    @Inject(DOCUMENT_TEXT_CHUNKER)
+    private readonly textChunker: DocumentTextChunker,
   ) {
     super();
   }
@@ -77,6 +83,17 @@ export class DocumentProcessingConsumer extends WorkerHost {
         throw new EmptyDocumentTextError();
       }
 
+      const chunks = this.textChunker.chunk({ text });
+
+      if (chunks.length === 0) {
+        throw new EmptyDocumentChunksError();
+      }
+
+      await this.documentsRepository.replaceChunks({
+        documentId,
+        chunks,
+      });
+
       units = await this.extractor.extract({
         documentId,
         fileName: document.fileName,
@@ -122,6 +139,12 @@ class EmptyDocumentTextError extends Error {
   }
 }
 
+class EmptyDocumentChunksError extends Error {
+  constructor() {
+    super('Document chunking returned no chunks');
+  }
+}
+
 class DocumentTextExtractionFailedError extends Error {
   constructor(readonly cause: unknown) {
     super('Document text extraction failed');
@@ -155,6 +178,10 @@ function getExtractionErrorCode(error: unknown): string {
 
   if (error instanceof EmptyDocumentTextError) {
     return 'DOCUMENT_TEXT_EMPTY';
+  }
+
+  if (error instanceof EmptyDocumentChunksError) {
+    return 'DOCUMENT_CHUNKS_EMPTY';
   }
 
   if (error instanceof DocumentTextExtractionFailedError) {

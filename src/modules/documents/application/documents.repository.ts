@@ -15,6 +15,43 @@ export interface RevisionDocumentDto {
   errorCode: string | null;
 }
 
+export type KnowledgeUnitDifficulty = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface KnowledgeUnitPersistenceInput {
+  title: string;
+  summary: string;
+  difficulty?: KnowledgeUnitDifficulty | null;
+  displayOrder?: number | null;
+  confidence?: number | null;
+  extractionPromptVersion?: string | null;
+  extractionSchemaVersion?: string | null;
+}
+
+export interface DocumentChunkPersistenceInput {
+  index: number;
+  text: string;
+  charStart?: number | null;
+  charEnd?: number | null;
+  pageNumber?: number | null;
+}
+
+export interface RevisionDocumentChunkDto {
+  id: string;
+  documentId: string;
+  subjectId: string;
+  index: number;
+  text: string;
+  charStart: number | null;
+  charEnd: number | null;
+  pageNumber: number | null;
+  createdAt: Date;
+}
+
+export interface KnowledgeUnitSourcePersistenceInput {
+  chunkId: string;
+  relevanceScore?: number | null;
+}
+
 export const DOCUMENTS_REPOSITORY = Symbol('DOCUMENTS_REPOSITORY');
 
 export interface DocumentsRepository {
@@ -43,7 +80,22 @@ export interface DocumentsRepository {
 
   markReadyWithKnowledgeUnits(input: {
     documentId: string;
-    units: Array<{ title: string; summary: string }>;
+    units: KnowledgeUnitPersistenceInput[];
+  }): Promise<void>;
+
+  replaceChunks(input: {
+    documentId: string;
+    chunks: DocumentChunkPersistenceInput[];
+  }): Promise<void>;
+
+  findChunksByDocumentId(
+    documentId: string,
+  ): Promise<RevisionDocumentChunkDto[]>;
+
+  replaceKnowledgeUnitSources(input: {
+    knowledgeUnitId: string;
+    subjectId: string;
+    sources: KnowledgeUnitSourcePersistenceInput[];
   }): Promise<void>;
 
   markFailed(input: { documentId: string; errorCode: string }): Promise<void>;

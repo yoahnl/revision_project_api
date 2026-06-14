@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { KnowledgeUnit } from '../../revision/domain/knowledge-unit.entity';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import {
+  type DocumentChunkPersistenceInput,
   type DocumentsRepository,
+  type KnowledgeUnitPersistenceInput,
+  type KnowledgeUnitSourcePersistenceInput,
+  type RevisionDocumentChunkDto,
   type RevisionDocumentDto,
 } from '../application/documents.repository';
 import { RevisionDocument } from '../domain/document.entity';
@@ -18,6 +22,18 @@ type DocumentRecord = {
   mimeType: string;
   status: DocumentStatus;
   errorCode: string | null;
+};
+
+type DocumentChunkRecord = {
+  id: string;
+  documentId: string;
+  subjectId: string;
+  index: number;
+  text: string;
+  charStart: number | null;
+  charEnd: number | null;
+  pageNumber: number | null;
+  createdAt: Date;
 };
 
 @Injectable()
@@ -151,7 +167,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
 
   async markReadyWithKnowledgeUnits(input: {
     documentId: string;
-    units: Array<{ title: string; summary: string }>;
+    units: KnowledgeUnitPersistenceInput[];
   }): Promise<void> {
     await this.prisma.$transaction(async (tx) => {
       const document = await tx.document.findUnique({
@@ -185,6 +201,13 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
               subjectId: knowledgeUnit.subjectId,
               title: knowledgeUnit.title,
               summary: knowledgeUnit.summary,
+              difficulty: unit.difficulty ?? undefined,
+              displayOrder: unit.displayOrder ?? undefined,
+              confidence: unit.confidence ?? undefined,
+              extractionPromptVersion:
+                unit.extractionPromptVersion ?? undefined,
+              extractionSchemaVersion:
+                unit.extractionSchemaVersion ?? undefined,
             };
           }),
         });
@@ -207,6 +230,129 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       if (jobResult.count !== 1) {
         throw new Error('Document processing job is not running');
       }
+    });
+  }
+
+  async replaceChunks(input: {
+    documentId: string;
+    chunks: DocumentChunkPersistenceInput[];
+  }): Promise<void> {
+    const chunks = [...input.chunks]
+      .map((chunk) => ({
+        index: chunk.index,
+        text: chunk.text.trim(),
+        charStart: chunk.charStart ?? null,
+        charEnd: chunk.charEnd ?? null,
+        pageNumber: chunk.pageNumber ?? null,
+      }))
+      .filter((chunk) => chunk.text.length > 0)
+      .sort((left, right) => left.index - right.index);
+
+    await this.prisma.$transaction(async (tx) => {
+      const document = await tx.document.findUnique({
+        where: { id: input.documentId },
+      });
+
+      if (!document) {
+        throw new Error('Document not found');
+      }
+
+      if (document.status !== 'PROCESSING') {
+        throw new Error('Document is not processing');
+      }
+
+      await tx.documentChunk.deleteMany({
+        where: { documentId: input.documentId },
+      });
+
+      if (chunks.length === 0) {
+        return;
+      }
+
+      await tx.documentChunk.createMany({
+        data: chunks.map((chunk) => ({
+          documentId: input.documentId,
+          subjectId: document.subjectId,
+          index: chunk.index,
+          text: chunk.text,
+          charStart: chunk.charStart,
+          charEnd: chunk.charEnd,
+          pageNumber: chunk.pageNumber,
+        })),
+      });
+    });
+  }
+
+  async findChunksByDocumentId(
+    documentId: string,
+  ): Promise<RevisionDocumentChunkDto[]> {
+    const records = await this.prisma.documentChunk.findMany({
+      where: { documentId },
+      orderBy: { index: 'asc' },
+    });
+
+    return records.map((record) => this.toChunkDto(record));
+  }
+
+  async replaceKnowledgeUnitSources(input: {
+    knowledgeUnitId: string;
+    subjectId: string;
+    sources: KnowledgeUnitSourcePersistenceInput[];
+  }): Promise<void> {
+    const sources = input.sources.map((source) => ({
+      chunkId: source.chunkId,
+      relevanceScore: source.relevanceScore ?? null,
+    }));
+    const chunkIds = [...new Set(sources.map((source) => source.chunkId))];
+
+    await this.prisma.$transaction(async (tx) => {
+      const knowledgeUnit = await tx.knowledgeUnit.findUnique({
+        where: {
+          id_subjectId: {
+            id: input.knowledgeUnitId,
+            subjectId: input.subjectId,
+          },
+        },
+      });
+
+      if (!knowledgeUnit) {
+        throw new Error('Knowledge unit not found');
+      }
+
+      if (chunkIds.length > 0) {
+        const chunks = await tx.documentChunk.findMany({
+          where: {
+            id: { in: chunkIds },
+            subjectId: input.subjectId,
+          },
+          select: { id: true },
+        });
+        const existingChunkIds = new Set(chunks.map((chunk) => chunk.id));
+
+        if (chunkIds.some((chunkId) => !existingChunkIds.has(chunkId))) {
+          throw new Error('Knowledge unit source chunk not found');
+        }
+      }
+
+      await tx.knowledgeUnitSource.deleteMany({
+        where: {
+          knowledgeUnitId: input.knowledgeUnitId,
+          subjectId: input.subjectId,
+        },
+      });
+
+      if (sources.length === 0) {
+        return;
+      }
+
+      await tx.knowledgeUnitSource.createMany({
+        data: sources.map((source) => ({
+          knowledgeUnitId: input.knowledgeUnitId,
+          subjectId: input.subjectId,
+          chunkId: source.chunkId,
+          relevanceScore: source.relevanceScore,
+        })),
+      });
     });
   }
 
@@ -270,6 +416,20 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       mimeType: document.mimeType,
       status: document.status,
       errorCode: document.errorCode,
+    };
+  }
+
+  private toChunkDto(record: DocumentChunkRecord): RevisionDocumentChunkDto {
+    return {
+      id: record.id,
+      documentId: record.documentId,
+      subjectId: record.subjectId,
+      index: record.index,
+      text: record.text,
+      charStart: record.charStart,
+      charEnd: record.charEnd,
+      pageNumber: record.pageNumber,
+      createdAt: record.createdAt,
     };
   }
 }

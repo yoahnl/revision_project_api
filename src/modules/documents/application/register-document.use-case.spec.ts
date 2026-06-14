@@ -22,6 +22,9 @@ describe('RegisterDocumentUseCase', () => {
       findBySubjectForStudent: jest.fn(),
       findByIdForStudent: jest.fn(),
       findById: jest.fn(),
+      replaceChunks: jest.fn(),
+      findChunksByDocumentId: jest.fn(),
+      replaceKnowledgeUnitSources: jest.fn(),
     };
     const enqueue = jest.fn().mockResolvedValue(undefined);
     const queue: DocumentProcessingQueue = { enqueue };

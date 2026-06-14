@@ -3,8 +3,10 @@ import { Module } from '@nestjs/common';
 import type { ConnectionOptions } from 'bullmq';
 import { AiModule } from '../ai/ai.module';
 import { DOCUMENT_CONTENT_READER } from '../documents/application/document-content-reader';
+import { DOCUMENT_TEXT_CHUNKER } from '../documents/application/document-text-chunker';
 import { DOCUMENT_TEXT_EXTRACTOR } from '../documents/application/document-text-extractor';
 import { DOCUMENTS_REPOSITORY } from '../documents/application/documents.repository';
+import { DeterministicDocumentTextChunker } from '../documents/infrastructure/deterministic-document-text.chunker';
 import { LocalDocumentFileStorage } from '../documents/infrastructure/local-document-file-storage';
 import { PdfParseDocumentTextExtractor } from '../documents/infrastructure/pdf-parse-document-text.extractor';
 import { PrismaDocumentsRepository } from '../documents/infrastructure/prisma-documents.repository';
@@ -41,6 +43,10 @@ const documentProcessingConsumerProviders =
         {
           provide: DOCUMENT_TEXT_EXTRACTOR,
           useClass: PdfParseDocumentTextExtractor,
+        },
+        {
+          provide: DOCUMENT_TEXT_CHUNKER,
+          useClass: DeterministicDocumentTextChunker,
         },
         DocumentProcessingConsumer,
       ]

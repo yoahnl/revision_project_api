@@ -67,6 +67,7 @@ model Document {
   updatedAt   DateTime       @updatedAt
 
   subject        Subject                 @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  chunks         DocumentChunk[]
   knowledgeUnits KnowledgeUnit[]
   jobs           DocumentProcessingJob[]
 
@@ -87,22 +88,64 @@ model DocumentProcessingJob {
 }
 
 model KnowledgeUnit {
-  id         String   @id @default(cuid())
-  subjectId  String
-  documentId String?
-  title      String
-  summary    String
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id                       String                   @id @default(cuid())
+  subjectId                String
+  documentId               String?
+  title                    String
+  summary                  String
+  difficulty               KnowledgeUnitDifficulty?
+  displayOrder             Int?
+  confidence               Float?
+  extractionPromptVersion  String?
+  extractionSchemaVersion  String?
+  createdAt                DateTime                 @default(now())
+  updatedAt                DateTime                 @updatedAt
 
   subject  Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
   document Document?      @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
   mastery  MasteryState[]
   questions Question[]
   sessions ActivitySession[]
+  sources  KnowledgeUnitSource[]
 
   @@index([subjectId])
+  @@index([documentId])
   @@unique([id, subjectId])
+}
+
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  subjectId  String
+  index      Int
+  text       String
+  charStart  Int?
+  charEnd    Int?
+  pageNumber Int?
+  createdAt  DateTime @default(now())
+
+  document Document              @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sources  KnowledgeUnitSource[]
+
+  @@index([documentId])
+  @@index([subjectId])
+  @@unique([documentId, index])
+  @@unique([id, subjectId])
+}
+
+model KnowledgeUnitSource {
+  knowledgeUnitId String
+  subjectId       String
+  chunkId         String
+  relevanceScore  Float?
+  createdAt       DateTime @default(now())
+
+  knowledgeUnit KnowledgeUnit @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  chunk         DocumentChunk @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
+
+  @@id([knowledgeUnitId, chunkId])
+  @@index([chunkId])
+  @@index([subjectId])
 }
 
 model MasteryState {
@@ -178,6 +221,12 @@ enum DocumentStatus {
   PROCESSING
   READY
   FAILED
+}
+
+enum KnowledgeUnitDifficulty {
+  LOW
+  MEDIUM
+  HIGH
 }
 
 enum JobStatus {

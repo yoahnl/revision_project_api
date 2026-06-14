@@ -29,6 +29,16 @@ type PrismaDocumentsMock = {
     updateMany: jest.Mock;
   };
   knowledgeUnit: {
+    findUnique: jest.Mock;
+    createMany: jest.Mock;
+  };
+  documentChunk: {
+    deleteMany: jest.Mock;
+    createMany: jest.Mock;
+    findMany: jest.Mock;
+  };
+  knowledgeUnitSource: {
+    deleteMany: jest.Mock;
     createMany: jest.Mock;
   };
   $transaction: jest.Mock<Promise<unknown>, [TransactionCallback]>;
@@ -55,6 +65,16 @@ describe('PrismaDocumentsRepository', () => {
         updateMany: jest.fn(),
       },
       knowledgeUnit: {
+        findUnique: jest.fn(),
+        createMany: jest.fn(),
+      },
+      documentChunk: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+        findMany: jest.fn(),
+      },
+      knowledgeUnitSource: {
+        deleteMany: jest.fn(),
         createMany: jest.fn(),
       },
       $transaction: jest.fn<Promise<unknown>, [TransactionCallback]>(),
@@ -316,6 +336,46 @@ describe('PrismaDocumentsRepository', () => {
     });
   });
 
+  it('persists optional enrichment fields when marking knowledge units ready', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markReadyWithKnowledgeUnits({
+      documentId: 'document-1',
+      units: [
+        {
+          title: 'Séparation des pouvoirs',
+          summary: 'Principe structurant les institutions.',
+          difficulty: 'MEDIUM',
+          displayOrder: 2,
+          confidence: 0.84,
+          extractionPromptVersion: 'document-knowledge-v1',
+          extractionSchemaVersion: 'extracted-knowledge-v1',
+        },
+      ],
+    });
+
+    expect(prisma.knowledgeUnit.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          documentId: 'document-1',
+          subjectId: 'subject-1',
+          title: 'Séparation des pouvoirs',
+          summary: 'Principe structurant les institutions.',
+          difficulty: 'MEDIUM',
+          displayOrder: 2,
+          confidence: 0.84,
+          extractionPromptVersion: 'document-knowledge-v1',
+          extractionSchemaVersion: 'extracted-knowledge-v1',
+        },
+      ],
+    });
+  });
+
   it('does not duplicate knowledge units when a document is already ready', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.findUnique.mockResolvedValue(record({ status: 'READY' }));
@@ -418,5 +478,217 @@ describe('PrismaDocumentsRepository', () => {
         errorCode: 'EXTRACTION_FAILED',
       }),
     ).rejects.toThrow('Document processing job is not active');
+  });
+
+  it('replaces chunks for a processing document in index order', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+
+    await repository.replaceChunks({
+      documentId: 'document-1',
+      chunks: [
+        {
+          index: 1,
+          text: 'Deuxieme bloc',
+          charStart: 15,
+          charEnd: 28,
+          pageNumber: null,
+        },
+        {
+          index: 0,
+          text: 'Premier bloc',
+          charStart: 0,
+          charEnd: 13,
+        },
+      ],
+    });
+
+    expect(prisma.documentChunk.deleteMany).toHaveBeenCalledWith({
+      where: { documentId: 'document-1' },
+    });
+    expect(prisma.documentChunk.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          documentId: 'document-1',
+          subjectId: 'subject-1',
+          index: 0,
+          text: 'Premier bloc',
+          charStart: 0,
+          charEnd: 13,
+          pageNumber: null,
+        },
+        {
+          documentId: 'document-1',
+          subjectId: 'subject-1',
+          index: 1,
+          text: 'Deuxieme bloc',
+          charStart: 15,
+          charEnd: 28,
+          pageNumber: null,
+        },
+      ],
+    });
+  });
+
+  it('replaces existing chunks with an empty list without creating rows', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+
+    await repository.replaceChunks({
+      documentId: 'document-1',
+      chunks: [],
+    });
+
+    expect(prisma.documentChunk.deleteMany).toHaveBeenCalledWith({
+      where: { documentId: 'document-1' },
+    });
+    expect(prisma.documentChunk.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects chunk replacement when the document is not processing', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(record({ status: 'READY' }));
+
+    await expect(
+      repository.replaceChunks({
+        documentId: 'document-1',
+        chunks: [{ index: 0, text: 'Bloc', charStart: 0, charEnd: 4 }],
+      }),
+    ).rejects.toThrow('Document is not processing');
+
+    expect(prisma.documentChunk.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.documentChunk.createMany).not.toHaveBeenCalled();
+  });
+
+  it('lists document chunks by ascending index', async () => {
+    const { prisma, repository } = createRepository();
+    const createdAt = new Date('2026-06-14T12:00:00.000Z');
+    prisma.documentChunk.findMany.mockResolvedValue([
+      {
+        id: 'chunk-1',
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        index: 0,
+        text: 'Premier bloc',
+        charStart: 0,
+        charEnd: 13,
+        pageNumber: null,
+        createdAt,
+      },
+    ]);
+
+    const chunks = await repository.findChunksByDocumentId('document-1');
+
+    expect(prisma.documentChunk.findMany).toHaveBeenCalledWith({
+      where: { documentId: 'document-1' },
+      orderBy: { index: 'asc' },
+    });
+    expect(chunks).toEqual([
+      {
+        id: 'chunk-1',
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        index: 0,
+        text: 'Premier bloc',
+        charStart: 0,
+        charEnd: 13,
+        pageNumber: null,
+        createdAt,
+      },
+    ]);
+  });
+
+  it('persists knowledge unit sources only for chunks in the same subject', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findUnique.mockResolvedValue({
+      id: 'knowledge-unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.documentChunk.findMany.mockResolvedValue([
+      { id: 'chunk-1' },
+      { id: 'chunk-2' },
+    ]);
+
+    await repository.replaceKnowledgeUnitSources({
+      knowledgeUnitId: 'knowledge-unit-1',
+      subjectId: 'subject-1',
+      sources: [
+        { chunkId: 'chunk-2', relevanceScore: 0.7 },
+        { chunkId: 'chunk-1', relevanceScore: null },
+      ],
+    });
+
+    expect(prisma.documentChunk.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['chunk-2', 'chunk-1'] },
+        subjectId: 'subject-1',
+      },
+      select: { id: true },
+    });
+    expect(prisma.knowledgeUnitSource.deleteMany).toHaveBeenCalledWith({
+      where: {
+        knowledgeUnitId: 'knowledge-unit-1',
+        subjectId: 'subject-1',
+      },
+    });
+    expect(prisma.knowledgeUnitSource.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          knowledgeUnitId: 'knowledge-unit-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-2',
+          relevanceScore: 0.7,
+        },
+        {
+          knowledgeUnitId: 'knowledge-unit-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-1',
+          relevanceScore: null,
+        },
+      ],
+    });
+  });
+
+  it('rejects knowledge unit sources pointing to unknown chunks', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findUnique.mockResolvedValue({
+      id: 'knowledge-unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.documentChunk.findMany.mockResolvedValue([{ id: 'chunk-1' }]);
+
+    await expect(
+      repository.replaceKnowledgeUnitSources({
+        knowledgeUnitId: 'knowledge-unit-1',
+        subjectId: 'subject-1',
+        sources: [
+          { chunkId: 'chunk-1', relevanceScore: 0.9 },
+          { chunkId: 'chunk-unknown', relevanceScore: 0.5 },
+        ],
+      }),
+    ).rejects.toThrow('Knowledge unit source chunk not found');
+
+    expect(prisma.knowledgeUnitSource.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.knowledgeUnitSource.createMany).not.toHaveBeenCalled();
+  });
+
+  it('does not create knowledge unit sources while marking ready without source ids', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markReadyWithKnowledgeUnits({
+      documentId: 'document-1',
+      units: [{ title: 'Constitution', summary: 'Norme fondamentale.' }],
+    });
+
+    expect(prisma.knowledgeUnitSource.createMany).not.toHaveBeenCalled();
   });
 });
