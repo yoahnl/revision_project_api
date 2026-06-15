@@ -1,306 +1,287 @@
+import { Subject } from '../../subjects/domain/subject.entity';
 import { AdaptivePlanService } from './adaptive-plan.service';
 import { KnowledgeUnit } from './knowledge-unit.entity';
 import { MasteryState } from './mastery-state.entity';
 import { RevisionGoal } from './revision-goal.entity';
-import { Subject } from '../../subjects/domain/subject.entity';
 
 describe('AdaptivePlanService', () => {
-  it('prioritizes weak knowledge units in a high-priority subject', () => {
-    const subject = new Subject({
-      id: 'subject-anatomy',
-      studentId: 'student-1',
-      name: 'Anatomie',
-      priority: 5,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const goal = new RevisionGoal({
-      id: 'goal-1',
-      studentId: 'student-1',
-      targetDate: new Date('2026-06-30T00:00:00.000Z'),
-      weeklyMinutes: 240,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const units = [
-      new KnowledgeUnit({
-        id: 'unit-strong',
-        subjectId: subject.id,
-        title: 'Os du carpe',
-        summary: 'Unit already mastered',
-      }),
-      new KnowledgeUnit({
-        id: 'unit-weak',
-        subjectId: subject.id,
-        title: 'Innervation du membre superieur',
-        summary: 'Unit with low mastery',
-      }),
-    ];
-    const mastery = [
-      new MasteryState({
-        studentId: 'student-1',
-        knowledgeUnitId: 'unit-strong',
-        score: 0.86,
-        lastPracticedAt: new Date('2026-06-11T10:00:00.000Z'),
-      }),
-      new MasteryState({
-        studentId: 'student-1',
-        knowledgeUnitId: 'unit-weak',
-        score: 0.22,
-        lastPracticedAt: new Date('2026-06-03T10:00:00.000Z'),
-      }),
-    ];
+  const now = new Date('2026-06-15T10:00:00.000Z');
 
+  it('returns an empty plan when no owned knowledge unit is eligible', () => {
     const plan = new AdaptivePlanService().buildTodayPlan({
-      now: new Date('2026-06-12T10:00:00.000Z'),
-      goal,
-      subjects: [subject],
-      knowledgeUnits: units,
-      masteryStates: mastery,
+      now,
+      goal: goal(),
+      subjects: [
+        subject({ id: 'subject-other', studentId: 'student-2', priority: 5 }),
+      ],
+      knowledgeUnits: [unit({ id: 'unit-other', subjectId: 'subject-other' })],
+      masteryStates: [
+        mastery({
+          studentId: 'student-2',
+          knowledgeUnitId: 'unit-other',
+          score: 0.1,
+        }),
+      ],
     });
 
-    expect(plan.items).toHaveLength(1);
+    expect(plan.items).toEqual([]);
+  });
+
+  it('returns several launchable action types for eligible knowledge units', () => {
+    const plan = new AdaptivePlanService().buildTodayPlan({
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 5 })],
+      knowledgeUnits: [
+        unit({ id: 'unit-1', subjectId: 'subject-1', title: 'Contrats' }),
+        unit({ id: 'unit-2', subjectId: 'subject-1', title: 'Responsabilite' }),
+      ],
+      masteryStates: [
+        mastery({ knowledgeUnitId: 'unit-1', score: 0.2 }),
+        mastery({ knowledgeUnitId: 'unit-2', score: 0.45 }),
+      ],
+    });
+
+    expect(plan.items).toHaveLength(4);
+    expect(plan.items.map((item) => item.action)).toEqual(
+      expect.arrayContaining([
+        'diagnostic_quiz',
+        'open_question',
+        'revision_session',
+      ]),
+    );
     expect(plan.items[0]).toMatchObject({
-      subjectId: 'subject-anatomy',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      action: 'diagnostic_quiz',
+      reasonCode: 'LOW_MASTERY',
+    });
+  });
+
+  it('prioritizes low mastery before stronger knowledge units', () => {
+    const plan = new AdaptivePlanService().buildTodayPlan({
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 3 })],
+      knowledgeUnits: [
+        unit({ id: 'unit-strong', subjectId: 'subject-1' }),
+        unit({ id: 'unit-weak', subjectId: 'subject-1' }),
+      ],
+      masteryStates: [
+        mastery({ knowledgeUnitId: 'unit-strong', score: 0.9 }),
+        mastery({ knowledgeUnitId: 'unit-weak', score: 0.1 }),
+      ],
+    });
+
+    expect(plan.items[0]).toMatchObject({
       knowledgeUnitId: 'unit-weak',
-      activityType: 'diagnostic_quiz',
-      estimatedMinutes: 15,
+      action: 'diagnostic_quiz',
+      reasonCode: 'LOW_MASTERY',
     });
-    expect(plan.items[0].reason).toContain('low mastery');
   });
 
-  it("does not let another student's mastery influence the plan", () => {
-    const subject = new Subject({
-      id: 'subject-anatomy',
-      studentId: 'student-1',
-      name: 'Anatomie',
-      priority: 5,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const goal = new RevisionGoal({
-      id: 'goal-1',
-      studentId: 'student-1',
-      targetDate: new Date('2026-06-30T00:00:00.000Z'),
-      weeklyMinutes: 240,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const units = [
-      new KnowledgeUnit({
-        id: 'unit-with-other-mastery',
-        subjectId: subject.id,
-        title: 'Plexus brachial',
-        summary: 'No mastery exists yet for the target student',
-      }),
-      new KnowledgeUnit({
-        id: 'unit-target-known',
-        subjectId: subject.id,
-        title: 'Nerf radial',
-        summary: 'Weak but known for the target student',
-      }),
-    ];
-    const mastery = [
-      new MasteryState({
-        studentId: 'student-2',
-        knowledgeUnitId: 'unit-with-other-mastery',
-        score: 0.95,
-        lastPracticedAt: new Date('2026-06-12T09:00:00.000Z'),
-      }),
-      new MasteryState({
-        studentId: 'student-1',
-        knowledgeUnitId: 'unit-target-known',
-        score: 0.2,
-        lastPracticedAt: new Date('2026-06-11T10:00:00.000Z'),
-      }),
-    ];
-
+  it('boosts knowledge units that have never been practiced', () => {
     const plan = new AdaptivePlanService().buildTodayPlan({
-      now: new Date('2026-06-12T10:00:00.000Z'),
-      goal,
-      subjects: [subject],
-      knowledgeUnits: units,
-      masteryStates: mastery,
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 3 })],
+      knowledgeUnits: [
+        unit({ id: 'unit-practiced', subjectId: 'subject-1' }),
+        unit({ id: 'unit-never', subjectId: 'subject-1' }),
+      ],
+      masteryStates: [
+        mastery({
+          knowledgeUnitId: 'unit-practiced',
+          score: 0.5,
+          lastPracticedAt: new Date('2026-06-14T10:00:00.000Z'),
+        }),
+      ],
     });
 
     expect(plan.items[0]).toMatchObject({
-      subjectId: 'subject-anatomy',
-      knowledgeUnitId: 'unit-with-other-mastery',
+      knowledgeUnitId: 'unit-never',
+      reasonCode: 'LOW_MASTERY',
     });
   });
 
-  it("does not rank knowledge units from another student's subject", () => {
-    const ownSubject = new Subject({
-      id: 'subject-own',
-      studentId: 'student-1',
-      name: 'Physiologie',
-      priority: 1,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const otherSubject = new Subject({
-      id: 'subject-other',
-      studentId: 'student-2',
-      name: 'Biophysique',
-      priority: 5,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const goal = new RevisionGoal({
-      id: 'goal-1',
-      studentId: 'student-1',
-      targetDate: new Date('2026-06-30T00:00:00.000Z'),
-      weeklyMinutes: 240,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const units = [
-      new KnowledgeUnit({
-        id: 'unit-own',
-        subjectId: ownSubject.id,
-        title: 'Potentiel action',
-        summary: 'Owned by the goal student',
-      }),
-      new KnowledgeUnit({
-        id: 'unit-other',
-        subjectId: otherSubject.id,
-        title: 'Rayons X',
-        summary: 'Belongs to another student',
-      }),
-    ];
-    const mastery = [
-      new MasteryState({
-        studentId: 'student-1',
-        knowledgeUnitId: 'unit-own',
-        score: 0.6,
-        lastPracticedAt: new Date('2026-06-11T10:00:00.000Z'),
-      }),
-      new MasteryState({
-        studentId: 'student-2',
-        knowledgeUnitId: 'unit-other',
-        score: 0.1,
-        lastPracticedAt: new Date('2026-06-01T10:00:00.000Z'),
-      }),
-    ];
-
+  it('takes subject priority into account', () => {
     const plan = new AdaptivePlanService().buildTodayPlan({
-      now: new Date('2026-06-12T10:00:00.000Z'),
-      goal,
-      subjects: [ownSubject, otherSubject],
-      knowledgeUnits: units,
-      masteryStates: mastery,
+      now,
+      goal: goal(),
+      subjects: [
+        subject({ id: 'subject-low', name: 'Basse priorite', priority: 1 }),
+        subject({ id: 'subject-high', name: 'Haute priorite', priority: 5 }),
+      ],
+      knowledgeUnits: [
+        unit({ id: 'unit-low', subjectId: 'subject-low', title: 'Low' }),
+        unit({ id: 'unit-high', subjectId: 'subject-high', title: 'High' }),
+      ],
+      masteryStates: [
+        mastery({ knowledgeUnitId: 'unit-low', score: 0.4 }),
+        mastery({ knowledgeUnitId: 'unit-high', score: 0.4 }),
+      ],
     });
 
-    expect(plan.items).toHaveLength(1);
     expect(plan.items[0]).toMatchObject({
-      subjectId: 'subject-own',
-      knowledgeUnitId: 'unit-own',
+      subjectId: 'subject-high',
+      knowledgeUnitId: 'unit-high',
     });
   });
 
-  it('prioritizes higher-priority subjects when mastery and recency are equal', () => {
-    const highPrioritySubject = new Subject({
-      id: 'subject-high',
-      studentId: 'student-1',
-      name: 'Anatomie',
-      priority: 5,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const lowPrioritySubject = new Subject({
-      id: 'subject-low',
-      studentId: 'student-1',
-      name: 'Histologie',
-      priority: 2,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const goal = new RevisionGoal({
-      id: 'goal-1',
-      studentId: 'student-1',
-      targetDate: new Date('2026-06-30T00:00:00.000Z'),
-      weeklyMinutes: 240,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-
+  it('keeps a stable order when scores are tied', () => {
     const plan = new AdaptivePlanService().buildTodayPlan({
-      now: new Date('2026-06-12T10:00:00.000Z'),
-      goal,
-      subjects: [lowPrioritySubject, highPrioritySubject],
+      now,
+      goal: goal(),
+      subjects: [
+        subject({ id: 'subject-b', name: 'Biologie', priority: 3 }),
+        subject({ id: 'subject-a', name: 'Anatomie', priority: 3 }),
+      ],
       knowledgeUnits: [
-        new KnowledgeUnit({
-          id: 'unit-low',
-          subjectId: lowPrioritySubject.id,
-          title: 'Epitheliums',
-          summary: 'Same score and recency',
-        }),
-        new KnowledgeUnit({
-          id: 'unit-high',
-          subjectId: highPrioritySubject.id,
-          title: 'Membre inferieur',
-          summary: 'Same score and recency',
-        }),
+        unit({ id: 'unit-b', subjectId: 'subject-b', title: 'Beta' }),
+        unit({ id: 'unit-a', subjectId: 'subject-a', title: 'Alpha' }),
       ],
       masteryStates: [
-        new MasteryState({
-          studentId: 'student-1',
-          knowledgeUnitId: 'unit-low',
-          score: 0.5,
-          lastPracticedAt: new Date('2026-06-10T10:00:00.000Z'),
-        }),
-        new MasteryState({
-          studentId: 'student-1',
-          knowledgeUnitId: 'unit-high',
-          score: 0.5,
-          lastPracticedAt: new Date('2026-06-10T10:00:00.000Z'),
-        }),
+        mastery({ knowledgeUnitId: 'unit-b', score: 0.5 }),
+        mastery({ knowledgeUnitId: 'unit-a', score: 0.5 }),
       ],
     });
 
-    expect(plan.items[0].knowledgeUnitId).toBe('unit-high');
+    expect(plan.items[0]).toMatchObject({
+      subjectId: 'subject-a',
+      knowledgeUnitId: 'unit-a',
+      action: 'diagnostic_quiz',
+    });
   });
 
-  it('prioritizes stale knowledge units when subject priority and mastery are equal', () => {
-    const subject = new Subject({
-      id: 'subject-anatomy',
-      studentId: 'student-1',
-      name: 'Anatomie',
-      priority: 3,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-    const goal = new RevisionGoal({
-      id: 'goal-1',
-      studentId: 'student-1',
-      targetDate: new Date('2026-06-30T00:00:00.000Z'),
-      weeklyMinutes: 240,
-      createdAt: new Date('2026-06-12T10:00:00.000Z'),
-    });
-
+  it('does not exceed the maximum number of today items', () => {
     const plan = new AdaptivePlanService().buildTodayPlan({
-      now: new Date('2026-06-12T10:00:00.000Z'),
-      goal,
-      subjects: [subject],
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 5 })],
       knowledgeUnits: [
-        new KnowledgeUnit({
-          id: 'unit-fresh',
-          subjectId: subject.id,
-          title: 'Articulation coude',
-          summary: 'Practiced recently',
-        }),
-        new KnowledgeUnit({
-          id: 'unit-stale',
-          subjectId: subject.id,
-          title: 'Articulation epaule',
-          summary: 'Needs review after a long gap',
-        }),
+        unit({ id: 'unit-1', subjectId: 'subject-1' }),
+        unit({ id: 'unit-2', subjectId: 'subject-1' }),
+        unit({ id: 'unit-3', subjectId: 'subject-1' }),
+        unit({ id: 'unit-4', subjectId: 'subject-1' }),
       ],
-      masteryStates: [
-        new MasteryState({
-          studentId: 'student-1',
-          knowledgeUnitId: 'unit-fresh',
-          score: 0.5,
-          lastPracticedAt: new Date('2026-06-11T10:00:00.000Z'),
-        }),
-        new MasteryState({
-          studentId: 'student-1',
-          knowledgeUnitId: 'unit-stale',
-          score: 0.5,
-          lastPracticedAt: new Date('2026-05-01T10:00:00.000Z'),
-        }),
-      ],
+      masteryStates: [],
     });
 
-    expect(plan.items[0].knowledgeUnitId).toBe('unit-stale');
+    expect(plan.items).toHaveLength(4);
+  });
+
+  it('proposes open questions only when a knowledge unit is available', () => {
+    const emptyPlan = new AdaptivePlanService().buildTodayPlan({
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 5 })],
+      knowledgeUnits: [],
+      masteryStates: [],
+    });
+    const plan = new AdaptivePlanService().buildTodayPlan({
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 5 })],
+      knowledgeUnits: [unit({ id: 'unit-1', subjectId: 'subject-1' })],
+      masteryStates: [],
+    });
+
+    expect(
+      emptyPlan.items.some((item) => item.action === 'open_question'),
+    ).toBe(false);
+    expect(plan.items.some((item) => item.action === 'open_question')).toBe(
+      true,
+    );
+  });
+
+  it('returns revision session actions with explicit start payload', () => {
+    const plan = new AdaptivePlanService().buildTodayPlan({
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 5 })],
+      knowledgeUnits: [unit({ id: 'unit-1', subjectId: 'subject-1' })],
+      masteryStates: [],
+    });
+
+    expect(plan.items).toContainEqual(
+      expect.objectContaining({
+        action: 'revision_session',
+        startPayload: {
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-1',
+        },
+      }),
+    );
+  });
+
+  it('does not mutate inputs', () => {
+    const subjects = [subject({ id: 'subject-1', priority: 5 })];
+    const units = [unit({ id: 'unit-1', subjectId: 'subject-1' })];
+    const masteryStates = [mastery({ knowledgeUnitId: 'unit-1', score: 0.4 })];
+    const before = JSON.stringify({
+      subjects,
+      units,
+      masteryStates,
+    });
+
+    new AdaptivePlanService().buildTodayPlan({
+      now,
+      goal: goal(),
+      subjects,
+      knowledgeUnits: units,
+      masteryStates,
+    });
+
+    expect(JSON.stringify({ subjects, units, masteryStates })).toBe(before);
   });
 });
+
+function goal(
+  input: Partial<ConstructorParameters<typeof RevisionGoal>[0]> = {},
+) {
+  return new RevisionGoal({
+    id: 'goal-1',
+    studentId: 'student-1',
+    targetDate: new Date('2026-07-01T00:00:00.000Z'),
+    weeklyMinutes: 240,
+    createdAt: new Date('2026-06-01T10:00:00.000Z'),
+    ...input,
+  });
+}
+
+function subject(
+  input: Partial<ConstructorParameters<typeof Subject>[0]> = {},
+) {
+  return new Subject({
+    id: 'subject-1',
+    studentId: 'student-1',
+    name: 'Droit',
+    priority: 3,
+    createdAt: new Date('2026-06-01T10:00:00.000Z'),
+    ...input,
+  });
+}
+
+function unit(
+  input: Partial<ConstructorParameters<typeof KnowledgeUnit>[0]> = {},
+) {
+  return new KnowledgeUnit({
+    id: 'unit-1',
+    subjectId: 'subject-1',
+    title: 'Notion',
+    summary: 'Résumé',
+    ...input,
+  });
+}
+
+function mastery(
+  input: Partial<ConstructorParameters<typeof MasteryState>[0]> = {},
+) {
+  return new MasteryState({
+    studentId: 'student-1',
+    knowledgeUnitId: 'unit-1',
+    score: 0.5,
+    lastPracticedAt: new Date('2026-06-10T10:00:00.000Z'),
+    ...input,
+  });
+}

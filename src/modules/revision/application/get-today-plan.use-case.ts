@@ -3,7 +3,12 @@ import {
   SUBJECTS_REPOSITORY,
   type SubjectsRepository,
 } from '../../subjects/application/subjects.repository';
-import { AdaptivePlanService } from '../domain/adaptive-plan.service';
+import {
+  AdaptivePlanService,
+  type RevisionPlanStartPayload,
+  type TodayPlanActionType,
+  type TodayPlanReasonCode,
+} from '../domain/adaptive-plan.service';
 import {
   REVISION_REPOSITORY,
   type RevisionRepository,
@@ -15,14 +20,18 @@ export interface TodayPlanDto {
 }
 
 export interface TodayPlanItemDto {
+  id: string;
   subjectId: string;
   subjectName: string;
-  knowledgeUnitId: string;
-  knowledgeUnitTitle: string;
-  masteryScore: number;
-  action: 'diagnostic_quiz';
+  knowledgeUnitId: string | null;
+  knowledgeUnitTitle: string | null;
+  masteryScore: number | null;
+  action: TodayPlanActionType;
   estimatedMinutes: number;
+  priority: number;
+  reasonCode: TodayPlanReasonCode;
   reason: string;
+  startPayload: RevisionPlanStartPayload;
 }
 
 @Injectable()
@@ -77,16 +86,36 @@ export class GetTodayPlanUseCase {
         }
 
         return {
+          id: item.id,
           subjectId: item.subjectId,
           subjectName: subject.name,
           knowledgeUnitId: item.knowledgeUnitId,
           knowledgeUnitTitle: unit.title,
-          masteryScore: masteryByUnitId.get(item.knowledgeUnitId)?.score ?? 0,
-          action: item.activityType,
+          masteryScore:
+            masteryByUnitId.get(item.knowledgeUnitId)?.score ?? null,
+          action: item.action,
           estimatedMinutes: item.estimatedMinutes,
-          reason: item.reason,
+          priority: item.priority,
+          reasonCode: item.reasonCode,
+          reason: toReason(item.reasonCode),
+          startPayload: item.startPayload,
         };
       }),
     };
   }
+}
+
+function toReason(reasonCode: TodayPlanReasonCode): string {
+  const reasons: Record<TodayPlanReasonCode, string> = {
+    LOW_MASTERY: 'À revoir en priorité : cette notion est encore fragile.',
+    STALE_PRACTICE:
+      'À entretenir : cette notion n’a pas été pratiquée récemment.',
+    HIGH_PRIORITY_SUBJECT: 'Matière prioritaire dans ton objectif de révision.',
+    MIX_ACTIVITY_TYPE: 'Change de format pour renforcer la mémorisation.',
+    START_REVISION_SESSION:
+      'Lance une session guidée pour enchaîner plusieurs exercices.',
+    CONTINUE_PROGRESS: 'Continue ta progression sur cette notion.',
+  };
+
+  return reasons[reasonCode];
 }
