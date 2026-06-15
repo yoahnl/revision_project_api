@@ -1,5 +1,6 @@
 import type {
   RichClosedExercise,
+  RichClosedPublicChoice,
   RichClosedPublicExercise,
   RichClosedPublicQuestion,
   RichClosedQuestion,
@@ -82,7 +83,9 @@ export function toRichClosedPublicQuestion(
   }
 }
 
-function publicChoices(choices: Array<{ id: string; label: string }>) {
+function publicChoices(
+  choices: Array<{ id: string; label: string }>,
+): RichClosedPublicChoice[] {
   return choices.map((choice) => ({
     id: choice.id,
     label: choice.label,

@@ -1,5 +1,6 @@
 import {
   RICH_CLOSED_EXERCISE_VERSION,
+  RICH_CLOSED_COGNITIVE_SKILLS,
   RICH_CLOSED_QUESTION_KINDS,
   type RichClosedChoice,
   type RichClosedExerciseValidationIssue,
@@ -182,11 +183,11 @@ function validateCommonQuestionFields(
     );
   }
 
-  if (!plainString(question.cognitiveSkill)) {
+  if (!isRichClosedCognitiveSkill(question.cognitiveSkill)) {
     issues.push(
       issue(
         'RICH_CLOSED_COGNITIVE_SKILL_INVALID',
-        'Question cognitive skill is required',
+        'Question cognitive skill is not part of the V1-A allowlist',
         'cognitiveSkill',
       ),
     );
@@ -221,6 +222,8 @@ function validateMultipleChoiceQuestion(
   const choices = readChoices(question.choices, issues, 'choices');
   const knownChoiceIds = choiceIds(choices);
   const correctChoiceIds = readStringArray(question.correctChoiceIds);
+  const minSelections = question.minSelections;
+  const maxSelections = question.maxSelections;
 
   if (correctChoiceIds.length < 2) {
     issues.push(
@@ -246,11 +249,15 @@ function validateMultipleChoiceQuestion(
   }
 
   if (
-    typeof question.minSelections !== 'number' ||
-    typeof question.maxSelections !== 'number' ||
-    question.minSelections < 1 ||
-    question.maxSelections < question.minSelections ||
-    question.maxSelections > choices.length
+    typeof minSelections !== 'number' ||
+    typeof maxSelections !== 'number' ||
+    !Number.isInteger(minSelections) ||
+    !Number.isInteger(maxSelections) ||
+    minSelections < 1 ||
+    maxSelections < minSelections ||
+    maxSelections > choices.length ||
+    correctChoiceIds.length < minSelections ||
+    correctChoiceIds.length > maxSelections
   ) {
     issues.push(
       issue(
@@ -561,6 +568,17 @@ function isRichClosedQuestionKind(
   return (
     typeof value === 'string' &&
     RICH_CLOSED_QUESTION_KINDS.includes(value as RichClosedQuestionKind)
+  );
+}
+
+function isRichClosedCognitiveSkill(
+  value: unknown,
+): value is (typeof RICH_CLOSED_COGNITIVE_SKILLS)[number] {
+  return (
+    typeof value === 'string' &&
+    RICH_CLOSED_COGNITIVE_SKILLS.includes(
+      value as (typeof RICH_CLOSED_COGNITIVE_SKILLS)[number],
+    )
   );
 }
 

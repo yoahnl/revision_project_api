@@ -16,20 +16,29 @@ export type RichClosedQuestionKind =
 
 export type RichClosedDifficulty = 'LOW' | 'MEDIUM' | 'HIGH';
 
+export const RICH_CLOSED_COGNITIVE_SKILLS = [
+  'memorization',
+  'comprehension',
+  'comparison',
+  'classification',
+  'case_application',
+  'procedure',
+  'error_detection',
+  'causality',
+] as const;
+
 export type RichClosedCognitiveSkill =
-  | 'memorization'
-  | 'comprehension'
-  | 'comparison'
-  | 'classification'
-  | 'case_application'
-  | 'procedure'
-  | 'error_detection'
-  | 'causality';
+  (typeof RICH_CLOSED_COGNITIVE_SKILLS)[number];
 
 export interface RichClosedChoice {
   id: string;
   label: string;
   feedback?: string | null;
+}
+
+export interface RichClosedPublicChoice {
+  id: string;
+  label: string;
 }
 
 export interface RichClosedPair {
@@ -106,13 +115,57 @@ export type RichClosedQuestion =
   | RichClosedCaseQualificationQuestion
   | RichClosedErrorDetectionQuestion;
 
+export interface RichClosedPublicQuestionBase {
+  id: string;
+  questionKind: RichClosedQuestionKind;
+  prompt: string;
+  difficulty: RichClosedDifficulty;
+  cognitiveSkill: RichClosedCognitiveSkill;
+  sourceChunkIds: string[];
+}
+
+export interface RichClosedPublicSingleChoiceQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'single_choice';
+  choices: RichClosedPublicChoice[];
+}
+
+export interface RichClosedPublicMultipleChoiceQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'multiple_choice';
+  choices: RichClosedPublicChoice[];
+  minSelections: number;
+  maxSelections: number;
+}
+
+export interface RichClosedPublicMatchingQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'matching';
+  leftItems: RichClosedLabelItem[];
+  rightItems: RichClosedLabelItem[];
+}
+
+export interface RichClosedPublicOrderingQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'ordering';
+  items: RichClosedLabelItem[];
+}
+
+export interface RichClosedPublicCaseQualificationQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'case_qualification';
+  caseText: string;
+  choices: RichClosedPublicChoice[];
+}
+
+export interface RichClosedPublicErrorDetectionQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'error_detection';
+  statement: string;
+  errorOptions: RichClosedPublicChoice[];
+}
+
 export type RichClosedPublicQuestion =
-  | Omit<RichClosedSingleChoiceQuestion, 'correctChoiceId' | 'explanation'>
-  | Omit<RichClosedMultipleChoiceQuestion, 'correctChoiceIds' | 'explanation'>
-  | Omit<RichClosedMatchingQuestion, 'correctPairs' | 'explanation'>
-  | Omit<RichClosedOrderingQuestion, 'correctOrder' | 'explanation'>
-  | Omit<RichClosedCaseQualificationQuestion, 'correctChoiceId' | 'explanation'>
-  | Omit<RichClosedErrorDetectionQuestion, 'correctErrorId' | 'explanation'>;
+  | RichClosedPublicSingleChoiceQuestion
+  | RichClosedPublicMultipleChoiceQuestion
+  | RichClosedPublicMatchingQuestion
+  | RichClosedPublicOrderingQuestion
+  | RichClosedPublicCaseQualificationQuestion
+  | RichClosedPublicErrorDetectionQuestion;
 
 export type RichClosedAnswer =
   | {

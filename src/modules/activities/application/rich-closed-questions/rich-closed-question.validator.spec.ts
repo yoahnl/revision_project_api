@@ -54,6 +54,33 @@ describe('rich closed question validator', () => {
     );
   });
 
+  it('rejects cognitive skills outside the V1-A allowlist', () => {
+    const question = {
+      ...richClosedQuestionFixture('single_choice'),
+      cognitiveSkill: 'creative_writing',
+    } as unknown as RichClosedQuestion;
+
+    const result = validateRichClosedQuestion(question);
+
+    expect(result.accepted).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_COGNITIVE_SKILL_INVALID',
+      }),
+    );
+  });
+
+  it('accepts a cognitive skill from the V1-A allowlist', () => {
+    const question = {
+      ...richClosedQuestionFixture('single_choice'),
+      cognitiveSkill: 'comparison',
+    };
+
+    const result = validateRichClosedQuestion(question);
+
+    expect(result.accepted).toBe(true);
+  });
+
   it('requires single_choice to have exactly one valid correct choice', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
@@ -80,6 +107,54 @@ describe('rich closed question validator', () => {
     expect(result.issues).toContainEqual(
       expect.objectContaining({ code: 'RICH_CLOSED_MULTIPLE_TOO_FEW_CORRECT' }),
     );
+  });
+
+  it('rejects decimal multiple_choice selection bounds', () => {
+    const question = {
+      ...richClosedQuestionFixture('multiple_choice'),
+      minSelections: 1.5,
+      maxSelections: 2.5,
+    };
+
+    const result = validateRichClosedQuestion(question);
+
+    expect(result.accepted).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_SELECTION_BOUNDS_INVALID',
+      }),
+    );
+  });
+
+  it('rejects multiple_choice bounds that exclude the correct answer count', () => {
+    const question = {
+      ...richClosedQuestionFixture('multiple_choice'),
+      minSelections: 1,
+      maxSelections: 1,
+      correctChoiceIds: ['choice-a', 'choice-b'],
+    };
+
+    const result = validateRichClosedQuestion(question);
+
+    expect(result.accepted).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_SELECTION_BOUNDS_INVALID',
+      }),
+    );
+  });
+
+  it('accepts multiple_choice bounds that include the correct answer count', () => {
+    const question = {
+      ...richClosedQuestionFixture('multiple_choice'),
+      minSelections: 1,
+      maxSelections: 3,
+      correctChoiceIds: ['choice-a', 'choice-b'],
+    };
+
+    const result = validateRichClosedQuestion(question);
+
+    expect(result.accepted).toBe(true);
   });
 
   it('rejects matching questions with fewer than three pairs', () => {

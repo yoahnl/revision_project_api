@@ -44,4 +44,29 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('explanation');
     expect(serialized).not.toContain('score');
   });
+
+  it('removes internal choice feedback from public choice payloads', () => {
+    const question = {
+      ...richClosedQuestionFixture('single_choice'),
+      choices: [
+        {
+          id: 'choice-a',
+          label: 'La responsabilité politique',
+          feedback: 'Ce feedback reste privé avant submit.',
+        },
+        {
+          id: 'choice-b',
+          label: 'La séparation totalement étanche',
+          feedback: 'Feedback privé également.',
+        },
+      ],
+    };
+
+    const publicQuestion = toRichClosedPublicQuestion(question);
+    const serialized = JSON.stringify(publicQuestion);
+
+    expect(serialized).not.toContain('feedback');
+    expect(serialized).not.toContain('Ce feedback reste privé avant submit.');
+    expect(serialized).not.toContain('Feedback privé également.');
+  });
 });

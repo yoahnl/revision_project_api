@@ -236,15 +236,25 @@ function emptyQuestionKindCounts(): Record<RichClosedQuestionKind, number> {
 }
 
 function isLikelyBasicPrompt(prompt: string): boolean {
-  const normalized = prompt.trim().toLocaleLowerCase('fr-FR');
+  const normalized = normalizePromptForHeuristic(prompt);
 
   return (
     normalized.startsWith('qui ') ||
     normalized.startsWith('quand ') ||
     normalized.startsWith('quelle date') ||
-    normalized.startsWith('quelle est la définition') ||
-    normalized.startsWith('quel terme désigne')
+    normalized.startsWith('quelle est la definition') ||
+    normalized.startsWith('quel terme designe')
   );
+}
+
+function normalizePromptForHeuristic(prompt: string): string {
+  return prompt
+    .trim()
+    .toLocaleLowerCase('fr-FR')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[’']/g, ' ')
+    .replace(/\s+/g, ' ');
 }
 
 function validatePublicPayloadHasNoCorrection(
@@ -291,8 +301,17 @@ function isPrivatePublicPayloadKey(key: string): boolean {
     key.startsWith('correct') ||
     key === 'correctionPayload' ||
     key === 'explanation' ||
+    key === 'feedback' ||
+    key === 'choiceFeedback' ||
+    key === 'modelAnswer' ||
+    key === 'answerText' ||
+    key === 'freeTextAnswer' ||
+    key === 'textAnswer' ||
     key === 'score' ||
-    key === 'partialScore'
+    key === 'partialScore' ||
+    key === 'workedSteps' ||
+    key === 'expectedAnswer' ||
+    key === 'expectedAnswers'
   );
 }
 
