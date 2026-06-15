@@ -44,5 +44,6 @@ import { ActivitiesController } from './interfaces/activities.controller';
       useClass: GenkitOpenAnswerEvaluator,
     },
   ],
+  exports: [StartNextActivityUseCase, StartOpenQuestionActivityUseCase],
 })
 export class ActivitiesModule {}

@@ -20,6 +20,8 @@ model StudentProfile {
   subjects Subject[]
   mastery  MasteryState[]
   sessions ActivitySession[]
+  revisionSessions RevisionSession[]
+  revisionSessionActions RevisionSessionAction[]
   summaries Summary[]
   revisionSheets RevisionSheet[]
   openQuestions OpenQuestion[]
@@ -52,6 +54,8 @@ model Subject {
   knowledgeUnits KnowledgeUnit[]
   mastery        MasteryState[]
   sessions       ActivitySession[]
+  revisionSessions RevisionSession[]
+  revisionSessionActions RevisionSessionAction[]
   summaries      Summary[]
   revisionSheets RevisionSheet[]
   openQuestions  OpenQuestion[]
@@ -81,6 +85,8 @@ model Document {
   summaries      Summary[]
   revisionSheets RevisionSheet[]
   openQuestions  OpenQuestion[]
+  revisionSessions RevisionSession[]
+  revisionSessionActions RevisionSessionAction[]
 
   @@index([studentId])
   @@index([subjectId])
@@ -117,6 +123,8 @@ model KnowledgeUnit {
   mastery  MasteryState[]
   questions Question[]
   sessions ActivitySession[]
+  revisionSessions RevisionSession[]
+  revisionSessionActions RevisionSessionAction[]
   sources  KnowledgeUnitSource[]
   openQuestions OpenQuestion[]
 
@@ -323,6 +331,7 @@ model ActivitySession {
   answers       QuestionAnswer[]
   openQuestion  OpenQuestion?
   openAnswerEvaluation OpenAnswerEvaluation?
+  revisionSessionActions RevisionSessionAction[]
 
   @@index([studentId])
   @@index([subjectId])
@@ -521,6 +530,59 @@ model OpenAnswerEvaluation {
   @@index([openQuestionId])
 }
 
+model RevisionSession {
+  id              String                @id @default(cuid())
+  studentId       String
+  subjectId       String
+  documentId      String?
+  knowledgeUnitId String?
+  status          RevisionSessionStatus @default(STARTED)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  completedAt     DateTime?
+
+  student       StudentProfile          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject       Subject                 @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  document      Document?               @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
+  knowledgeUnit KnowledgeUnit?          @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: NoAction)
+  actions       RevisionSessionAction[]
+
+  @@index([studentId])
+  @@index([subjectId])
+  @@index([documentId])
+  @@index([knowledgeUnitId])
+  @@unique([id, studentId])
+}
+
+model RevisionSessionAction {
+  id                String                      @id @default(cuid())
+  sessionId         String
+  studentId         String
+  subjectId         String
+  kind              RevisionSessionActionKind
+  status            RevisionSessionActionStatus @default(READY)
+  displayOrder      Int                         @default(0)
+  activitySessionId String?
+  documentId        String?
+  knowledgeUnitId   String?
+  createdAt         DateTime                    @default(now())
+  completedAt       DateTime?
+
+  session         RevisionSession  @relation(fields: [sessionId, studentId], references: [id, studentId], onDelete: Cascade)
+  student         StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject         Subject          @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  activitySession ActivitySession? @relation(fields: [activitySessionId], references: [id], onDelete: NoAction)
+  document        Document?        @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
+  knowledgeUnit   KnowledgeUnit?   @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: NoAction)
+
+  @@unique([sessionId, displayOrder])
+  @@index([studentId])
+  @@index([subjectId])
+  @@index([activitySessionId])
+  @@index([documentId])
+  @@index([knowledgeUnitId])
+}
+
 enum DocumentKind {
   COURSE_PDF
   EXAM_PDF
@@ -566,6 +628,23 @@ enum ActivityStatus {
   STARTED
   SUBMITTED
   COMPLETED
+}
+
+enum RevisionSessionStatus {
+  STARTED
+  COMPLETED
+  ABANDONED
+}
+
+enum RevisionSessionActionKind {
+  DIAGNOSTIC_QUIZ
+  OPEN_QUESTION
+}
+
+enum RevisionSessionActionStatus {
+  READY
+  COMPLETED
+  FAILED
 }
 
 enum OpenAnswerEvaluationStatus {
