@@ -219,6 +219,8 @@ function createRevisionSessionsRepository(): jest.Mocked<RevisionSessionsReposit
       .mockResolvedValue(
         revisionSessionResponse('OPEN_QUESTION', 'open-session-1'),
       ),
+    findPlanningContextByIdForStudent: jest.fn(),
+    appendAction: jest.fn(),
   };
 }
 

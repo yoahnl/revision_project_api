@@ -113,6 +113,117 @@ describe('PrismaRevisionSessionsRepository', () => {
       sessionId: 'activity-session-1',
     });
   });
+
+  it('loads a planning context with action activity knowledge units and candidates', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findFirst.mockResolvedValue({
+      ...revisionSessionRecord(),
+      actions: [
+        {
+          ...actionRecord(),
+          knowledgeUnitId: null,
+          activitySession: { knowledgeUnitId: 'unit-from-activity' },
+        },
+      ],
+    });
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      { id: 'unit-1' },
+      { id: 'unit-from-activity' },
+    ]);
+
+    const result = await repository.findPlanningContextByIdForStudent({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+
+    expect(prisma.revisionSession.findFirst).toHaveBeenCalledWith({
+      where: { id: 'revision-session-1', studentId: 'student-1' },
+      include: {
+        actions: {
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          include: {
+            activitySession: {
+              select: { knowledgeUnitId: true },
+            },
+          },
+        },
+      },
+    });
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        subjectId: 'subject-1',
+        subject: { studentId: 'student-1' },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+      take: 20,
+      select: { id: true },
+    });
+    expect(result.actions[0]?.knowledgeUnitId).toBe('unit-from-activity');
+    expect(result.allowedKnowledgeUnitIds).toEqual([
+      'unit-1',
+      'unit-from-activity',
+    ]);
+  });
+
+  it('appends an action with the next display order inside a transaction', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst
+      .mockResolvedValueOnce(revisionSessionRecord())
+      .mockResolvedValueOnce({
+        ...revisionSessionRecord(),
+        actions: [
+          actionRecord(),
+          { ...actionRecord(), id: 'action-2', displayOrder: 1 },
+        ],
+      });
+    prisma.revisionSessionAction.aggregate.mockResolvedValue({
+      _max: { displayOrder: 0 },
+    });
+    prisma.revisionSessionAction.create.mockResolvedValue({
+      ...actionRecord(),
+      id: 'action-2',
+      displayOrder: 1,
+      activitySessionId: 'quiz-session-2',
+      kind: 'DIAGNOSTIC_QUIZ',
+      documentId: null,
+      knowledgeUnitId: null,
+    });
+
+    const result = await repository.appendAction({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+      action: {
+        kind: 'DIAGNOSTIC_QUIZ',
+        status: 'READY',
+        activitySessionId: 'quiz-session-2',
+        documentId: null,
+        knowledgeUnitId: null,
+      },
+    });
+
+    expect(prisma.revisionSessionAction.aggregate).toHaveBeenCalledWith({
+      where: { sessionId: 'revision-session-1' },
+      _max: { displayOrder: true },
+    });
+    expect(prisma.revisionSessionAction.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'revision-session-1',
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        kind: 'DIAGNOSTIC_QUIZ',
+        status: 'READY',
+        displayOrder: 1,
+        activitySessionId: 'quiz-session-2',
+        documentId: null,
+        knowledgeUnitId: null,
+      },
+    });
+    expect(result.history).toHaveLength(2);
+    expect(result.currentAction?.displayOrder).toBe(1);
+  });
 });
 
 type PrismaRevisionSessionsMock = ReturnType<typeof createPrismaMock>;
@@ -137,6 +248,7 @@ function createPrismaMock() {
     },
     knowledgeUnit: {
       findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn(),
     },
     revisionSession: {
       create: jest.fn(),
@@ -144,6 +256,7 @@ function createPrismaMock() {
     },
     revisionSessionAction: {
       create: jest.fn(),
+      aggregate: jest.fn(),
     },
     $transaction: jest.fn(),
   };

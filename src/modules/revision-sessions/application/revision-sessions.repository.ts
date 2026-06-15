@@ -2,6 +2,7 @@ import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionStatusValue,
   RevisionSessionResponseDto,
+  RevisionSessionStatusValue,
 } from '../domain/revision-session.entity';
 
 export const REVISION_SESSIONS_REPOSITORY = Symbol(
@@ -12,6 +13,24 @@ export interface RevisionSessionStartContext {
   subjectId: string;
   documentId: string | null;
   knowledgeUnitId: string | null;
+}
+
+export interface RevisionSessionPlanningContext {
+  session: {
+    id: string;
+    status: RevisionSessionStatusValue;
+    subjectId: string;
+    documentId: string | null;
+    knowledgeUnitId: string | null;
+  };
+  actions: Array<{
+    kind: RevisionSessionActionKindValue;
+    status: RevisionSessionActionStatusValue;
+    displayOrder: number;
+    activitySessionId: string | null;
+    knowledgeUnitId: string | null;
+  }>;
+  allowedKnowledgeUnitIds: string[];
 }
 
 export interface RevisionSessionsRepository {
@@ -40,5 +59,22 @@ export interface RevisionSessionsRepository {
   findByIdForStudent(input: {
     studentId: string;
     sessionId: string;
+  }): Promise<RevisionSessionResponseDto>;
+
+  findPlanningContextByIdForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RevisionSessionPlanningContext>;
+
+  appendAction(input: {
+    studentId: string;
+    sessionId: string;
+    action: {
+      kind: RevisionSessionActionKindValue;
+      status: RevisionSessionActionStatusValue;
+      activitySessionId: string | null;
+      documentId: string | null;
+      knowledgeUnitId: string | null;
+    };
   }): Promise<RevisionSessionResponseDto>;
 }

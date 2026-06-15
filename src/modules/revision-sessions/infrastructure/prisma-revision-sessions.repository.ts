@@ -13,6 +13,7 @@ import type {
 } from '../domain/revision-session.entity';
 import type {
   RevisionSessionsRepository,
+  RevisionSessionPlanningContext,
   RevisionSessionStartContext,
 } from '../application/revision-sessions.repository';
 
@@ -41,6 +42,9 @@ type RevisionSessionActionRecord = {
   knowledgeUnitId: string | null;
   createdAt: Date;
   completedAt: Date | null;
+  activitySession?: {
+    knowledgeUnitId: string;
+  } | null;
 };
 
 @Injectable()
@@ -184,6 +188,129 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     }
 
     return toRevisionSessionResponse(session, session.actions ?? []);
+  }
+
+  async findPlanningContextByIdForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RevisionSessionPlanningContext> {
+    const session = (await this.prisma.revisionSession.findFirst({
+      where: {
+        id: input.sessionId,
+        studentId: input.studentId,
+      },
+      include: {
+        actions: {
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          include: {
+            activitySession: {
+              select: { knowledgeUnitId: true },
+            },
+          },
+        },
+      },
+    })) as RevisionSessionRecord | null;
+
+    if (!session) {
+      throw new Error('Revision session not found');
+    }
+
+    const knowledgeUnits = await this.prisma.knowledgeUnit.findMany({
+      where: {
+        subjectId: session.subjectId,
+        subject: { studentId: input.studentId },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+      take: 20,
+      select: { id: true },
+    });
+
+    return {
+      session: {
+        id: session.id,
+        status: session.status,
+        subjectId: session.subjectId,
+        documentId: session.documentId,
+        knowledgeUnitId: session.knowledgeUnitId,
+      },
+      actions: (session.actions ?? []).map((action) => ({
+        kind: action.kind,
+        status: action.status,
+        displayOrder: action.displayOrder,
+        activitySessionId: action.activitySessionId,
+        knowledgeUnitId:
+          action.knowledgeUnitId ??
+          action.activitySession?.knowledgeUnitId ??
+          null,
+      })),
+      allowedKnowledgeUnitIds: knowledgeUnits.map((unit) => unit.id),
+    };
+  }
+
+  async appendAction(input: {
+    studentId: string;
+    sessionId: string;
+    action: {
+      kind: RevisionSessionActionKindValue;
+      status: RevisionSessionActionStatusValue;
+      activitySessionId: string | null;
+      documentId: string | null;
+      knowledgeUnitId: string | null;
+    };
+  }): Promise<RevisionSessionResponseDto> {
+    return this.prisma.$transaction(async (tx) => {
+      const session = await tx.revisionSession.findFirst({
+        where: {
+          id: input.sessionId,
+          studentId: input.studentId,
+        },
+      });
+
+      if (!session) {
+        throw new Error('Revision session not found');
+      }
+
+      const maxOrder = await tx.revisionSessionAction.aggregate({
+        where: { sessionId: input.sessionId },
+        _max: { displayOrder: true },
+      });
+      const displayOrder = (maxOrder._max.displayOrder ?? -1) + 1;
+
+      await tx.revisionSessionAction.create({
+        data: {
+          sessionId: session.id,
+          studentId: input.studentId,
+          subjectId: session.subjectId,
+          kind: toPrismaActionKind(input.action.kind),
+          status: toPrismaActionStatus(input.action.status),
+          displayOrder,
+          activitySessionId: input.action.activitySessionId,
+          documentId: input.action.documentId,
+          knowledgeUnitId: input.action.knowledgeUnitId,
+        },
+      });
+
+      const updatedSession = (await tx.revisionSession.findFirst({
+        where: {
+          id: input.sessionId,
+          studentId: input.studentId,
+        },
+        include: {
+          actions: {
+            orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          },
+        },
+      })) as RevisionSessionRecord | null;
+
+      if (!updatedSession) {
+        throw new Error('Revision session not found');
+      }
+
+      return toRevisionSessionResponse(
+        updatedSession,
+        updatedSession.actions ?? [],
+      );
+    });
   }
 }
 

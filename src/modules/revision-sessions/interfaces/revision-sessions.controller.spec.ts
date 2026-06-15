@@ -7,6 +7,7 @@ import { AppModule } from '../../../app.module';
 import { TOKEN_VERIFIER } from '../../auth/application/token-verifier';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
+import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
 import { StartRevisionSessionUseCase } from '../application/start-revision-session.use-case';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import type { RevisionSessionResponseDto } from '../domain/revision-session.entity';
@@ -26,12 +27,16 @@ describe('RevisionSessionsController', () => {
   let app: INestApplication<App>;
   let startRevisionSession: { execute: jest.Mock };
   let getRevisionSession: { execute: jest.Mock };
+  let requestNextAction: { execute: jest.Mock };
 
   beforeEach(async () => {
     startRevisionSession = {
       execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
     };
     getRevisionSession = {
+      execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
+    };
+    requestNextAction = {
       execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
     };
 
@@ -54,6 +59,8 @@ describe('RevisionSessionsController', () => {
       .useValue(startRevisionSession)
       .overrideProvider(GetRevisionSessionUseCase)
       .useValue(getRevisionSession)
+      .overrideProvider(RequestNextRevisionSessionActionUseCase)
+      .useValue(requestNextAction)
       .overrideProvider(PrismaService)
       .useValue({})
       .compile();
@@ -135,6 +142,39 @@ describe('RevisionSessionsController', () => {
     await request(app.getHttpServer())
       .get('/revision-sessions/missing-session')
       .expect(404);
+  });
+
+  it('requests a bounded next action for the current student', async () => {
+    await request(app.getHttpServer())
+      .post('/revision-sessions/revision-session-1/next-action')
+      .send({ message: 'ignore me' })
+      .expect(201);
+
+    expect(requestNextAction.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+    expect(JSON.stringify(requestNextAction.execute.mock.calls)).not.toContain(
+      'ignore me',
+    );
+  });
+
+  it('maps next action session and planning errors', async () => {
+    requestNextAction.execute.mockRejectedValueOnce(
+      new Error('Revision session not found'),
+    );
+
+    await request(app.getHttpServer())
+      .post('/revision-sessions/missing-session/next-action')
+      .expect(404);
+
+    requestNextAction.execute.mockRejectedValueOnce(
+      new Error('Revision coach no action available'),
+    );
+
+    await request(app.getHttpServer())
+      .post('/revision-sessions/revision-session-1/next-action')
+      .expect(422);
   });
 });
 

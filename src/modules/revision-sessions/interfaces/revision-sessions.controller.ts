@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Get,
   NotFoundException,
@@ -13,6 +14,7 @@ import { CurrentStudent } from '../../auth/interfaces/current-student.decorator'
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import type { RevisionSessionPreferredAction } from '../domain/revision-session.entity';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
+import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
 import { StartRevisionSessionUseCase } from '../application/start-revision-session.use-case';
 
 class StartRevisionSessionDto {
@@ -35,6 +37,7 @@ export class RevisionSessionsController {
   constructor(
     private readonly startRevisionSession: StartRevisionSessionUseCase,
     private readonly getRevisionSession: GetRevisionSessionUseCase,
+    private readonly requestNextAction: RequestNextRevisionSessionActionUseCase,
   ) {}
 
   @Post()
@@ -68,6 +71,26 @@ export class RevisionSessionsController {
     );
 
     return this.getRevisionSession
+      .execute({
+        studentId: student.id,
+        sessionId: validatedSessionId,
+      })
+      .catch((error: unknown) => {
+        normalizeRevisionSessionError(error);
+      });
+  }
+
+  @Post(':sessionId/next-action')
+  nextAction(
+    @CurrentStudent() student: { id: string },
+    @Param('sessionId') sessionId: string,
+  ) {
+    const validatedSessionId = validateRequiredId(
+      sessionId,
+      'Revision session id',
+    );
+
+    return this.requestNextAction
       .execute({
         studentId: student.id,
         sessionId: validatedSessionId,
@@ -144,6 +167,14 @@ function normalizeRevisionSessionError(error: unknown): never {
       'Open question revision session requires a knowledge unit'
     ) {
       throw new UnprocessableEntityException(error.message);
+    }
+
+    if (error.message === 'Revision coach no action available') {
+      throw new UnprocessableEntityException(error.message);
+    }
+
+    if (error.message === 'Revision session is not started') {
+      throw new ConflictException(error.message);
     }
   }
 
