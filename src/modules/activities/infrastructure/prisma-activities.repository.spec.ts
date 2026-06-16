@@ -1,4 +1,11 @@
 import { PrismaActivitiesRepository } from './prisma-activities.repository';
+import { RICH_CLOSED_SESSION_ALREADY_COMPLETED } from '../application/rich-closed-questions/rich-closed-question-errors';
+import { richClosedExerciseFixture } from '../application/rich-closed-questions/rich-closed-question.fixtures';
+import { scoreRichClosedExerciseSubmission } from '../application/rich-closed-questions/rich-closed-question-scorer';
+import type {
+  RichClosedAnswer,
+  RichClosedExercise,
+} from '../application/rich-closed-questions/rich-closed-question.types';
 
 type ActivitySessionRecord = {
   id: string;
@@ -15,6 +22,32 @@ type ActivitySessionRecord = {
   generationInputSize: number | null;
   status: 'STARTED' | 'SUBMITTED' | 'COMPLETED';
   completedAt: Date | null;
+};
+
+type RichClosedExercisePayloadRecord = {
+  id: string;
+  activitySessionId: string;
+  version: string;
+  title: string;
+  subjectId: string;
+  documentId: string | null;
+  knowledgeUnitId: string;
+  exercisePayload: RichClosedExercise;
+  generationMetadata: unknown;
+  qualityMetrics: unknown;
+};
+
+type RichClosedExerciseResultRecord = {
+  id: string;
+  activitySessionId: string;
+  answersPayload: RichClosedAnswer[];
+  correctionPayload: ReturnType<
+    typeof scoreRichClosedExerciseSubmission
+  >['items'];
+  correctAnswers: number;
+  totalQuestions: number;
+  score: number;
+  createdAt: Date;
 };
 
 type QuestionRecord = {
@@ -201,6 +234,11 @@ type OpenQuestionSessionRecord = ActivitySessionRecord & {
   knowledgeUnit?: KnowledgeUnitRecord;
 };
 
+type RichClosedExerciseSessionRecord = ActivitySessionRecord & {
+  richClosedExercisePayload: RichClosedExercisePayloadRecord | null;
+  richClosedExerciseResult: RichClosedExerciseResultRecord | null;
+};
+
 type KnowledgeUnitRecord = {
   id: string;
   subjectId: string;
@@ -264,6 +302,12 @@ type PrismaActivitiesMock = {
   activityResult: {
     create: jest.Mock;
   };
+  richClosedExercisePayload: {
+    create: jest.Mock;
+  };
+  richClosedExerciseResult: {
+    create: jest.Mock;
+  };
   $transaction: jest.Mock<Promise<unknown>, [TransactionCallback]>;
 };
 
@@ -323,6 +367,12 @@ describe('PrismaActivitiesRepository', () => {
         createMany: jest.fn(),
       },
       activityResult: {
+        create: jest.fn(),
+      },
+      richClosedExercisePayload: {
+        create: jest.fn(),
+      },
+      richClosedExerciseResult: {
         create: jest.fn(),
       },
       $transaction: jest.fn<Promise<unknown>, [TransactionCallback]>(),
@@ -469,6 +519,57 @@ describe('PrismaActivitiesRepository', () => {
     errors: [],
     modelAnswer: null,
     advice: null,
+    ...input,
+  });
+
+  const richClosedPayloadRecord = (
+    input: Partial<RichClosedExercisePayloadRecord> = {},
+  ): RichClosedExercisePayloadRecord => ({
+    id: 'rich-payload-1',
+    activitySessionId: 'session-1',
+    version: 'rich-closed-question-v1',
+    title: 'Droit constitutionnel - exercice riche fermé',
+    subjectId: 'subject-1',
+    documentId: 'document-1',
+    knowledgeUnitId: 'unit-1',
+    exercisePayload: richClosedExerciseFixture(),
+    generationMetadata: null,
+    qualityMetrics: null,
+    ...input,
+  });
+
+  const richClosedResultRecord = (
+    input: Partial<RichClosedExerciseResultRecord> = {},
+  ): RichClosedExerciseResultRecord => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedExerciseFixture(),
+      answers: correctRichClosedAnswers(),
+    });
+
+    return {
+      id: 'rich-result-1',
+      activitySessionId: 'session-1',
+      answersPayload: correctRichClosedAnswers(),
+      correctionPayload: result.items,
+      correctAnswers: result.correctAnswers,
+      totalQuestions: result.totalQuestions,
+      score: result.score,
+      createdAt,
+      ...input,
+    };
+  };
+
+  const richClosedSessionRecord = (
+    input: Partial<RichClosedExerciseSessionRecord> = {},
+  ): RichClosedExerciseSessionRecord => ({
+    ...sessionRecord({
+      type: 'RICH_CLOSED_EXERCISE' as never,
+      version: 1,
+      documentId: 'document-1',
+    }),
+    richClosedExercisePayload: richClosedPayloadRecord(),
+    richClosedExerciseResult: null,
     ...input,
   });
 
@@ -1703,4 +1804,254 @@ describe('PrismaActivitiesRepository', () => {
 
     expect(prisma.openAnswerEvaluation.create).not.toHaveBeenCalled();
   });
+
+  it('persists rich closed exercise payloads and returns a public pre-submit envelope', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findFirst.mockResolvedValue({
+      id: 'unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.documentChunk.findMany.mockResolvedValue([{ id: 'chunk-1' }]);
+    prisma.activitySession.create.mockResolvedValue(
+      sessionRecord({
+        id: 'rich-session-1',
+        type: 'RICH_CLOSED_EXERCISE' as never,
+        version: 1,
+        documentId: 'document-1',
+      }),
+    );
+
+    const result = await repository.createRichClosedExerciseSession({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      documentId: 'document-1',
+      exercise: {
+        ...richClosedExerciseFixture(),
+        metadata: {
+          flowName: 'richClosedQuestionGeneration',
+          provider: 'test-provider',
+          model: 'test-model',
+          promptVersion: 'rich-closed-v1a-001',
+          schemaVersion: 'rich-closed-question-v1',
+          inputSize: 1234,
+        },
+      },
+      qualityMetrics: {
+        questionCount: 6,
+      },
+    });
+
+    const [sessionCreatePayload] = prisma.activitySession.create.mock
+      .calls[0] as [ActivitySessionCreatePayload] | [];
+    expect(sessionCreatePayload?.data).toMatchObject({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      documentId: 'document-1',
+      type: 'RICH_CLOSED_EXERCISE',
+      status: 'STARTED',
+    });
+
+    const [richClosedPayloadCreate] = prisma.richClosedExercisePayload.create
+      .mock.calls[0] as
+      | [
+          {
+            data: {
+              activitySessionId: string;
+              version: string;
+              subjectId: string;
+              documentId: string | null;
+              knowledgeUnitId: string;
+              exercisePayload: RichClosedExercise;
+              generationMetadata: { flowName: string };
+              qualityMetrics: { questionCount: number };
+            };
+          },
+        ]
+      | [];
+    expect(richClosedPayloadCreate?.data).toMatchObject({
+      activitySessionId: 'rich-session-1',
+      version: 'rich-closed-question-v1',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+    });
+    expect(richClosedPayloadCreate?.data.exercisePayload.questions).toEqual(
+      expect.any(Array),
+    );
+    expect(richClosedPayloadCreate?.data.generationMetadata.flowName).toBe(
+      'richClosedQuestionGeneration',
+    );
+    expect(richClosedPayloadCreate?.data.qualityMetrics).toEqual({
+      questionCount: 6,
+    });
+    expect(result).toMatchObject({
+      sessionId: 'rich-session-1',
+      type: 'rich_closed_exercise',
+      version: 'rich-closed-question-v1',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+    });
+    expect(JSON.stringify(result)).not.toContain('correctChoiceId');
+    expect(JSON.stringify(result)).not.toContain('explanation');
+  });
+
+  it('relreads rich closed exercises for the owning student without leaking corrections', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.activitySession.findFirst.mockResolvedValue(
+      richClosedSessionRecord(),
+    );
+
+    const result = await repository.getRichClosedExerciseForStudent({
+      studentId: 'student-1',
+      sessionId: 'session-1',
+    });
+
+    expect(prisma.activitySession.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'session-1',
+        studentId: 'student-1',
+      },
+      include: {
+        richClosedExercisePayload: true,
+        richClosedExerciseResult: true,
+      },
+    });
+    expect(result.type).toBe('rich_closed_exercise');
+    expect(JSON.stringify(result)).not.toContain('correct');
+    expect(JSON.stringify(result)).not.toContain('feedback');
+    expect(JSON.stringify(result)).not.toContain('modelAnswer');
+    expect(JSON.stringify(result)).not.toContain('answerText');
+  });
+
+  it('saves and relreads a rich closed post-submit result', async () => {
+    const { prisma, repository } = createRepository();
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedExerciseFixture(),
+      answers: correctRichClosedAnswers(),
+    });
+    prisma.activitySession.findFirst.mockResolvedValue(
+      richClosedSessionRecord(),
+    );
+    prisma.richClosedExerciseResult.create.mockResolvedValue(
+      richClosedResultRecord(),
+    );
+    prisma.activitySession.update.mockResolvedValue(
+      sessionRecord({ status: 'COMPLETED' }),
+    );
+
+    const saved = await repository.saveRichClosedExerciseResult({
+      studentId: 'student-1',
+      sessionId: 'session-1',
+      answers: correctRichClosedAnswers(),
+      result,
+    });
+
+    expect(prisma.richClosedExerciseResult.create).toHaveBeenCalledWith({
+      data: {
+        activitySessionId: 'session-1',
+        answersPayload: correctRichClosedAnswers(),
+        correctionPayload: result.items,
+        correctAnswers: 6,
+        totalQuestions: 6,
+        score: 1,
+      },
+    });
+    expect(prisma.activitySession.update).toHaveBeenCalledWith({
+      where: {
+        id: 'session-1',
+      },
+      data: {
+        status: 'COMPLETED',
+        completedAt: expect.any(Date) as Date,
+      },
+    });
+    expect(saved).toEqual(result);
+
+    prisma.activitySession.findFirst.mockResolvedValue(
+      richClosedSessionRecord({
+        richClosedExerciseResult: richClosedResultRecord(),
+      }),
+    );
+
+    await expect(
+      repository.getRichClosedExerciseResultForStudent({
+        studentId: 'student-1',
+        sessionId: 'session-1',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'session-1',
+      type: 'rich_closed_exercise',
+      status: 'completed',
+      correctAnswers: 6,
+      totalQuestions: 6,
+      score: 1,
+    });
+  });
+
+  it('rejects rich closed double submit', async () => {
+    const { prisma, repository } = createRepository();
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedExerciseFixture(),
+      answers: correctRichClosedAnswers(),
+    });
+    prisma.activitySession.findFirst.mockResolvedValue(
+      richClosedSessionRecord({
+        status: 'COMPLETED',
+        richClosedExerciseResult: richClosedResultRecord(),
+      }),
+    );
+
+    await expect(
+      repository.saveRichClosedExerciseResult({
+        studentId: 'student-1',
+        sessionId: 'session-1',
+        answers: correctRichClosedAnswers(),
+        result,
+      }),
+    ).rejects.toThrow(RICH_CLOSED_SESSION_ALREADY_COMPLETED);
+  });
 });
+
+function correctRichClosedAnswers(): RichClosedAnswer[] {
+  return [
+    {
+      questionId: 'single-1',
+      questionKind: 'single_choice',
+      choiceId: 'choice-a',
+    },
+    {
+      questionId: 'multiple-1',
+      questionKind: 'multiple_choice',
+      choiceIds: ['choice-a', 'choice-b'],
+    },
+    {
+      questionId: 'matching-1',
+      questionKind: 'matching',
+      pairs: [
+        { leftId: 'left-1', rightId: 'right-1' },
+        { leftId: 'left-2', rightId: 'right-2' },
+        { leftId: 'left-3', rightId: 'right-3' },
+      ],
+    },
+    {
+      questionId: 'ordering-1',
+      questionKind: 'ordering',
+      orderedIds: ['item-1', 'item-2', 'item-3'],
+    },
+    {
+      questionId: 'case-1',
+      questionKind: 'case_qualification',
+      choiceId: 'choice-a',
+    },
+    {
+      questionId: 'error-1',
+      questionKind: 'error_detection',
+      errorId: 'error-a',
+    },
+  ];
+}

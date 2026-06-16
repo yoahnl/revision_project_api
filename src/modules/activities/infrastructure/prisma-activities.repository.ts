@@ -22,6 +22,7 @@ import type {
   OpenAnswerSubmissionResult,
   OpenQuestionActivity,
   OpenQuestionDraft,
+  RichClosedExerciseInternalEnvelope,
 } from '../application/activities.repository';
 import type {
   GeneratedDiagnosticQuiz,
@@ -29,6 +30,25 @@ import type {
   GeneratedDiagnosticQuizQuestion,
   GeneratedDiagnosticQuizVisual,
 } from '../application/diagnostic-quiz-generator';
+import {
+  RICH_CLOSED_GENERATION_SOURCE_INVALID,
+  RICH_CLOSED_SESSION_ALREADY_COMPLETED,
+  RICH_CLOSED_SESSION_NOT_COMPLETED,
+  RICH_CLOSED_SESSION_NOT_FOUND,
+  RICH_CLOSED_START_INVALID_INPUT,
+} from '../application/rich-closed-questions/rich-closed-question-errors';
+import type {
+  GeneratedRichClosedExercise,
+  RichClosedQuestionGenerationMetadata,
+} from '../application/rich-closed-questions/rich-closed-question-generator';
+import { toRichClosedPublicExerciseEnvelope } from '../application/rich-closed-questions/rich-closed-question-public.mapper';
+import type {
+  RichClosedAnswer,
+  RichClosedExercise,
+  RichClosedExerciseResult,
+  RichClosedPublicExerciseEnvelope,
+} from '../application/rich-closed-questions/rich-closed-question.types';
+import { validateRichClosedExercise } from '../application/rich-closed-questions/rich-closed-question.validator';
 
 type ActivityQuestionChoiceRecord = {
   id: string;
@@ -135,6 +155,39 @@ type OpenAnswerEvaluationSessionRecord = OpenQuestionSessionRecord & {
   openAnswerEvaluation: OpenAnswerEvaluationRecord | null;
 };
 
+type RichClosedExercisePayloadRecord = {
+  id: string;
+  activitySessionId: string;
+  version: string;
+  title: string;
+  subjectId: string;
+  documentId: string | null;
+  knowledgeUnitId: string;
+  exercisePayload: unknown;
+  generationMetadata?: unknown;
+  qualityMetrics?: unknown;
+};
+
+type RichClosedExerciseResultRecord = {
+  id: string;
+  activitySessionId: string;
+  answersPayload: unknown;
+  correctionPayload: unknown;
+  correctAnswers: number;
+  totalQuestions: number;
+  score: number;
+  createdAt: Date;
+};
+
+type RichClosedExerciseSessionRecord = ActivitySessionRecord & {
+  richClosedExercisePayload?: RichClosedExercisePayloadRecord | null;
+  richClosedExerciseResult?: RichClosedExerciseResultRecord | null;
+};
+
+type RichClosedPersistedSessionRecord = RichClosedExerciseSessionRecord & {
+  richClosedExercisePayload: RichClosedExercisePayloadRecord;
+};
+
 type DocumentChunkRecord = {
   id: string;
   documentId: string;
@@ -194,6 +247,14 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
   }
 
   async findOpenQuestionGenerationContext(input: {
+    studentId: string;
+    subjectId: string;
+    knowledgeUnitId: string;
+  }): Promise<DiagnosticQuizGenerationContext | null> {
+    return this.findDiagnosticQuizGenerationContext(input);
+  }
+
+  async findRichClosedGenerationContext(input: {
     studentId: string;
     subjectId: string;
     knowledgeUnitId: string;
@@ -490,6 +551,186 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
     });
   }
 
+  async createRichClosedExerciseSession(input: {
+    studentId: string;
+    subjectId: string;
+    knowledgeUnitId: string;
+    documentId?: string | null;
+    exercise: GeneratedRichClosedExercise;
+    qualityMetrics?: unknown;
+    generationMetadata?: RichClosedQuestionGenerationMetadata;
+  }): Promise<RichClosedPublicExerciseEnvelope> {
+    assertRichClosedExerciseIsPersistable(input.exercise);
+
+    return this.prisma.$transaction(async (tx) => {
+      const knowledgeUnit = await tx.knowledgeUnit.findFirst({
+        where: {
+          id: input.knowledgeUnitId,
+          subjectId: input.subjectId,
+          subject: {
+            studentId: input.studentId,
+          },
+        },
+      });
+
+      if (!knowledgeUnit) {
+        throw new Error('Knowledge unit does not belong to student subject');
+      }
+
+      const sourceChunkIds = collectRichClosedSourceChunkIds(input.exercise);
+      const sourceChunks =
+        sourceChunkIds.length === 0
+          ? []
+          : await tx.documentChunk.findMany({
+              where: {
+                id: {
+                  in: sourceChunkIds,
+                },
+                subjectId: input.subjectId,
+                ...(input.documentId ? { documentId: input.documentId } : {}),
+              },
+              select: {
+                id: true,
+              },
+            });
+
+      if (sourceChunks.length !== sourceChunkIds.length) {
+        throw new Error(RICH_CLOSED_GENERATION_SOURCE_INVALID);
+      }
+
+      const session = await tx.activitySession.create({
+        data: buildRichClosedActivitySessionCreateData(input),
+      });
+      const exercise: RichClosedExercise = {
+        id: input.exercise.id,
+        version: input.exercise.version,
+        title: input.exercise.title,
+        subjectId: input.subjectId,
+        documentId: input.documentId ?? null,
+        knowledgeUnitId: input.knowledgeUnitId,
+        questions: input.exercise.questions,
+      };
+
+      await tx.richClosedExercisePayload.create({
+        data: {
+          activitySessionId: session.id,
+          version: exercise.version,
+          title: exercise.title,
+          subjectId: input.subjectId,
+          documentId: input.documentId ?? null,
+          knowledgeUnitId: input.knowledgeUnitId,
+          exercisePayload: toJsonValue(exercise),
+          generationMetadata: toNullableJsonValue(
+            input.generationMetadata ?? input.exercise.metadata,
+          ),
+          qualityMetrics: toNullableJsonValue(input.qualityMetrics),
+        },
+      });
+
+      return toRichClosedPublicExerciseEnvelope({
+        sessionId: session.id,
+        exercise,
+      });
+    });
+  }
+
+  async getRichClosedExerciseForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RichClosedPublicExerciseEnvelope> {
+    const session = await this.findRichClosedExerciseSession(input);
+
+    return toRichClosedPublicExerciseEnvelope({
+      sessionId: session.id,
+      exercise: toRichClosedExercise(session.richClosedExercisePayload),
+    });
+  }
+
+  async getInternalRichClosedExerciseForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RichClosedExerciseInternalEnvelope> {
+    const session = await this.findRichClosedExerciseSession(input);
+    const result = session.richClosedExerciseResult
+      ? toRichClosedExerciseResult(session.id, session.richClosedExerciseResult)
+      : null;
+
+    return {
+      sessionId: session.id,
+      status: session.status,
+      exercise: toRichClosedExercise(session.richClosedExercisePayload),
+      result,
+    };
+  }
+
+  async saveRichClosedExerciseResult(input: {
+    studentId: string;
+    sessionId: string;
+    answers: RichClosedAnswer[];
+    result: RichClosedExerciseResult;
+  }): Promise<RichClosedExerciseResult> {
+    return this.prisma.$transaction(async (tx) => {
+      const session = (await tx.activitySession.findFirst({
+        where: {
+          id: input.sessionId,
+          studentId: input.studentId,
+        },
+        include: {
+          richClosedExercisePayload: true,
+          richClosedExerciseResult: true,
+        },
+      })) as RichClosedExerciseSessionRecord | null;
+
+      assertRichClosedSession(session);
+
+      if (
+        session.status !== ActivityStatus.STARTED ||
+        session.richClosedExerciseResult
+      ) {
+        throw new Error(RICH_CLOSED_SESSION_ALREADY_COMPLETED);
+      }
+
+      await tx.richClosedExerciseResult.create({
+        data: {
+          activitySessionId: session.id,
+          answersPayload: toJsonValue(input.answers),
+          correctionPayload: toJsonValue(input.result.items),
+          correctAnswers: input.result.correctAnswers,
+          totalQuestions: input.result.totalQuestions,
+          score: input.result.score,
+        },
+      });
+
+      await tx.activitySession.update({
+        where: {
+          id: session.id,
+        },
+        data: {
+          status: ActivityStatus.COMPLETED,
+          completedAt: new Date(),
+        },
+      });
+
+      return input.result;
+    });
+  }
+
+  async getRichClosedExerciseResultForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RichClosedExerciseResult> {
+    const session = await this.findRichClosedExerciseSession(input);
+
+    if (!session.richClosedExerciseResult) {
+      throw new Error(RICH_CLOSED_SESSION_NOT_COMPLETED);
+    }
+
+    return toRichClosedExerciseResult(
+      session.id,
+      session.richClosedExerciseResult,
+    );
+  }
+
   async submitResult(input: {
     studentId: string;
     sessionId: string;
@@ -587,6 +828,26 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
         knowledgeUnitId: session.knowledgeUnitId,
       };
     });
+  }
+
+  private async findRichClosedExerciseSession(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RichClosedPersistedSessionRecord> {
+    const session = (await this.prisma.activitySession.findFirst({
+      where: {
+        id: input.sessionId,
+        studentId: input.studentId,
+      },
+      include: {
+        richClosedExercisePayload: true,
+        richClosedExerciseResult: true,
+      },
+    })) as RichClosedExerciseSessionRecord | null;
+
+    assertRichClosedSession(session);
+
+    return session;
   }
 
   async findOpenAnswerEvaluationContext(input: {
@@ -753,6 +1014,126 @@ function buildOpenQuestionSessionCreateData(input: {
   }
 
   return data;
+}
+
+function buildRichClosedActivitySessionCreateData(input: {
+  studentId: string;
+  subjectId: string;
+  knowledgeUnitId: string;
+  documentId?: string | null;
+  exercise: GeneratedRichClosedExercise;
+}): Prisma.ActivitySessionUncheckedCreateInput {
+  const metadata = input.exercise.metadata;
+  const data: Prisma.ActivitySessionUncheckedCreateInput = {
+    studentId: input.studentId,
+    subjectId: input.subjectId,
+    knowledgeUnitId: input.knowledgeUnitId,
+    documentId: input.documentId ?? null,
+    type: ActivityType.RICH_CLOSED_EXERCISE,
+    status: ActivityStatus.STARTED,
+    version: 1,
+  };
+
+  if (metadata) {
+    data.generationFlowName = metadata.flowName;
+    data.generationProvider = metadata.provider;
+    data.generationModel = metadata.model;
+    data.generationPromptVersion = metadata.promptVersion;
+    data.generationSchemaVersion = metadata.schemaVersion;
+    data.generationInputSize = metadata.inputSize;
+  }
+
+  return data;
+}
+
+function assertRichClosedExerciseIsPersistable(
+  exercise: RichClosedExercise,
+): void {
+  const validation = validateRichClosedExercise(exercise);
+
+  if (!validation.accepted) {
+    throw new Error(RICH_CLOSED_START_INVALID_INPUT);
+  }
+}
+
+function assertRichClosedSession(
+  session: RichClosedExerciseSessionRecord | null,
+): asserts session is RichClosedExerciseSessionRecord & {
+  richClosedExercisePayload: RichClosedExercisePayloadRecord;
+} {
+  if (!session) {
+    throw new Error(RICH_CLOSED_SESSION_NOT_FOUND);
+  }
+
+  if (
+    session.type !== ActivityType.RICH_CLOSED_EXERCISE ||
+    !session.richClosedExercisePayload
+  ) {
+    throw new Error(RICH_CLOSED_SESSION_NOT_FOUND);
+  }
+}
+
+function toRichClosedExercise(
+  payload: RichClosedExercisePayloadRecord,
+): RichClosedExercise {
+  const exercise = payload.exercisePayload;
+  const validation = validateRichClosedExercise(exercise);
+
+  if (!validation.accepted || !isRichClosedExercise(exercise)) {
+    throw new Error(RICH_CLOSED_START_INVALID_INPUT);
+  }
+
+  return exercise;
+}
+
+function toRichClosedExerciseResult(
+  sessionId: string,
+  result: RichClosedExerciseResultRecord,
+): RichClosedExerciseResult {
+  if (!Array.isArray(result.correctionPayload)) {
+    throw new Error(RICH_CLOSED_START_INVALID_INPUT);
+  }
+
+  return {
+    sessionId,
+    type: 'rich_closed_exercise',
+    status: 'completed',
+    correctAnswers: result.correctAnswers,
+    totalQuestions: result.totalQuestions,
+    score: result.score,
+    items: result.correctionPayload as RichClosedExerciseResult['items'],
+  };
+}
+
+function collectRichClosedSourceChunkIds(
+  exercise: RichClosedExercise,
+): string[] {
+  return dedupeStrings(
+    exercise.questions.flatMap((question) => question.sourceChunkIds),
+  );
+}
+
+function isRichClosedExercise(value: unknown): value is RichClosedExercise {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Array.isArray((value as { questions?: unknown }).questions)
+  );
+}
+
+function toJsonValue(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
+}
+
+function toNullableJsonValue(
+  value: unknown,
+): Prisma.InputJsonValue | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return toJsonValue(value);
 }
 
 function buildQuestionCreateData(input: {

@@ -170,7 +170,12 @@ export type RichClosedPublicQuestion =
 export type RichClosedAnswer =
   | {
       questionId: string;
-      questionKind: 'single_choice' | 'case_qualification';
+      questionKind: 'single_choice';
+      choiceId: string;
+    }
+  | {
+      questionId: string;
+      questionKind: 'case_qualification';
       choiceId: string;
     }
   | {
@@ -202,6 +207,35 @@ export interface RichClosedCorrection {
   explanation: string;
 }
 
+export type RichClosedCorrectionPayload =
+  | { correctChoiceId: string }
+  | { correctChoiceIds: string[] }
+  | { correctPairs: RichClosedPair[] }
+  | { correctOrder: string[] }
+  | { correctErrorId: string };
+
+export interface RichClosedCorrectionItem {
+  questionId: string;
+  questionKind: RichClosedQuestionKind;
+  prompt: string;
+  submittedAnswer: RichClosedAnswer | null;
+  isCorrect: boolean;
+  partialScore: number;
+  explanation: string;
+  sourceChunkIds: string[];
+  correction: RichClosedCorrectionPayload;
+}
+
+export interface RichClosedExerciseResult {
+  sessionId: string;
+  type: 'rich_closed_exercise';
+  status: 'completed';
+  correctAnswers: number;
+  totalQuestions: number;
+  score: number;
+  items: RichClosedCorrectionItem[];
+}
+
 export interface RichClosedExercise {
   id: string;
   version: RichClosedExerciseVersion;
@@ -220,6 +254,11 @@ export interface RichClosedPublicExercise {
   documentId?: string | null;
   knowledgeUnitId?: string;
   questions: RichClosedPublicQuestion[];
+}
+
+export interface RichClosedPublicExerciseEnvelope extends RichClosedPublicExercise {
+  sessionId: string;
+  type: 'rich_closed_exercise';
 }
 
 export type RichClosedExerciseValidationSeverity = 'error' | 'warning';

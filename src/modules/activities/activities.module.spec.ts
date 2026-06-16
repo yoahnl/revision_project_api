@@ -26,6 +26,19 @@ import {
   type GeneratedOpenAnswerEvaluation,
   type OpenAnswerEvaluationInput,
 } from './application/open-answer-evaluator';
+import {
+  RICH_CLOSED_QUESTION_GENERATOR,
+  type RichClosedQuestionGenerationInput,
+} from './application/rich-closed-questions/rich-closed-question-generator';
+import { RICH_CLOSED_SOURCE_CONTEXT_EMPTY } from './application/rich-closed-questions/rich-closed-question-errors';
+import { richClosedExerciseFixture } from './application/rich-closed-questions/rich-closed-question.fixtures';
+import { scoreRichClosedExerciseSubmission } from './application/rich-closed-questions/rich-closed-question-scorer';
+import type {
+  RichClosedAnswer,
+  RichClosedExercise,
+  RichClosedExerciseResult,
+  RichClosedPublicExerciseEnvelope,
+} from './application/rich-closed-questions/rich-closed-question.types';
 import { KnowledgeUnit } from '../revision/domain/knowledge-unit.entity';
 import { TOKEN_VERIFIER } from '../auth/application/token-verifier';
 import { FirebaseAuthGuard } from '../auth/interfaces/firebase-auth.guard';
@@ -62,6 +75,7 @@ describe('ActivitiesModule', () => {
   let activitiesRepository: {
     findDiagnosticQuizGenerationContext: jest.Mock;
     findOpenQuestionGenerationContext: jest.Mock;
+    findRichClosedGenerationContext: jest.Mock;
     createDiagnosticQuiz: jest.Mock<
       Promise<DiagnosticQuizActivity>,
       [CreateDiagnosticQuizInput]
@@ -70,6 +84,11 @@ describe('ActivitiesModule', () => {
     createOpenQuestionActivity: jest.Mock;
     findOpenAnswerEvaluationContext: jest.Mock;
     saveOpenAnswerEvaluation: jest.Mock;
+    createRichClosedExerciseSession: jest.Mock;
+    getRichClosedExerciseForStudent: jest.Mock;
+    getInternalRichClosedExerciseForStudent: jest.Mock;
+    saveRichClosedExerciseResult: jest.Mock;
+    getRichClosedExerciseResultForStudent: jest.Mock;
   };
   let diagnosticQuizGenerator: {
     generate: jest.Mock<
@@ -89,6 +108,12 @@ describe('ActivitiesModule', () => {
       [OpenAnswerEvaluationInput]
     >;
   };
+  let richClosedGenerator: {
+    generate: jest.Mock<
+      Promise<RichClosedExercise>,
+      [RichClosedQuestionGenerationInput]
+    >;
+  };
   let revisionRepository: {
     findKnowledgeUnits: jest.Mock;
     findMasteryStates: jest.Mock;
@@ -101,6 +126,30 @@ describe('ActivitiesModule', () => {
     activitiesRepository = {
       findDiagnosticQuizGenerationContext: jest.fn().mockResolvedValue(null),
       findOpenQuestionGenerationContext: jest.fn().mockResolvedValue(null),
+      findRichClosedGenerationContext: jest.fn().mockResolvedValue({
+        documentId: 'document-1',
+        knowledgeUnit: Object.assign(
+          new KnowledgeUnit({
+            id: 'unit-1',
+            subjectId: 'subject-1',
+            title: 'Revision constitutionnelle',
+            summary:
+              'La Constitution de 1958 encadre la procedure de revision.',
+          }),
+          {
+            difficulty: 'MEDIUM' as const,
+            sourceChunkIds: ['chunk-1'],
+          },
+        ),
+        chunks: [
+          {
+            id: 'chunk-1',
+            index: 0,
+            text: 'Article 89 encadre la revision constitutionnelle.',
+            pageNumber: null,
+          },
+        ],
+      }),
       createDiagnosticQuiz: jest.fn<
         Promise<DiagnosticQuizActivity>,
         [CreateDiagnosticQuizInput]
@@ -191,6 +240,24 @@ describe('ActivitiesModule', () => {
             sources: [],
           },
         }),
+      createRichClosedExerciseSession: jest
+        .fn()
+        .mockResolvedValue(richClosedPublicExercise()),
+      getRichClosedExerciseForStudent: jest
+        .fn()
+        .mockResolvedValue(richClosedPublicExercise()),
+      getInternalRichClosedExerciseForStudent: jest.fn().mockResolvedValue({
+        sessionId: 'rich-session-1',
+        status: 'STARTED',
+        exercise: richClosedExerciseFixture(),
+        result: null,
+      }),
+      saveRichClosedExerciseResult: jest
+        .fn()
+        .mockResolvedValue(richClosedResult()),
+      getRichClosedExerciseResultForStudent: jest
+        .fn()
+        .mockResolvedValue(richClosedResult()),
     };
     diagnosticQuizGenerator = {
       generate: jest
@@ -260,6 +327,11 @@ describe('ActivitiesModule', () => {
           },
         }),
     };
+    richClosedGenerator = {
+      generate: jest
+        .fn<Promise<RichClosedExercise>, [RichClosedQuestionGenerationInput]>()
+        .mockResolvedValue(richClosedExerciseFixture()),
+    };
     revisionRepository = {
       findKnowledgeUnits: jest.fn().mockResolvedValue([
         new KnowledgeUnit({
@@ -296,6 +368,8 @@ describe('ActivitiesModule', () => {
       .useValue(openQuestionGenerator)
       .overrideProvider(OPEN_ANSWER_EVALUATOR)
       .useValue(openAnswerEvaluator)
+      .overrideProvider(RICH_CLOSED_QUESTION_GENERATOR)
+      .useValue(richClosedGenerator)
       .overrideProvider(REVISION_REPOSITORY)
       .useValue(revisionRepository)
       .overrideProvider(PrismaService)
@@ -523,6 +597,178 @@ describe('ActivitiesModule', () => {
     expect(publicPayload).not.toContain('feedback');
   });
 
+  it('starts a rich closed exercise without exposing pre-submit correction data', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/activities/rich-closed/start')
+      .send({
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        questionCount: 6,
+        complexityProfile: 'exam',
+      })
+      .expect(201);
+
+    expect(richClosedGenerator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        questionCount: 6,
+        complexityProfile: 'exam',
+      }),
+    );
+    expect(
+      activitiesRepository.createRichClosedExerciseSession,
+    ).toHaveBeenCalled();
+    expect(response.body).toMatchObject({
+      sessionId: 'rich-session-1',
+      type: 'rich_closed_exercise',
+      version: 'rich-closed-question-v1',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+    });
+    const publicPayload = JSON.stringify(response.body);
+    expect(publicPayload).not.toContain('correctChoiceId');
+    expect(publicPayload).not.toContain('correctChoiceIds');
+    expect(publicPayload).not.toContain('correctPairs');
+    expect(publicPayload).not.toContain('correctOrder');
+    expect(publicPayload).not.toContain('correctErrorId');
+    expect(publicPayload).not.toContain('explanation');
+    expect(publicPayload).not.toContain('feedback');
+    expect(publicPayload).not.toContain('score');
+  });
+
+  it('gets rich closed pre-submit payload and returns post-submit result', async () => {
+    await request(app.getHttpServer())
+      .get('/activities/rich-closed/rich-session-1')
+      .expect(200)
+      .expect(richClosedPublicExercise());
+
+    expect(
+      activitiesRepository.getRichClosedExerciseForStudent,
+    ).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'rich-session-1',
+    });
+
+    await request(app.getHttpServer())
+      .get('/activities/rich-closed/rich-session-1/result')
+      .expect(200)
+      .expect(richClosedResult());
+
+    expect(
+      activitiesRepository.getRichClosedExerciseResultForStudent,
+    ).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'rich-session-1',
+    });
+  });
+
+  it('submits rich closed structured answers and exposes correction only post-submit', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/activities/rich-closed/rich-session-1/submit')
+      .send({
+        answers: richClosedAnswers(),
+      })
+      .expect(201);
+
+    expect(
+      activitiesRepository.saveRichClosedExerciseResult,
+    ).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'rich-session-1',
+      answers: richClosedAnswers(),
+      result: expect.objectContaining({
+        correctAnswers: 6,
+        totalQuestions: 6,
+        score: 1,
+      }) as RichClosedExerciseResult,
+    });
+    expect(response.body).toMatchObject({
+      sessionId: 'rich-session-1',
+      type: 'rich_closed_exercise',
+      status: 'completed',
+      correctAnswers: 6,
+      totalQuestions: 6,
+      score: 1,
+    });
+    expect(JSON.stringify(response.body)).toContain('correctChoiceId');
+    expect(JSON.stringify(richClosedPublicExercise())).not.toContain(
+      'correctChoiceId',
+    );
+  });
+
+  it('validates rich closed start and submit payloads', async () => {
+    await request(app.getHttpServer())
+      .post('/activities/rich-closed/start')
+      .send({
+        subjectId: 'subject-1',
+        knowledgeUnitId: 'unit-1',
+        questionCount: 5,
+      })
+      .expect(400);
+
+    await request(app.getHttpServer())
+      .post('/activities/rich-closed/rich-session-1/submit')
+      .send({
+        answers: [
+          {
+            questionId: 'single-1',
+            questionKind: 'single_choice',
+            choiceId: 'choice-a',
+            answerText: 'texte libre interdit',
+          },
+        ],
+      })
+      .expect(400);
+
+    expect(richClosedGenerator.generate).not.toHaveBeenCalled();
+  });
+
+  it('maps rich closed source and double-submit errors', async () => {
+    activitiesRepository.findRichClosedGenerationContext.mockResolvedValueOnce({
+      documentId: 'document-1',
+      knowledgeUnit: Object.assign(
+        new KnowledgeUnit({
+          id: 'unit-1',
+          subjectId: 'subject-1',
+          title: 'Revision constitutionnelle',
+          summary: 'La Constitution de 1958 encadre la procedure de revision.',
+        }),
+        {
+          difficulty: 'MEDIUM' as const,
+          sourceChunkIds: [],
+        },
+      ),
+      chunks: [],
+    });
+
+    await request(app.getHttpServer())
+      .post('/activities/rich-closed/start')
+      .send({ subjectId: 'subject-1', knowledgeUnitId: 'unit-1' })
+      .expect(422);
+
+    activitiesRepository.getInternalRichClosedExerciseForStudent.mockResolvedValueOnce(
+      {
+        sessionId: 'rich-session-1',
+        status: 'COMPLETED',
+        exercise: richClosedExerciseFixture(),
+        result: richClosedResult(),
+      },
+    );
+
+    await request(app.getHttpServer())
+      .post('/activities/rich-closed/rich-session-1/submit')
+      .send({ answers: richClosedAnswers() })
+      .expect(409);
+
+    activitiesRepository.getRichClosedExerciseForStudent.mockRejectedValueOnce(
+      new Error(RICH_CLOSED_SOURCE_CONTEXT_EMPTY),
+    );
+  });
+
   it('submits an open answer and returns a ready evaluation contract', async () => {
     await request(app.getHttpServer())
       .post('/activities/open-session-1/open-answer')
@@ -586,3 +832,122 @@ describe('ActivitiesModule', () => {
     ).not.toHaveBeenCalled();
   });
 });
+
+function richClosedPublicExercise(): RichClosedPublicExerciseEnvelope {
+  const exercise = richClosedExerciseFixture();
+
+  return {
+    sessionId: 'rich-session-1',
+    type: 'rich_closed_exercise',
+    id: exercise.id,
+    version: exercise.version,
+    title: exercise.title,
+    subjectId: exercise.subjectId,
+    documentId: exercise.documentId,
+    knowledgeUnitId: exercise.knowledgeUnitId,
+    questions: exercise.questions.map((question) => {
+      const base = {
+        id: question.id,
+        questionKind: question.questionKind,
+        prompt: question.prompt,
+        difficulty: question.difficulty,
+        cognitiveSkill: question.cognitiveSkill,
+        sourceChunkIds: question.sourceChunkIds,
+      };
+
+      switch (question.questionKind) {
+        case 'single_choice':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            choices: question.choices.map(({ id, label }) => ({ id, label })),
+          };
+        case 'multiple_choice':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            choices: question.choices.map(({ id, label }) => ({ id, label })),
+            minSelections: question.minSelections,
+            maxSelections: question.maxSelections,
+          };
+        case 'matching':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            leftItems: question.leftItems,
+            rightItems: question.rightItems,
+          };
+        case 'ordering':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            items: question.items,
+          };
+        case 'case_qualification':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            caseText: question.caseText,
+            choices: question.choices.map(({ id, label }) => ({ id, label })),
+          };
+        case 'error_detection':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            statement: question.statement,
+            errorOptions: question.errorOptions.map(({ id, label }) => ({
+              id,
+              label,
+            })),
+          };
+      }
+    }),
+  };
+}
+
+function richClosedResult(): RichClosedExerciseResult {
+  return scoreRichClosedExerciseSubmission({
+    sessionId: 'rich-session-1',
+    exercise: richClosedExerciseFixture(),
+    answers: richClosedAnswers(),
+  });
+}
+
+function richClosedAnswers(): RichClosedAnswer[] {
+  return [
+    {
+      questionId: 'single-1',
+      questionKind: 'single_choice',
+      choiceId: 'choice-a',
+    },
+    {
+      questionId: 'multiple-1',
+      questionKind: 'multiple_choice',
+      choiceIds: ['choice-a', 'choice-b'],
+    },
+    {
+      questionId: 'matching-1',
+      questionKind: 'matching',
+      pairs: [
+        { leftId: 'left-1', rightId: 'right-1' },
+        { leftId: 'left-2', rightId: 'right-2' },
+        { leftId: 'left-3', rightId: 'right-3' },
+      ],
+    },
+    {
+      questionId: 'ordering-1',
+      questionKind: 'ordering',
+      orderedIds: ['item-1', 'item-2', 'item-3'],
+    },
+    {
+      questionId: 'case-1',
+      questionKind: 'case_qualification',
+      choiceId: 'choice-a',
+    },
+    {
+      questionId: 'error-1',
+      questionKind: 'error_detection',
+      errorId: 'error-a',
+    },
+  ];
+}

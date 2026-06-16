@@ -2,6 +2,7 @@ import type {
   RichClosedExercise,
   RichClosedPublicChoice,
   RichClosedPublicExercise,
+  RichClosedPublicExerciseEnvelope,
   RichClosedPublicQuestion,
   RichClosedQuestion,
 } from './rich-closed-question.types';
@@ -23,6 +24,17 @@ export function toRichClosedPublicExercise(
       ? {}
       : { knowledgeUnitId: exercise.knowledgeUnitId }),
     questions: exercise.questions.map(toRichClosedPublicQuestion),
+  };
+}
+
+export function toRichClosedPublicExerciseEnvelope(input: {
+  sessionId: string;
+  exercise: RichClosedExercise;
+}): RichClosedPublicExerciseEnvelope {
+  return {
+    sessionId: input.sessionId,
+    type: 'rich_closed_exercise',
+    ...toRichClosedPublicExercise(input.exercise),
   };
 }
 

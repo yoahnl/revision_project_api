@@ -10,6 +10,16 @@ import type {
   OpenAnswerEvaluationQuestion,
 } from './open-answer-evaluator';
 import type { OpenQuestionGenerationMetadata } from './open-question-generator';
+import type {
+  GeneratedRichClosedExercise,
+  RichClosedQuestionGenerationMetadata,
+} from './rich-closed-questions/rich-closed-question-generator';
+import type {
+  RichClosedAnswer,
+  RichClosedExercise,
+  RichClosedExerciseResult,
+  RichClosedPublicExerciseEnvelope,
+} from './rich-closed-questions/rich-closed-question.types';
 
 export interface ActivityQuestionChoice {
   id: string;
@@ -191,6 +201,13 @@ export interface OpenAnswerEvaluationContext {
   chunks: DiagnosticQuizGenerationChunk[];
 }
 
+export interface RichClosedExerciseInternalEnvelope {
+  sessionId: string;
+  status: 'STARTED' | 'SUBMITTED' | 'COMPLETED';
+  exercise: RichClosedExercise;
+  result: RichClosedExerciseResult | null;
+}
+
 export type OpenAnswerEvaluationDraft =
   | GeneratedOpenAnswerEvaluation
   | {
@@ -227,6 +244,44 @@ export interface ActivitiesRepository {
     documentId?: string | null;
     question: OpenQuestionDraft;
   }): Promise<OpenQuestionActivity>;
+
+  findRichClosedGenerationContext(input: {
+    studentId: string;
+    subjectId: string;
+    knowledgeUnitId: string;
+  }): Promise<DiagnosticQuizGenerationContext | null>;
+
+  createRichClosedExerciseSession(input: {
+    studentId: string;
+    subjectId: string;
+    knowledgeUnitId: string;
+    documentId?: string | null;
+    exercise: GeneratedRichClosedExercise;
+    qualityMetrics?: unknown;
+    generationMetadata?: RichClosedQuestionGenerationMetadata;
+  }): Promise<RichClosedPublicExerciseEnvelope>;
+
+  getRichClosedExerciseForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RichClosedPublicExerciseEnvelope>;
+
+  getInternalRichClosedExerciseForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RichClosedExerciseInternalEnvelope>;
+
+  saveRichClosedExerciseResult(input: {
+    studentId: string;
+    sessionId: string;
+    answers: RichClosedAnswer[];
+    result: RichClosedExerciseResult;
+  }): Promise<RichClosedExerciseResult>;
+
+  getRichClosedExerciseResultForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RichClosedExerciseResult>;
 
   submitResult(input: {
     studentId: string;

@@ -331,6 +331,8 @@ model ActivitySession {
   answers       QuestionAnswer[]
   openQuestion  OpenQuestion?
   openAnswerEvaluation OpenAnswerEvaluation?
+  richClosedExercisePayload RichClosedExercisePayload?
+  richClosedExerciseResult RichClosedExerciseResult?
   revisionSessionActions RevisionSessionAction[]
 
   @@index([studentId])
@@ -530,6 +532,40 @@ model OpenAnswerEvaluation {
   @@index([openQuestionId])
 }
 
+model RichClosedExercisePayload {
+  id                 String   @id @default(cuid())
+  activitySessionId  String   @unique
+  version            String
+  title              String
+  subjectId          String
+  documentId         String?
+  knowledgeUnitId    String
+  exercisePayload    Json
+  generationMetadata Json?
+  qualityMetrics     Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  session ActivitySession @relation(fields: [activitySessionId], references: [id], onDelete: Cascade)
+
+  @@index([subjectId])
+  @@index([documentId])
+  @@index([knowledgeUnitId])
+}
+
+model RichClosedExerciseResult {
+  id                String   @id @default(cuid())
+  activitySessionId String   @unique
+  answersPayload    Json
+  correctionPayload Json
+  correctAnswers    Int
+  totalQuestions    Int
+  score             Float
+  createdAt         DateTime @default(now())
+
+  session ActivitySession @relation(fields: [activitySessionId], references: [id], onDelete: Cascade)
+}
+
 model RevisionSession {
   id              String                @id @default(cuid())
   studentId       String
@@ -622,6 +658,7 @@ enum JobStatus {
 enum ActivityType {
   DIAGNOSTIC_QUIZ
   OPEN_QUESTION
+  RICH_CLOSED_EXERCISE
 }
 
 enum ActivityStatus {

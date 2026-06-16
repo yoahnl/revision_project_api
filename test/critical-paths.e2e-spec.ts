@@ -10,6 +10,10 @@ import { StartNextActivityUseCase } from '../src/modules/activities/application/
 import { StartOpenQuestionActivityUseCase } from '../src/modules/activities/application/start-open-question-activity.use-case';
 import { SubmitActivityResultUseCase } from '../src/modules/activities/application/submit-activity-result.use-case';
 import { SubmitOpenAnswerUseCase } from '../src/modules/activities/application/submit-open-answer.use-case';
+import { GetRichClosedExerciseResultUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise-result.use-case';
+import { GetRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise.use-case';
+import { StartRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/start-rich-closed-exercise.use-case';
+import { SubmitRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/submit-rich-closed-exercise.use-case';
 import { GetDocumentUseCase } from '../src/modules/documents/application/get-document.use-case';
 import { ListDocumentKnowledgeUnitsUseCase } from '../src/modules/documents/application/list-document-knowledge-units.use-case';
 import { GetTodayPlanUseCase } from '../src/modules/revision/application/get-today-plan.use-case';
@@ -77,6 +81,10 @@ describe('Critical demo paths (e2e)', () => {
         .expect(401);
       await request(server)
         .post('/activities/open-question')
+        .send({ subjectId: 'subject-1', knowledgeUnitId: 'unit-1' })
+        .expect(401);
+      await request(server)
+        .post('/activities/rich-closed/start')
         .send({ subjectId: 'subject-1', knowledgeUnitId: 'unit-1' })
         .expect(401);
       await request(server)
@@ -361,6 +369,121 @@ describe('Critical demo paths (e2e)', () => {
         .expect(422);
     });
 
+    it('routes rich closed start, get, submit and result without pre-submit leaks', async () => {
+      const server = app.getHttpServer();
+
+      const startResponse = await request(server)
+        .post('/activities/rich-closed/start')
+        .send({
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-1',
+          questionCount: 6,
+        })
+        .expect(201);
+
+      expect(mocks.startRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        subjectId: 'subject-1',
+        documentId: undefined,
+        knowledgeUnitId: 'unit-1',
+        questionCount: 6,
+        complexityProfile: 'exam',
+        questionTypeMix: undefined,
+      });
+      const startBody = startResponse.body as { type: string };
+      expect(startBody.type).toBe('rich_closed_exercise');
+      assertNoSensitivePreSubmitFields(startResponse.body);
+      expect(JSON.stringify(startResponse.body)).not.toContain('explanation');
+      expect(JSON.stringify(startResponse.body)).not.toContain('feedback');
+
+      await request(server)
+        .get('/activities/rich-closed/rich-session-1')
+        .expect(200);
+      expect(mocks.getRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'rich-session-1',
+      });
+
+      const submitResponse = await request(server)
+        .post('/activities/rich-closed/rich-session-1/submit')
+        .send({ answers: richClosedAnswers() })
+        .expect(201);
+
+      expect(mocks.submitRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'rich-session-1',
+        answers: richClosedAnswers(),
+      });
+      const submitBody = submitResponse.body as {
+        items: Array<Record<string, unknown>>;
+      };
+      expect(submitBody.items[0]).toHaveProperty('correction');
+
+      await request(server)
+        .get('/activities/rich-closed/rich-session-1/result')
+        .expect(200);
+      expect(mocks.getRichClosedExerciseResult.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'rich-session-1',
+      });
+    });
+
+    it('validates and maps rich closed errors', async () => {
+      const server = app.getHttpServer();
+
+      await request(server)
+        .post('/activities/rich-closed/start')
+        .send({
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-1',
+          questionCount: 5,
+        })
+        .expect(400);
+      expect(mocks.startRichClosedExercise.execute).not.toHaveBeenCalled();
+
+      await request(server)
+        .post('/activities/rich-closed/rich-session-1/submit')
+        .send({
+          answers: [
+            {
+              questionId: 'single-1',
+              questionKind: 'single_choice',
+              choiceId: 'choice-a',
+              modelAnswer: 'interdit',
+            },
+          ],
+        })
+        .expect(400);
+      expect(mocks.submitRichClosedExercise.execute).not.toHaveBeenCalled();
+
+      mocks.getRichClosedExercise.execute.mockRejectedValueOnce(
+        new Error('RICH_CLOSED_SESSION_NOT_FOUND'),
+      );
+      await request(server)
+        .get('/activities/rich-closed/missing-session')
+        .expect(404);
+
+      mocks.submitRichClosedExercise.execute.mockRejectedValueOnce(
+        new Error('RICH_CLOSED_SESSION_ALREADY_COMPLETED'),
+      );
+      await request(server)
+        .post('/activities/rich-closed/rich-session-1/submit')
+        .send({ answers: richClosedAnswers() })
+        .expect(409);
+
+      mocks.startRichClosedExercise.execute.mockRejectedValueOnce(
+        new Error('RICH_CLOSED_GENERATION_QUALITY_REJECTED'),
+      );
+      await request(server)
+        .post('/activities/rich-closed/start')
+        .send({
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-1',
+          questionCount: 6,
+        })
+        .expect(422);
+    });
+
     it('routes revision sessions and next actions without free-message leakage', async () => {
       const server = app.getHttpServer();
 
@@ -491,6 +614,14 @@ async function createAuthenticatedApp(
     .useValue(mocks.submitActivityResult)
     .overrideProvider(SubmitOpenAnswerUseCase)
     .useValue(mocks.submitOpenAnswer)
+    .overrideProvider(StartRichClosedExerciseUseCase)
+    .useValue(mocks.startRichClosedExercise)
+    .overrideProvider(GetRichClosedExerciseUseCase)
+    .useValue(mocks.getRichClosedExercise)
+    .overrideProvider(SubmitRichClosedExerciseUseCase)
+    .useValue(mocks.submitRichClosedExercise)
+    .overrideProvider(GetRichClosedExerciseResultUseCase)
+    .useValue(mocks.getRichClosedExerciseResult)
     .overrideProvider(StartRevisionSessionUseCase)
     .useValue(mocks.startRevisionSession)
     .overrideProvider(GetRevisionSessionUseCase)
@@ -538,6 +669,18 @@ function createCriticalPathMocks() {
     },
     submitOpenAnswer: {
       execute: jest.fn().mockResolvedValue(openAnswerSubmissionResult()),
+    },
+    startRichClosedExercise: {
+      execute: jest.fn().mockResolvedValue(richClosedPublicExercise()),
+    },
+    getRichClosedExercise: {
+      execute: jest.fn().mockResolvedValue(richClosedPublicExercise()),
+    },
+    submitRichClosedExercise: {
+      execute: jest.fn().mockResolvedValue(richClosedResult()),
+    },
+    getRichClosedExerciseResult: {
+      execute: jest.fn().mockResolvedValue(richClosedResult()),
     },
     startRevisionSession: {
       execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
@@ -795,6 +938,74 @@ function openAnswerSubmissionResult() {
       ],
     },
   };
+}
+
+function richClosedPublicExercise() {
+  return {
+    sessionId: 'rich-session-1',
+    type: 'rich_closed_exercise',
+    id: 'rich-exercise-1',
+    version: 'rich-closed-question-v1',
+    title: 'Exercice fermé riche',
+    subjectId: 'subject-1',
+    documentId: 'document-1',
+    knowledgeUnitId: 'unit-1',
+    questions: [
+      {
+        id: 'single-1',
+        questionKind: 'single_choice',
+        prompt: 'Quel critère institutionnel caractérise le parlementarisme ?',
+        difficulty: 'MEDIUM',
+        cognitiveSkill: 'comparison',
+        sourceChunkIds: ['chunk-1'],
+        choices: [
+          { id: 'choice-a', label: 'Responsabilité politique' },
+          { id: 'choice-b', label: 'Indépendance absolue' },
+        ],
+      },
+    ],
+  };
+}
+
+function richClosedResult() {
+  return {
+    sessionId: 'rich-session-1',
+    type: 'rich_closed_exercise',
+    status: 'completed',
+    correctAnswers: 1,
+    totalQuestions: 1,
+    score: 1,
+    items: [
+      {
+        questionId: 'single-1',
+        questionKind: 'single_choice',
+        prompt: 'Quel critère institutionnel caractérise le parlementarisme ?',
+        submittedAnswer: {
+          questionId: 'single-1',
+          questionKind: 'single_choice',
+          choiceId: 'choice-a',
+        },
+        isCorrect: true,
+        partialScore: 1,
+        explanation:
+          'La responsabilité politique est un critère du régime parlementaire.',
+        sourceChunkIds: ['chunk-1'],
+        correction: {
+          correctChoiceId: 'choice-a',
+        },
+      },
+    ],
+  };
+}
+
+function richClosedAnswers() {
+  return [
+    {
+      questionId: 'single-1',
+      questionKind: 'single_choice',
+      choiceId: 'choice-a',
+    },
+  ];
 }
 
 function revisionSessionResponse() {
