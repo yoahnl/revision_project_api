@@ -16,6 +16,7 @@ import { evaluateRichClosedExerciseQuality } from '../application/rich-closed-qu
 import { validateRichClosedExercise } from '../application/rich-closed-questions/rich-closed-question.validator';
 import {
   RICH_CLOSED_EXERCISE_VERSION,
+  RICH_CLOSED_COGNITIVE_SKILLS,
   RICH_CLOSED_QUESTION_KINDS,
   type RichClosedExercise,
   type RichClosedExerciseValidationIssue,
@@ -190,6 +191,9 @@ interface RichClosedGenerationDiagnosticIssue {
 
 interface RichClosedGenerationDiagnostic {
   failureType: RichClosedGenerationFailureType;
+  schemaErrorName?: string;
+  schemaErrorMessagePreview?: string;
+  schemaIssueCount?: number;
   expectedQuestionCount?: number;
   actualQuestionCount?: number | null;
   expectedQuestionTypeMix?: Record<RichClosedQuestionKind, number>;
@@ -587,6 +591,16 @@ function buildRichClosedPrompt(input: {
     'Tu ne dois jamais inclure de modelAnswer, answerText, freeTextAnswer, textAnswer, HTML, SVG, Mermaid, markdown rendu libre ou widget libre.',
     'Tu ne dois jamais produire de widget libre.',
     'Tu ne dois jamais produire true_false, true_false_grid, timeline, date_slider, image_choice, diagram_labeling, institution_matrix, cause_consequence, calculation_mcq ou fill_blank_dropdown.',
+    'Tu dois retourner un JSON object only: un objet JSON brut, sans Markdown, sans code fences, sans texte avant ou après.',
+    'Aucun champ additionnel n’est autorisé.',
+    `cognitiveSkill autorisés: ${RICH_CLOSED_COGNITIVE_SKILLS.join(', ')}`,
+    'Clés communes exactes par question: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds.',
+    'Clés exactes single_choice: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, choices, correctChoiceId, explanation.',
+    'Clés exactes multiple_choice: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, choices, minSelections, maxSelections, correctChoiceIds, explanation.',
+    'Clés exactes matching: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, leftItems, rightItems, correctPairs, explanation.',
+    'Clés exactes ordering: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, items, correctOrder, explanation.',
+    'Clés exactes case_qualification: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, caseText, choices, correctChoiceId, explanation.',
+    'Clés exactes error_detection: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, statement, errorOptions, correctErrorId, explanation.',
     'Tu dois retourner uniquement du JSON strict conforme au schema demandé.',
     `Prompt version: ${RICH_CLOSED_PROMPT_VERSION}.`,
     `Schema version: ${RICH_CLOSED_SCHEMA_VERSION}.`,
@@ -809,7 +823,7 @@ function toRichClosedGenerationError(
   ) {
     return new RichClosedQuestionGenerationError(
       RICH_CLOSED_GENERATION_SCHEMA_INVALID,
-      { failureType: 'schema' },
+      buildSchemaGenerationDiagnostic(error),
     );
   }
 
@@ -851,19 +865,137 @@ function buildRichClosedGenerationDiagnostic(input: {
 function buildSchemaGenerationDiagnostic(
   error: unknown,
 ): RichClosedGenerationDiagnostic {
-  const zodIssues =
-    error instanceof z.ZodError
-      ? error.issues.map((issue) => ({
-          code: issue.code,
-          path: issue.path.join('.'),
-          severity: 'error' as const,
-        }))
-      : undefined;
+  const schemaIssues = findSchemaIssues(error);
+  const errorName = error instanceof Error ? error.name : typeof error;
+  const messagePreview =
+    error instanceof Error ? scrubSchemaErrorMessage(error.message) : undefined;
 
   return {
     failureType: 'schema',
-    ...(zodIssues === undefined ? {} : { validationIssues: zodIssues }),
+    schemaErrorName: errorName,
+    schemaIssueCount: schemaIssues.length,
+    ...(messagePreview === undefined
+      ? {}
+      : { schemaErrorMessagePreview: messagePreview }),
+    ...(schemaIssues.length === 0 ? {} : { validationIssues: schemaIssues }),
   };
+}
+
+function findSchemaIssues(
+  error: unknown,
+): RichClosedGenerationDiagnosticIssue[] {
+  const seen = new Set<unknown>();
+  const pending: unknown[] = [error];
+
+  while (pending.length > 0) {
+    const current = pending.shift();
+
+    if (current === null || current === undefined || seen.has(current)) {
+      continue;
+    }
+
+    seen.add(current);
+
+    if (current instanceof z.ZodError) {
+      return current.issues.map(toSchemaDiagnosticIssue);
+    }
+
+    if (typeof current !== 'object') {
+      continue;
+    }
+
+    const record = current as Record<string, unknown>;
+    const issues = readUnknownIssues(record.issues);
+
+    if (issues.length > 0) {
+      return issues;
+    }
+
+    pending.push(record.cause, record.error, record.details);
+  }
+
+  return [];
+}
+
+function readUnknownIssues(
+  issues: unknown,
+): RichClosedGenerationDiagnosticIssue[] {
+  if (!Array.isArray(issues)) {
+    return [];
+  }
+
+  return issues.flatMap((issue) => {
+    if (typeof issue !== 'object' || issue === null || Array.isArray(issue)) {
+      return [];
+    }
+
+    const record = issue as Record<string, unknown>;
+    const code =
+      typeof record.code === 'string' && record.code.trim().length > 0
+        ? record.code
+        : 'schema_issue';
+    const path = normalizeSchemaIssuePath(record.path);
+
+    return [
+      {
+        code,
+        ...(path === undefined ? {} : { path }),
+        severity: 'error' as const,
+      },
+    ];
+  });
+}
+
+function toSchemaDiagnosticIssue(
+  issue: z.ZodIssue,
+): RichClosedGenerationDiagnosticIssue {
+  return {
+    code: issue.code,
+    path: issue.path.join('.'),
+    severity: 'error',
+  };
+}
+
+function normalizeSchemaIssuePath(path: unknown): string | undefined {
+  if (Array.isArray(path)) {
+    return path.map(String).join('.');
+  }
+
+  if (typeof path === 'string' && path.trim().length > 0) {
+    return path;
+  }
+
+  return undefined;
+}
+
+function scrubSchemaErrorMessage(message: string): string | undefined {
+  const scrubbed = redactKnownSensitiveFragments(message)
+    .replace(/SENTINEL_[A-Z0-9_]+/g, '[redacted-sentinel]')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (scrubbed.length === 0) {
+    return undefined;
+  }
+
+  return scrubbed.slice(0, 220);
+}
+
+function redactKnownSensitiveFragments(value: string): string {
+  const secretValues = [
+    process.env.MISTRAL_API_KEY,
+    process.env.DATABASE_URL,
+    process.env.REDIS_URL,
+    process.env.FIREBASE_PRIVATE_KEY,
+  ].filter(
+    (secret): secret is string =>
+      typeof secret === 'string' && secret.trim().length > 0,
+  );
+
+  return secretValues.reduce(
+    (scrubbed, secret) => scrubbed.split(secret).join('[redacted-secret]'),
+    value,
+  );
 }
 
 function toDiagnosticIssues(

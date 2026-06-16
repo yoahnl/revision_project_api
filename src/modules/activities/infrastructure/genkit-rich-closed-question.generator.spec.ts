@@ -146,6 +146,18 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     expect(generateInput?.prompt).toContain(
       'Tu ne dois jamais produire de widget libre',
     );
+    expect(generateInput?.prompt).toContain('JSON object only');
+    expect(generateInput?.prompt).toContain('sans Markdown');
+    expect(generateInput?.prompt).toContain('sans code fences');
+    expect(generateInput?.prompt).toContain(
+      'cognitiveSkill autorisés: memorization, comprehension, comparison, classification, case_application, procedure, error_detection, causality',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Clés exactes single_choice: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, choices, correctChoiceId, explanation.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Aucun champ additionnel n’est autorisé.',
+    );
     expect(generateInput?.output.schema).toBeDefined();
     expect(exercise).toMatchObject({
       id: 'rich-exercise-1',
@@ -284,6 +296,101 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     expect(getObservedObservation(observer).errorCode).toBe(
       RICH_CLOSED_GENERATION_SCHEMA_INVALID,
     );
+  });
+
+  it('logs schema diagnostics from direct issues without leaking sensitive context', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    const schemaError = new Error('Schema parser saw SENTINEL_FULL_CHUNK_TEXT');
+    Object.assign(schemaError, {
+      issues: [
+        {
+          code: 'invalid_type',
+          path: ['questions', 0, 'choices'],
+        },
+      ],
+    });
+    mockGenerate.mockRejectedValue(schemaError);
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator().generate(generationInput()),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_SCHEMA_INVALID });
+
+    const errorLog = getLastRichClosedErrorLog(loggerWarnSpy);
+    expect(errorLog.diagnostic).toMatchObject({
+      failureType: 'schema',
+      schemaErrorName: 'Error',
+      schemaIssueCount: 1,
+      validationIssues: [
+        {
+          code: 'invalid_type',
+          path: 'questions.0.choices',
+          severity: 'error',
+        },
+      ],
+    });
+    expect(JSON.stringify(errorLog)).not.toContain('SENTINEL_FULL_CHUNK_TEXT');
+    expect(JSON.stringify(errorLog)).not.toContain('test-mistral-key');
+  });
+
+  it('logs schema diagnostics from nested cause issues', async () => {
+    const schemaError = new Error('Wrapper output error');
+    Object.assign(schemaError, {
+      cause: {
+        issues: [
+          {
+            code: 'unrecognized_keys',
+            path: ['questions', 2, 'extra'],
+          },
+        ],
+      },
+    });
+    mockGenerate.mockRejectedValue(schemaError);
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator().generate(generationInput()),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_SCHEMA_INVALID });
+
+    expect(getLastRichClosedErrorLog(loggerWarnSpy).diagnostic).toMatchObject({
+      failureType: 'schema',
+      schemaIssueCount: 1,
+      validationIssues: [
+        {
+          code: 'unrecognized_keys',
+          path: 'questions.2.extra',
+          severity: 'error',
+        },
+      ],
+    });
+  });
+
+  it('logs a scrubbed and truncated schema message when no issues are available', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    mockGenerate.mockRejectedValue(
+      new Error(
+        `JSON output invalid ${'x'.repeat(300)} SENTINEL_FULL_CHUNK_TEXT test-mistral-key`,
+      ),
+    );
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator().generate(generationInput()),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_SCHEMA_INVALID });
+
+    const errorLog = getLastRichClosedErrorLog(loggerWarnSpy);
+    expect(errorLog.diagnostic).toMatchObject({
+      failureType: 'schema',
+      schemaErrorName: 'Error',
+      schemaIssueCount: 0,
+    });
+    expect(JSON.stringify(errorLog)).not.toContain('SENTINEL_FULL_CHUNK_TEXT');
+    expect(JSON.stringify(errorLog)).not.toContain('test-mistral-key');
+    expect(
+      String(
+        (errorLog.diagnostic as { schemaErrorMessagePreview?: string })
+          .schemaErrorMessagePreview,
+      ).length,
+    ).toBeLessThanOrEqual(220);
   });
 
   it('rejects output dominated by single_choice through the quality gate', async () => {
