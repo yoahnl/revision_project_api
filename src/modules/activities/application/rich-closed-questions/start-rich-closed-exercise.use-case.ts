@@ -77,11 +77,12 @@ export class StartRichClosedExerciseUseCase {
       throw new Error(RICH_CLOSED_SOURCE_CONTEXT_EMPTY);
     }
 
-    const documentId = input.documentId ?? generationContext.documentId;
+    const requestedDocumentId = input.documentId ?? undefined;
+    const documentId = requestedDocumentId ?? generationContext.documentId;
 
     if (
-      input.documentId !== undefined &&
-      input.documentId !== generationContext.documentId
+      requestedDocumentId !== undefined &&
+      requestedDocumentId !== generationContext.documentId
     ) {
       throw new Error(RICH_CLOSED_START_INVALID_INPUT);
     }

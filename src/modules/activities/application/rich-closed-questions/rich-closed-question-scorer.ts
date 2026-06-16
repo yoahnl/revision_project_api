@@ -138,6 +138,11 @@ function scoreQuestion(
         RichClosedAnswer,
         { questionKind: 'single_choice' }
       >;
+      assertKnownId(
+        singleAnswer.choiceId,
+        question.choices.map((choice) => choice.id),
+      );
+
       return buildCorrectionItem({
         question,
         answer: singleAnswer,
@@ -150,6 +155,11 @@ function scoreQuestion(
         RichClosedAnswer,
         { questionKind: 'case_qualification' }
       >;
+      assertKnownId(
+        caseAnswer.choiceId,
+        question.choices.map((choice) => choice.id),
+      );
+
       return buildCorrectionItem({
         question,
         answer: caseAnswer,
@@ -162,6 +172,11 @@ function scoreQuestion(
         RichClosedAnswer,
         { questionKind: 'error_detection' }
       >;
+      assertKnownId(
+        errorAnswer.errorId,
+        question.errorOptions.map((option) => option.id),
+      );
+
       return buildCorrectionItem({
         question,
         answer: errorAnswer,
@@ -178,6 +193,13 @@ function scoreQuestion(
         multipleAnswer.choiceIds,
         question.choices.map((choice) => choice.id),
       );
+
+      if (
+        multipleAnswer.choiceIds.length < question.minSelections ||
+        multipleAnswer.choiceIds.length > question.maxSelections
+      ) {
+        throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+      }
 
       return buildCorrectionItem({
         question,
@@ -227,6 +249,12 @@ function scoreQuestion(
         correction: { correctOrder: [...question.correctOrder] },
       });
     }
+  }
+}
+
+function assertKnownId(submittedId: string, knownIds: string[]) {
+  if (!knownIds.includes(submittedId)) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
   }
 }
 

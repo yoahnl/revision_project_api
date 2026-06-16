@@ -640,6 +640,24 @@ describe('ActivitiesModule', () => {
     expect(publicPayload).not.toContain('score');
   });
 
+  it('starts a rich closed exercise when document id is null', async () => {
+    await request(app.getHttpServer())
+      .post('/activities/rich-closed/start')
+      .send({
+        subjectId: 'subject-1',
+        documentId: null,
+        knowledgeUnitId: 'unit-1',
+        questionCount: 6,
+      })
+      .expect(201);
+
+    expect(richClosedGenerator.generate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: 'document-1',
+      }),
+    );
+  });
+
   it('gets rich closed pre-submit payload and returns post-submit result', async () => {
     await request(app.getHttpServer())
       .get('/activities/rich-closed/rich-session-1')

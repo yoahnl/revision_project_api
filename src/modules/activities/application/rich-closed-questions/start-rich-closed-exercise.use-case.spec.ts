@@ -104,6 +104,53 @@ describe('StartRichClosedExerciseUseCase', () => {
     });
   });
 
+  it('treats a null document id as absent and uses the source context document', async () => {
+    const activitiesRepository = createActivitiesRepository();
+    const revisionRepository = createRevisionRepository();
+    const generator = createGenerator();
+
+    await new StartRichClosedExerciseUseCase(
+      activitiesRepository,
+      revisionRepository,
+      generator,
+    ).execute({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      documentId: null,
+    });
+
+    expect(generator.generate.mock.calls[0]?.[0]).toMatchObject({
+      documentId: 'document-1',
+    });
+    expect(
+      activitiesRepository.createRichClosedExerciseSession.mock.calls[0]?.[0],
+    ).toMatchObject({
+      documentId: 'document-1',
+    });
+  });
+
+  it('accepts an explicit document id matching the source context', async () => {
+    const activitiesRepository = createActivitiesRepository();
+    const revisionRepository = createRevisionRepository();
+    const generator = createGenerator();
+
+    await new StartRichClosedExerciseUseCase(
+      activitiesRepository,
+      revisionRepository,
+      generator,
+    ).execute({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      documentId: 'document-1',
+    });
+
+    expect(generator.generate.mock.calls[0]?.[0]).toMatchObject({
+      documentId: 'document-1',
+    });
+  });
+
   it('rejects an incoherent explicit question type mix before calling the generator', async () => {
     const activitiesRepository = createActivitiesRepository();
     const revisionRepository = createRevisionRepository();

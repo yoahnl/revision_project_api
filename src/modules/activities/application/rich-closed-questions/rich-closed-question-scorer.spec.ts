@@ -97,7 +97,7 @@ describe('scoreRichClosedExerciseSubmission', () => {
           : answer,
       ),
     });
-    const missing = scoreRichClosedExerciseSubmission({
+    const wrongSet = scoreRichClosedExerciseSubmission({
       sessionId: 'session-1',
       exercise: richClosedExerciseFixture(),
       answers: correctAnswers().map((answer) =>
@@ -105,7 +105,7 @@ describe('scoreRichClosedExerciseSubmission', () => {
           ? {
               questionId: 'multiple-1',
               questionKind: 'multiple_choice',
-              choiceIds: ['choice-a'],
+              choiceIds: ['choice-a', 'choice-c'],
             }
           : answer,
       ),
@@ -117,10 +117,51 @@ describe('scoreRichClosedExerciseSubmission', () => {
       isCorrect: true,
     });
     expect(
-      missing.items.find((item) => item.questionId === 'multiple-1'),
+      wrongSet.items.find((item) => item.questionId === 'multiple-1'),
     ).toMatchObject({
       isCorrect: false,
     });
+  });
+
+  it('rejects unknown selected ids for choice-based answers', () => {
+    expectInvalid(
+      replaceAnswer({
+        questionId: 'single-1',
+        questionKind: 'single_choice',
+        choiceId: 'unknown-choice',
+      }),
+    );
+    expectInvalid(
+      replaceAnswer({
+        questionId: 'case-1',
+        questionKind: 'case_qualification',
+        choiceId: 'unknown-choice',
+      }),
+    );
+    expectInvalid(
+      replaceAnswer({
+        questionId: 'error-1',
+        questionKind: 'error_detection',
+        errorId: 'unknown-error',
+      }),
+    );
+  });
+
+  it('rejects multiple choice submissions outside min and max selections', () => {
+    expectInvalid(
+      replaceAnswer({
+        questionId: 'multiple-1',
+        questionKind: 'multiple_choice',
+        choiceIds: ['choice-a'],
+      }),
+    );
+    expectInvalid(
+      replaceAnswer({
+        questionId: 'multiple-1',
+        questionKind: 'multiple_choice',
+        choiceIds: ['choice-a', 'choice-b', 'choice-c'],
+      }),
+    );
   });
 
   it('accepts matching pair order but requires exact logical pairs', () => {
@@ -284,6 +325,12 @@ function expectInvalid(answers: unknown[]) {
       answers,
     }),
   ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+}
+
+function replaceAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
+  return correctAnswers().map((currentAnswer) =>
+    currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
+  );
 }
 
 function correctAnswers(): RichClosedAnswer[] {
