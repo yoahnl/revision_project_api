@@ -169,6 +169,98 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     );
   });
 
+  it('logs metadata-only diagnostics when generated question count is wrong', async () => {
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedExercise(),
+        questions: generatedExercise().questions.slice(0, 5),
+      },
+    });
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator().generate(generationInput()),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_CONTRACT_INVALID });
+
+    const errorLog = getLastRichClosedErrorLog(loggerWarnSpy);
+    expect(errorLog.diagnostic).toMatchObject({
+      failureType: 'count',
+      expectedQuestionCount: 6,
+      actualQuestionCount: 5,
+      expectedQuestionTypeMix: {
+        single_choice: 1,
+        multiple_choice: 1,
+        matching: 1,
+        ordering: 1,
+        case_qualification: 1,
+        error_detection: 1,
+      },
+      actualQuestionTypeMix: {
+        single_choice: 1,
+        multiple_choice: 1,
+        matching: 1,
+        ordering: 1,
+        case_qualification: 1,
+        error_detection: 0,
+      },
+    });
+    expect(errorLog.diagnostic.questionKinds).toEqual([
+      'single_choice',
+      'multiple_choice',
+      'matching',
+      'ordering',
+      'case_qualification',
+    ]);
+    expectNoSensitiveDiagnosticLog(errorLog);
+  });
+
+  it('logs metadata-only diagnostics when generated question type mix is wrong', async () => {
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedExercise(),
+        questions: [
+          {
+            ...richClosedQuestionFixture('multiple_choice'),
+            id: 'multiple-mix-1',
+          },
+          richClosedQuestionFixture('matching'),
+          richClosedQuestionFixture('ordering'),
+          richClosedQuestionFixture('case_qualification'),
+          richClosedQuestionFixture('error_detection'),
+          {
+            ...richClosedQuestionFixture('case_qualification'),
+            id: 'case-mix-2',
+          },
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator().generate(generationInput()),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_CONTRACT_INVALID });
+
+    const errorLog = getLastRichClosedErrorLog(loggerWarnSpy);
+    expect(errorLog.diagnostic).toMatchObject({
+      failureType: 'mix',
+      expectedQuestionTypeMix: {
+        single_choice: 1,
+        multiple_choice: 1,
+        matching: 1,
+        ordering: 1,
+        case_qualification: 1,
+        error_detection: 1,
+      },
+      actualQuestionTypeMix: {
+        single_choice: 0,
+        multiple_choice: 1,
+        matching: 1,
+        ordering: 1,
+        case_qualification: 2,
+        error_detection: 1,
+      },
+    });
+    expectNoSensitiveDiagnosticLog(errorLog);
+  });
+
   it('rejects output with a question kind outside V1-A', async () => {
     mockGenerate.mockResolvedValue({
       output: {
@@ -277,6 +369,16 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     await expect(
       new GenkitRichClosedQuestionGenerator().generate(generationInput()),
     ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_CONTRACT_INVALID });
+
+    expect(getLastRichClosedErrorLog(loggerWarnSpy).diagnostic).toMatchObject({
+      failureType: 'contract',
+      validationIssues: [
+        {
+          code: 'RICH_CLOSED_COGNITIVE_SKILL_INVALID',
+          path: 'questions.0.cognitiveSkill',
+        },
+      ],
+    });
   });
 
   it('rejects output with invalid multiple_choice bounds through contract validation', async () => {
@@ -299,6 +401,154 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     await expect(
       new GenkitRichClosedQuestionGenerator().generate(generationInput()),
     ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_CONTRACT_INVALID });
+  });
+
+  it('logs quality gate issue codes when quality rejects the generation', async () => {
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedExercise(),
+        questions: Array.from({ length: 6 }, (_value, index) => ({
+          ...richClosedQuestionFixture('single_choice'),
+          id: `single-quality-${index + 1}`,
+          prompt: `Question de choix unique ${index + 1}`,
+        })),
+      },
+    });
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator().generate(generationInput()),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_QUALITY_REJECTED });
+
+    const errorLog = getLastRichClosedErrorLog(loggerWarnSpy);
+    const diagnostic = errorLog.diagnostic as {
+      failureType?: string;
+      qualityIssues?: Array<{ code: string }>;
+    };
+    expect(diagnostic.failureType).toBe('quality');
+    expect(diagnostic.qualityIssues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'RICH_CLOSED_GATE_TOO_MANY_SINGLE_CHOICE',
+        }),
+      ]),
+    );
+    expectNoSensitiveDiagnosticLog(errorLog);
+  });
+
+  it('keeps source invalid categorized and logs source issue paths', async () => {
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedExercise(),
+        questions: [
+          {
+            ...richClosedQuestionFixture('single_choice'),
+            sourceChunkIds: ['chunk-unknown'],
+          },
+          ...generatedExercise().questions.slice(1),
+        ],
+      },
+    });
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator().generate(generationInput()),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_SOURCE_INVALID });
+
+    expect(getLastRichClosedErrorLog(loggerWarnSpy).diagnostic).toMatchObject({
+      failureType: 'source',
+      validationIssues: [
+        {
+          code: 'RICH_CLOSED_SOURCE_UNKNOWN',
+          path: 'questions.0.sourceChunkIds',
+        },
+      ],
+    });
+  });
+
+  it('retries with a stricter repair prompt when fallback model is configured after contract invalid output', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_RICH_CLOSED_FALLBACK_MODEL = 'mistral-large-latest';
+    mockGenerate
+      .mockResolvedValueOnce({
+        output: {
+          ...generatedExercise(),
+          questions: generatedExercise().questions.slice(0, 5),
+        },
+      })
+      .mockResolvedValueOnce({ output: generatedExercise() });
+    const observer = createObserver();
+
+    const exercise = await new GenkitRichClosedQuestionGenerator(
+      observer,
+    ).generate(generationInput());
+
+    expect(exercise.id).toBe('rich-exercise-1');
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenerate.mock.calls[1][0].prompt).toContain(
+      'Tentative de réparation stricte',
+    );
+    expect(mockGenerate.mock.calls[1][0].prompt).toContain('Question count: 6');
+    expect(mockGenerate.mock.calls[1][0].prompt).toContain('questionTypeMix');
+    expect(
+      observer.observe.mock.calls.map(([observation]) => observation),
+    ).toEqual([
+      expect.objectContaining({
+        status: 'error',
+        errorCode: RICH_CLOSED_GENERATION_CONTRACT_INVALID,
+        model: 'mistral/mistral-small-latest',
+      }),
+      expect.objectContaining({
+        status: 'success',
+        model: 'mistral/mistral-large-latest',
+      }),
+    ]);
+    expect(JSON.stringify(observer.observe.mock.calls)).not.toContain(
+      'SENTINEL_FULL_CHUNK_TEXT',
+    );
+    expect(JSON.stringify(loggerWarnSpy.mock.calls)).not.toContain(
+      'SENTINEL_FULL_CHUNK_TEXT',
+    );
+    expect(JSON.stringify(loggerWarnSpy.mock.calls)).not.toContain(
+      'test-mistral-key',
+    );
+  });
+
+  it('returns the final controlled error when fallback model also fails', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_RICH_CLOSED_FALLBACK_MODEL = 'mistral-large-latest';
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedExercise(),
+        questions: generatedExercise().questions.slice(0, 5),
+      },
+    });
+    const observer = createObserver();
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator(observer).generate(
+        generationInput(),
+      ),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_CONTRACT_INVALID });
+
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(
+      observer.observe.mock.calls.map(([observation]) => observation),
+    ).toEqual([
+      expect.objectContaining({
+        status: 'error',
+        errorCode: RICH_CLOSED_GENERATION_CONTRACT_INVALID,
+      }),
+      expect.objectContaining({
+        status: 'error',
+        errorCode: RICH_CLOSED_GENERATION_CONTRACT_INVALID,
+      }),
+    ]);
+    expect(getLastRichClosedErrorLog(loggerWarnSpy).diagnostic).toMatchObject({
+      failureType: 'count',
+      expectedQuestionCount: 6,
+      actualQuestionCount: 5,
+    });
   });
 
   it('returns controlled errors without leaking generated payloads', async () => {
@@ -381,6 +631,37 @@ function getObservedObservation(
   expect(observer.observe).toHaveBeenCalledTimes(1);
 
   return observer.observe.mock.calls[0][0];
+}
+
+function getLastRichClosedErrorLog(loggerWarnSpy: jest.SpyInstance): {
+  diagnostic?: unknown;
+  [key: string]: unknown;
+} {
+  const parsedLogs = loggerWarnSpy.mock.calls.flatMap(([message]) => {
+    const parsed: unknown = JSON.parse(String(message));
+
+    return isLogRecord(parsed) ? [parsed] : [];
+  });
+  const errorLogs = parsedLogs.filter(
+    (log) => log.event === 'rich.closed.generation.error',
+  );
+
+  expect(errorLogs.length).toBeGreaterThan(0);
+
+  return errorLogs[errorLogs.length - 1];
+}
+
+function isLogRecord(
+  value: unknown,
+): value is { event?: string; diagnostic?: unknown; [key: string]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function expectNoSensitiveDiagnosticLog(log: unknown) {
+  const serialized = JSON.stringify(log);
+
+  expect(serialized).not.toContain('SENTINEL_FULL_CHUNK_TEXT');
+  expect(serialized).not.toContain('test-mistral-key');
 }
 
 function restoreEnv(key: string, value: string | undefined) {

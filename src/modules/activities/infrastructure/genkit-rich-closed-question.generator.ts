@@ -13,10 +13,7 @@ import {
 } from '../../ai/infrastructure/document-artifact-genkit-config';
 import { isInvalidAiOutputError } from '../../ai/infrastructure/mistral-model-fallback';
 import { evaluateRichClosedExerciseQuality } from '../application/rich-closed-questions/rich-closed-question-quality-gate';
-import {
-  validateRichClosedExercise,
-  type RichClosedQuestionValidationOptions,
-} from '../application/rich-closed-questions/rich-closed-question.validator';
+import { validateRichClosedExercise } from '../application/rich-closed-questions/rich-closed-question.validator';
 import {
   RICH_CLOSED_EXERCISE_VERSION,
   RICH_CLOSED_QUESTION_KINDS,
@@ -177,6 +174,33 @@ type RichClosedPromptChunk = {
   pageNumber: number | null;
 };
 
+type RichClosedGenerationFailureType =
+  | 'schema'
+  | 'count'
+  | 'mix'
+  | 'contract'
+  | 'quality'
+  | 'source';
+
+interface RichClosedGenerationDiagnosticIssue {
+  code: string;
+  path?: string;
+  severity?: RichClosedExerciseValidationIssue['severity'];
+}
+
+interface RichClosedGenerationDiagnostic {
+  failureType: RichClosedGenerationFailureType;
+  expectedQuestionCount?: number;
+  actualQuestionCount?: number | null;
+  expectedQuestionTypeMix?: Record<RichClosedQuestionKind, number>;
+  actualQuestionTypeMix?: Record<RichClosedQuestionKind, number>;
+  validationIssues?: RichClosedGenerationDiagnosticIssue[];
+  qualityIssues?: RichClosedGenerationDiagnosticIssue[];
+  questionIds?: string[];
+  questionKinds?: RichClosedQuestionKind[];
+  sourceChunkIds?: string[];
+}
+
 @Injectable()
 export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGenerator {
   private readonly logger = new Logger(GenkitRichClosedQuestionGenerator.name);
@@ -207,6 +231,7 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
       questionTypeMix,
     });
     const inputSize = prompt.length;
+    let previousDiagnostic: RichClosedGenerationDiagnostic | undefined;
 
     this.logger.log(
       JSON.stringify(
@@ -222,10 +247,20 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
 
     for (const [index, metadata] of attempts.entries()) {
       const startedAt = Date.now();
+      const attemptPrompt =
+        index === 0
+          ? prompt
+          : buildRichClosedRepairPrompt({
+              input,
+              chunks,
+              questionTypeMix,
+              previousDiagnostic,
+            });
+      const attemptInputSize = attemptPrompt.length;
 
       try {
         const { output } = await this.getAi(metadata).generate({
-          prompt,
+          prompt: attemptPrompt,
           output: {
             schema: GeneratedRichClosedExerciseSchema,
           },
@@ -235,7 +270,7 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
           input,
           chunks,
           metadata,
-          inputSize,
+          inputSize: attemptInputSize,
           questionTypeMix,
         });
 
@@ -251,7 +286,7 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
           model: metadata.model,
           promptVersion: RICH_CLOSED_PROMPT_VERSION,
           schemaVersion: RICH_CLOSED_SCHEMA_VERSION,
-          inputSize,
+          inputSize: attemptInputSize,
           durationMs: Date.now() - startedAt,
           status: 'success',
           documentId: input.documentId ?? undefined,
@@ -263,6 +298,7 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
         return exercise;
       } catch (error) {
         const controlledError = toRichClosedGenerationError(error);
+        previousDiagnostic = controlledError.diagnostic;
 
         this.logger.warn(
           JSON.stringify(
@@ -270,6 +306,7 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
               input,
               metadata,
               errorCode: controlledError.code,
+              diagnostic: controlledError.diagnostic,
             }),
           ),
         );
@@ -280,7 +317,7 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
           model: metadata.model,
           promptVersion: RICH_CLOSED_PROMPT_VERSION,
           schemaVersion: RICH_CLOSED_SCHEMA_VERSION,
-          inputSize,
+          inputSize: attemptInputSize,
           durationMs: Date.now() - startedAt,
           status: 'error',
           errorCode: controlledError.code,
@@ -333,7 +370,10 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
 }
 
 export class RichClosedQuestionGenerationError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly diagnostic?: RichClosedGenerationDiagnostic,
+  ) {
     super(code);
     this.name = 'RichClosedQuestionGenerationError';
   }
@@ -362,15 +402,66 @@ function normalizeGeneratedRichClosedExercise(input: {
   if (exercise.questions.length !== input.input.questionCount) {
     throw new RichClosedQuestionGenerationError(
       RICH_CLOSED_GENERATION_CONTRACT_INVALID,
+      buildRichClosedGenerationDiagnostic({
+        exercise,
+        expectedQuestionCount: input.input.questionCount,
+        expectedQuestionTypeMix: input.questionTypeMix,
+        failureType: 'count',
+      }),
     );
   }
 
-  assertValidContract(exercise, { knownSourceChunkIds });
-  assertAcceptedQuality(exercise, { knownSourceChunkIds });
+  const validation = validateRichClosedExercise(exercise, {
+    knownSourceChunkIds,
+  });
+
+  if (!validation.accepted) {
+    const sourceIssue = hasSourceIssue(validation.issues);
+
+    throw new RichClosedQuestionGenerationError(
+      sourceIssue
+        ? RICH_CLOSED_GENERATION_SOURCE_INVALID
+        : RICH_CLOSED_GENERATION_CONTRACT_INVALID,
+      buildRichClosedGenerationDiagnostic({
+        exercise,
+        expectedQuestionCount: input.input.questionCount,
+        expectedQuestionTypeMix: input.questionTypeMix,
+        failureType: sourceIssue ? 'source' : 'contract',
+        validationIssues: validation.issues,
+      }),
+    );
+  }
+
+  const quality = evaluateRichClosedExerciseQuality(exercise, {
+    knownSourceChunkIds,
+  });
+
+  if (!quality.accepted) {
+    const sourceIssue = hasSourceIssue(quality.issues);
+
+    throw new RichClosedQuestionGenerationError(
+      sourceIssue
+        ? RICH_CLOSED_GENERATION_SOURCE_INVALID
+        : RICH_CLOSED_GENERATION_QUALITY_REJECTED,
+      buildRichClosedGenerationDiagnostic({
+        exercise,
+        expectedQuestionCount: input.input.questionCount,
+        expectedQuestionTypeMix: input.questionTypeMix,
+        failureType: sourceIssue ? 'source' : 'quality',
+        qualityIssues: quality.issues,
+      }),
+    );
+  }
 
   if (!matchesQuestionTypeMix(exercise, input.questionTypeMix)) {
     throw new RichClosedQuestionGenerationError(
       RICH_CLOSED_GENERATION_CONTRACT_INVALID,
+      buildRichClosedGenerationDiagnostic({
+        exercise,
+        expectedQuestionCount: input.input.questionCount,
+        expectedQuestionTypeMix: input.questionTypeMix,
+        failureType: 'mix',
+      }),
     );
   }
 
@@ -391,6 +482,7 @@ function parseRichClosedGenerationOutput(output: unknown): RichClosedExercise {
   if (output === undefined || output === null) {
     throw new RichClosedQuestionGenerationError(
       RICH_CLOSED_GENERATION_SCHEMA_INVALID,
+      { failureType: 'schema', actualQuestionCount: null },
     );
   }
 
@@ -398,45 +490,12 @@ function parseRichClosedGenerationOutput(output: unknown): RichClosedExercise {
     return GeneratedRichClosedExerciseSchema.parse(
       output,
     ) as RichClosedExercise;
-  } catch {
+  } catch (error) {
     throw new RichClosedQuestionGenerationError(
       RICH_CLOSED_GENERATION_SCHEMA_INVALID,
+      buildSchemaGenerationDiagnostic(error),
     );
   }
-}
-
-function assertValidContract(
-  exercise: RichClosedExercise,
-  options: RichClosedQuestionValidationOptions,
-) {
-  const validation = validateRichClosedExercise(exercise, options);
-
-  if (validation.accepted) {
-    return;
-  }
-
-  throw new RichClosedQuestionGenerationError(
-    hasSourceIssue(validation.issues)
-      ? RICH_CLOSED_GENERATION_SOURCE_INVALID
-      : RICH_CLOSED_GENERATION_CONTRACT_INVALID,
-  );
-}
-
-function assertAcceptedQuality(
-  exercise: RichClosedExercise,
-  options: RichClosedQuestionValidationOptions,
-) {
-  const quality = evaluateRichClosedExerciseQuality(exercise, options);
-
-  if (quality.accepted) {
-    return;
-  }
-
-  throw new RichClosedQuestionGenerationError(
-    hasSourceIssue(quality.issues)
-      ? RICH_CLOSED_GENERATION_SOURCE_INVALID
-      : RICH_CLOSED_GENERATION_QUALITY_REJECTED,
-  );
 }
 
 function hasSourceIssue(issues: RichClosedExerciseValidationIssue[]): boolean {
@@ -447,6 +506,16 @@ function matchesQuestionTypeMix(
   exercise: RichClosedExercise,
   questionTypeMix: Record<RichClosedQuestionKind, number>,
 ): boolean {
+  const actualCounts = countQuestionTypeMix(exercise);
+
+  return RICH_CLOSED_QUESTION_KINDS.every(
+    (kind) => actualCounts[kind] === questionTypeMix[kind],
+  );
+}
+
+function countQuestionTypeMix(
+  exercise: RichClosedExercise,
+): Record<RichClosedQuestionKind, number> {
   const actualCounts = Object.fromEntries(
     RICH_CLOSED_QUESTION_KINDS.map((kind) => [kind, 0]),
   ) as Record<RichClosedQuestionKind, number>;
@@ -455,9 +524,7 @@ function matchesQuestionTypeMix(
     actualCounts[question.questionKind] += 1;
   }
 
-  return RICH_CLOSED_QUESTION_KINDS.every(
-    (kind) => actualCounts[kind] === questionTypeMix[kind],
-  );
+  return actualCounts;
 }
 
 function resolveRequestedQuestionTypeMix(
@@ -528,6 +595,29 @@ function buildRichClosedPrompt(input: {
     `Titre de la notion: ${input.input.knowledgeUnit.title}`,
     `Résumé de la notion: ${input.input.knowledgeUnit.summary}`,
     JSON.stringify(toPromptPayload(input.input, input.chunks)),
+  ].join('\n\n');
+}
+
+function buildRichClosedRepairPrompt(input: {
+  input: RichClosedQuestionGenerationInput;
+  chunks: RichClosedPromptChunk[];
+  questionTypeMix: Record<RichClosedQuestionKind, number>;
+  previousDiagnostic?: RichClosedGenerationDiagnostic;
+}): string {
+  return [
+    'Tentative de réparation stricte de génération rich closed.',
+    'La tentative précédente a été rejetée avant toute utilisation.',
+    'Tu dois corriger uniquement la structure de sortie, sans inventer de source et sans relâcher le contrat.',
+    `Diagnostic metadata-only précédent: ${JSON.stringify(input.previousDiagnostic ?? {})}`,
+    'Rappels de structure par type:',
+    '- single_choice: choices, correctChoiceId, explanation.',
+    '- multiple_choice: choices, minSelections, maxSelections, correctChoiceIds, explanation.',
+    '- matching: leftItems, rightItems, correctPairs, explanation.',
+    '- ordering: items, correctOrder, explanation.',
+    '- case_qualification: caseText, choices, correctChoiceId, explanation.',
+    '- error_detection: statement, errorOptions, correctErrorId, explanation.',
+    'Tu dois respecter le nombre exact de questions, le mix exact, et uniquement les sourceChunkIds autorisés.',
+    buildRichClosedPrompt(input),
   ].join('\n\n');
 }
 
@@ -667,6 +757,7 @@ function buildRichClosedErrorLog(input: {
   input: RichClosedQuestionGenerationInput;
   metadata: ResolvedArtifactGenkitMetadata;
   errorCode: string;
+  diagnostic?: RichClosedGenerationDiagnostic;
 }) {
   return {
     event: 'rich.closed.generation.error',
@@ -674,6 +765,7 @@ function buildRichClosedErrorLog(input: {
     provider: input.metadata.provider,
     model: input.metadata.model,
     errorCode: input.errorCode,
+    ...(input.diagnostic === undefined ? {} : { diagnostic: input.diagnostic }),
     documentId: input.input.documentId ?? undefined,
     subjectId: input.input.subjectId,
     knowledgeUnitId: input.input.knowledgeUnit.id,
@@ -704,6 +796,7 @@ function toRichClosedGenerationError(
   ) {
     return new RichClosedQuestionGenerationError(
       RICH_CLOSED_GENERATION_CONTRACT_INVALID,
+      { failureType: 'count' },
     );
   }
 
@@ -716,8 +809,69 @@ function toRichClosedGenerationError(
   ) {
     return new RichClosedQuestionGenerationError(
       RICH_CLOSED_GENERATION_SCHEMA_INVALID,
+      { failureType: 'schema' },
     );
   }
 
   return new RichClosedQuestionGenerationError(RICH_CLOSED_GENERATION_FAILED);
+}
+
+function buildRichClosedGenerationDiagnostic(input: {
+  exercise: RichClosedExercise;
+  expectedQuestionCount: number;
+  expectedQuestionTypeMix: Record<RichClosedQuestionKind, number>;
+  failureType: RichClosedGenerationFailureType;
+  validationIssues?: RichClosedExerciseValidationIssue[];
+  qualityIssues?: RichClosedExerciseValidationIssue[];
+}): RichClosedGenerationDiagnostic {
+  return {
+    failureType: input.failureType,
+    expectedQuestionCount: input.expectedQuestionCount,
+    actualQuestionCount: input.exercise.questions.length,
+    expectedQuestionTypeMix: input.expectedQuestionTypeMix,
+    actualQuestionTypeMix: countQuestionTypeMix(input.exercise),
+    ...(input.validationIssues === undefined
+      ? {}
+      : { validationIssues: toDiagnosticIssues(input.validationIssues) }),
+    ...(input.qualityIssues === undefined
+      ? {}
+      : { qualityIssues: toDiagnosticIssues(input.qualityIssues) }),
+    questionIds: input.exercise.questions.map((question) => question.id),
+    questionKinds: input.exercise.questions.map(
+      (question) => question.questionKind,
+    ),
+    sourceChunkIds: Array.from(
+      new Set(
+        input.exercise.questions.flatMap((question) => question.sourceChunkIds),
+      ),
+    ),
+  };
+}
+
+function buildSchemaGenerationDiagnostic(
+  error: unknown,
+): RichClosedGenerationDiagnostic {
+  const zodIssues =
+    error instanceof z.ZodError
+      ? error.issues.map((issue) => ({
+          code: issue.code,
+          path: issue.path.join('.'),
+          severity: 'error' as const,
+        }))
+      : undefined;
+
+  return {
+    failureType: 'schema',
+    ...(zodIssues === undefined ? {} : { validationIssues: zodIssues }),
+  };
+}
+
+function toDiagnosticIssues(
+  issues: RichClosedExerciseValidationIssue[],
+): RichClosedGenerationDiagnosticIssue[] {
+  return issues.map((issue) => ({
+    code: issue.code,
+    ...(issue.path === undefined ? {} : { path: issue.path }),
+    severity: issue.severity,
+  }));
 }
