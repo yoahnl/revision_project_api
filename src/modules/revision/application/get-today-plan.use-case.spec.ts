@@ -38,7 +38,12 @@ describe('GetTodayPlanUseCase', () => {
       subject({ id: 'subject-1', name: 'Droit constitutionnel', priority: 5 }),
     ]);
     revisionRepository.findKnowledgeUnits.mockResolvedValue([
-      unit({ id: 'unit-1', subjectId: 'subject-1', title: 'Séparation' }),
+      unit({
+        id: 'unit-1',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        title: 'Séparation',
+      }),
       unit({ id: 'unit-2', subjectId: 'subject-1', title: 'Régimes' }),
     ]);
     revisionRepository.findMasteryStates.mockResolvedValue([
@@ -58,6 +63,7 @@ describe('GetTodayPlanUseCase', () => {
         id: 'subject-1:unit-1:diagnostic_quiz',
         subjectId: 'subject-1',
         subjectName: 'Droit constitutionnel',
+        documentId: 'document-1',
         knowledgeUnitId: 'unit-1',
         knowledgeUnitTitle: 'Séparation',
         masteryScore: 0.2,
@@ -76,9 +82,31 @@ describe('GetTodayPlanUseCase', () => {
       expect.arrayContaining([
         'diagnostic_quiz',
         'open_question',
+        'rich_closed_exercise',
         'revision_session',
       ]),
     );
+    const richClosedItem = plan.items.find(
+      (item) => item.action === 'rich_closed_exercise',
+    );
+    expect(richClosedItem).toEqual(
+      expect.objectContaining({
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        knowledgeUnitTitle: 'Séparation',
+        estimatedMinutes: 8,
+        reasonCode: 'RICH_CLOSED_PRACTICE',
+        reason: 'Questions riches recommandées pour consolider la notion.',
+        startPayload: {
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnitId: 'unit-1',
+        },
+      }),
+    );
+    expect(richClosedItem).not.toHaveProperty('questions');
+    expect(richClosedItem).not.toHaveProperty('correction');
   });
 
   it('uses null mastery score when no mastery state exists', async () => {
@@ -114,6 +142,7 @@ describe('GetTodayPlanUseCase', () => {
           {
             id: 'subject-missing:unit-1:diagnostic_quiz',
             subjectId: 'subject-missing',
+            documentId: null,
             knowledgeUnitId: 'unit-1',
             action: 'diagnostic_quiz',
             estimatedMinutes: 12,

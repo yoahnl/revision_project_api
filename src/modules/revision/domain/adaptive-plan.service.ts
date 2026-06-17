@@ -8,6 +8,7 @@ export const TODAY_PLAN_MAX_ITEMS = 4;
 export type TodayPlanActionType =
   | 'diagnostic_quiz'
   | 'open_question'
+  | 'rich_closed_exercise'
   | 'revision_session';
 
 export type TodayPlanPreferredAction = 'diagnostic_quiz' | 'open_question';
@@ -17,11 +18,13 @@ export type TodayPlanReasonCode =
   | 'STALE_PRACTICE'
   | 'HIGH_PRIORITY_SUBJECT'
   | 'MIX_ACTIVITY_TYPE'
+  | 'RICH_CLOSED_PRACTICE'
   | 'START_REVISION_SESSION'
   | 'CONTINUE_PROGRESS';
 
 export interface RevisionPlanStartPayload {
   subjectId: string;
+  documentId?: string | null;
   knowledgeUnitId?: string;
   preferredAction?: TodayPlanPreferredAction;
 }
@@ -29,6 +32,7 @@ export interface RevisionPlanStartPayload {
 export interface RevisionPlanItem {
   id: string;
   subjectId: string;
+  documentId: string | null;
   knowledgeUnitId: string;
   action: TodayPlanActionType;
   estimatedMinutes: number;
@@ -138,7 +142,12 @@ function selectTodayItems(rankedUnits: RankedUnit[]): CandidateItem[] {
     selected,
     selectedIds,
   );
-  addSpreadDiagnosticQuiz(candidates, selected, selectedIds);
+  addFirstCandidateOfAction(
+    'rich_closed_exercise',
+    candidates,
+    selected,
+    selectedIds,
+  );
   addFirstCandidateOfAction('open_question', candidates, selected, selectedIds);
   addFirstCandidateOfAction(
     'revision_session',
@@ -165,23 +174,6 @@ function addFirstCandidateOfAction(
   selectedIds: Set<string>,
 ) {
   const candidate = candidates.find((item) => item.action === action);
-
-  if (candidate) {
-    addCandidate(candidate, selected, selectedIds);
-  }
-}
-
-function addSpreadDiagnosticQuiz(
-  candidates: CandidateItem[],
-  selected: CandidateItem[],
-  selectedIds: Set<string>,
-) {
-  const firstSelectedUnitId = selected[0]?.knowledgeUnitId;
-  const candidate = candidates.find(
-    (item) =>
-      item.action === 'diagnostic_quiz' &&
-      item.knowledgeUnitId !== firstSelectedUnitId,
-  );
 
   if (candidate) {
     addCandidate(candidate, selected, selectedIds);
@@ -221,13 +213,31 @@ function toCandidates(rankedUnit: RankedUnit): CandidateItem[] {
     }),
     toCandidate({
       rankedUnit,
+      action: 'rich_closed_exercise',
+      estimatedMinutes: 8,
+      actionBoost: 25,
+      actionOrder: 1,
+      reasonCode: 'RICH_CLOSED_PRACTICE',
+      startPayload: {
+        subjectId: rankedUnit.subject.id,
+        ...(rankedUnit.unit.documentId === null
+          ? {}
+          : { documentId: rankedUnit.unit.documentId }),
+        knowledgeUnitId: rankedUnit.unit.id,
+      },
+    }),
+    toCandidate({
+      rankedUnit,
       action: 'open_question',
       estimatedMinutes: 18,
       actionBoost: 20,
-      actionOrder: 1,
+      actionOrder: 2,
       reasonCode: 'MIX_ACTIVITY_TYPE',
       startPayload: {
         subjectId: rankedUnit.subject.id,
+        ...(rankedUnit.unit.documentId === null
+          ? {}
+          : { documentId: rankedUnit.unit.documentId }),
         knowledgeUnitId: rankedUnit.unit.id,
         preferredAction: 'open_question',
       },
@@ -237,10 +247,13 @@ function toCandidates(rankedUnit: RankedUnit): CandidateItem[] {
       action: 'revision_session',
       estimatedMinutes: 25,
       actionBoost: 10,
-      actionOrder: 2,
+      actionOrder: 3,
       reasonCode: 'START_REVISION_SESSION',
       startPayload: {
         subjectId: rankedUnit.subject.id,
+        ...(rankedUnit.unit.documentId === null
+          ? {}
+          : { documentId: rankedUnit.unit.documentId }),
         knowledgeUnitId: rankedUnit.unit.id,
       },
     }),
@@ -261,6 +274,7 @@ function toCandidate(input: {
   return {
     id: `${input.rankedUnit.subject.id}:${input.rankedUnit.unit.id}:${input.action}`,
     subjectId: input.rankedUnit.subject.id,
+    documentId: input.rankedUnit.unit.documentId,
     knowledgeUnitId: input.rankedUnit.unit.id,
     action: input.action,
     estimatedMinutes: input.estimatedMinutes,
@@ -279,6 +293,7 @@ function toRevisionPlanItem(candidate: CandidateItem): RevisionPlanItem {
   return {
     id: candidate.id,
     subjectId: candidate.subjectId,
+    documentId: candidate.documentId,
     knowledgeUnitId: candidate.knowledgeUnitId,
     action: candidate.action,
     estimatedMinutes: candidate.estimatedMinutes,

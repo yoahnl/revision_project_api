@@ -11,6 +11,7 @@ type RevisionGoalRecord = {
 type KnowledgeUnitRecord = {
   id: string;
   subjectId: string;
+  documentId: string | null;
   title: string;
   summary: string;
   createdAt: Date;
@@ -68,6 +69,7 @@ describe('PrismaRevisionRepository', () => {
   ): KnowledgeUnitRecord => ({
     id: 'unit-1',
     subjectId: 'subject-1',
+    documentId: null,
     title: 'Cellules',
     summary: 'Bases de biologie cellulaire',
     createdAt,
@@ -164,6 +166,30 @@ describe('PrismaRevisionRepository', () => {
       },
     });
     expect(prisma.masteryState.upsert).not.toHaveBeenCalled();
+  });
+
+  it('loads only student knowledge units and maps document ids', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      knowledgeUnitRecord({ documentId: 'document-1' }),
+    ]);
+
+    const units = await repository.findKnowledgeUnits('student-1');
+
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        subject: {
+          studentId: 'student-1',
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(units).toHaveLength(1);
+    expect(units[0]).toMatchObject({
+      id: 'unit-1',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+    });
   });
 
   it('upserts mastery after verifying the student owns the knowledge unit', async () => {

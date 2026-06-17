@@ -6,6 +6,7 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 | --- | --- | --- | --- |
 | V1-012C | Backend diagnostics génération rich closed | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_012C_BACKEND_RICH_CLOSED_GENERATION_DIAGNOSTICS.md |
 | V1-012D | Dokploy runtime fix génération rich closed | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_012D_DOKPLOY_RICH_CLOSED_RUNTIME_FIX.md |
+| V1-013 | Today integration V1 | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_013_TODAY_INTEGRATION_V1.md |
 
 ## Lots détaillés
 
@@ -24,3 +25,11 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 - Périmètre inclus : inspection Dokploy, prompt strict, diagnostics schema imbriqués, tests mockés.
 - Non-objectifs : frontend, Today, revision sessions, Prisma, endpoints publics, redeploy sans commit déployable.
 - Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_012D_DOKPLOY_RICH_CLOSED_RUNTIME_FIX.md`.
+
+### V1-013 — Today integration V1
+
+- Objectif : permettre à Today de recommander une action déterministe `rich_closed_exercise`.
+- Pourquoi maintenant : la page rich closed complète existe et peut prendre le relais au clic utilisateur.
+- Périmètre inclus : contrat Today, sélection déterministe, propagation optionnelle de `documentId`, tests Today/revision/activities.
+- Non-objectifs : Genkit depuis Today, revision sessions, endpoints rich closed, Prisma schema ou migration.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_013_TODAY_INTEGRATION_V1.md`.

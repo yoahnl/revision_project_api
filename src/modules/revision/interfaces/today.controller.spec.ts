@@ -10,6 +10,7 @@ describe('TodayController', () => {
           id: 'subject-1:unit-1:diagnostic_quiz',
           subjectId: 'subject-1',
           subjectName: 'Droit',
+          documentId: null,
           knowledgeUnitId: 'unit-1',
           knowledgeUnitTitle: 'Séparation',
           masteryScore: 0.2,

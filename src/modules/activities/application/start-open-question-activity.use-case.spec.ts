@@ -84,6 +84,7 @@ describe('StartOpenQuestionActivityUseCase', () => {
           knowledgeUnit: {
             id: 'unit-1',
             subjectId: 'subject-1',
+            documentId: null,
             title: 'Séparation des pouvoirs',
             summary:
               'La séparation des pouvoirs distingue les fonctions législative, exécutive et juridictionnelle.',

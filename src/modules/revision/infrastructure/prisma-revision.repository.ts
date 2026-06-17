@@ -16,6 +16,7 @@ type RevisionGoalRecord = {
 type KnowledgeUnitRecord = {
   id: string;
   subjectId: string;
+  documentId: string | null;
   title: string;
   summary: string;
 };
@@ -151,6 +152,7 @@ export class PrismaRevisionRepository implements RevisionRepository {
     return new KnowledgeUnit({
       id: record.id,
       subjectId: record.subjectId,
+      documentId: record.documentId,
       title: record.title,
       summary: record.summary,
     });

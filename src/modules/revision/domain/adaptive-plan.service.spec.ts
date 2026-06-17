@@ -47,6 +47,7 @@ describe('AdaptivePlanService', () => {
       expect.arrayContaining([
         'diagnostic_quiz',
         'open_question',
+        'rich_closed_exercise',
         'revision_session',
       ]),
     );
@@ -192,6 +193,61 @@ describe('AdaptivePlanService', () => {
     expect(plan.items.some((item) => item.action === 'open_question')).toBe(
       true,
     );
+  });
+
+  it('returns rich closed actions with a bounded start payload', () => {
+    const plan = new AdaptivePlanService().buildTodayPlan({
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 5 })],
+      knowledgeUnits: [
+        unit({
+          id: 'unit-1',
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+        }),
+      ],
+      masteryStates: [mastery({ knowledgeUnitId: 'unit-1', score: 0.2 })],
+    });
+
+    expect(plan.items).toContainEqual(
+      expect.objectContaining({
+        id: 'subject-1:unit-1:rich_closed_exercise',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        action: 'rich_closed_exercise',
+        estimatedMinutes: 8,
+        reasonCode: 'RICH_CLOSED_PRACTICE',
+        startPayload: {
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnitId: 'unit-1',
+        },
+      }),
+    );
+  });
+
+  it('omits rich closed document id from start payload when unavailable', () => {
+    const plan = new AdaptivePlanService().buildTodayPlan({
+      now,
+      goal: goal(),
+      subjects: [subject({ id: 'subject-1', priority: 5 })],
+      knowledgeUnits: [unit({ id: 'unit-1', subjectId: 'subject-1' })],
+      masteryStates: [mastery({ knowledgeUnitId: 'unit-1', score: 0.2 })],
+    });
+    const richClosedAction = plan.items.find(
+      (item) => item.action === 'rich_closed_exercise',
+    );
+
+    expect(richClosedAction).toMatchObject({
+      documentId: null,
+      startPayload: {
+        subjectId: 'subject-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    });
+    expect(richClosedAction?.startPayload).not.toHaveProperty('documentId');
   });
 
   it('returns revision session actions with explicit start payload', () => {

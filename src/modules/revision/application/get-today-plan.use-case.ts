@@ -23,6 +23,7 @@ export interface TodayPlanItemDto {
   id: string;
   subjectId: string;
   subjectName: string;
+  documentId: string | null;
   knowledgeUnitId: string | null;
   knowledgeUnitTitle: string | null;
   masteryScore: number | null;
@@ -89,6 +90,7 @@ export class GetTodayPlanUseCase {
           id: item.id,
           subjectId: item.subjectId,
           subjectName: subject.name,
+          documentId: item.documentId,
           knowledgeUnitId: item.knowledgeUnitId,
           knowledgeUnitTitle: unit.title,
           masteryScore:
@@ -112,6 +114,8 @@ function toReason(reasonCode: TodayPlanReasonCode): string {
       'À entretenir : cette notion n’a pas été pratiquée récemment.',
     HIGH_PRIORITY_SUBJECT: 'Matière prioritaire dans ton objectif de révision.',
     MIX_ACTIVITY_TYPE: 'Change de format pour renforcer la mémorisation.',
+    RICH_CLOSED_PRACTICE:
+      'Questions riches recommandées pour consolider la notion.',
     START_REVISION_SESSION:
       'Lance une session guidée pour enchaîner plusieurs exercices.',
     CONTINUE_PROGRESS: 'Continue ta progression sur cette notion.',
