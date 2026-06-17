@@ -313,8 +313,30 @@ function isPrivatePublicPayloadKey(key: string): boolean {
     key === 'workedSteps' ||
     key === 'answersPayload' ||
     key === 'expectedAnswer' ||
-    key === 'expectedAnswers'
+    key === 'expectedAnswers' ||
+    isForbiddenRenderPublicPayloadKey(key)
   );
+}
+
+function isForbiddenRenderPublicPayloadKey(key: string): boolean {
+  return [
+    'html',
+    'svg',
+    'rawSvg',
+    'mermaid',
+    'markdown',
+    'widget',
+    'component',
+    'renderPayload',
+    'style',
+    'css',
+    'script',
+    'imageUrl',
+    'assetUrl',
+    'canvas',
+    'code',
+    'markup',
+  ].includes(key);
 }
 
 function error(

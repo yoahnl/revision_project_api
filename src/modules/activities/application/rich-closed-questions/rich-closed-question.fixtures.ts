@@ -74,6 +74,20 @@ export function richClosedV1CExerciseFixture(): RichClosedExercise {
   };
 }
 
+export function richClosedV1CFullExerciseFixture(): RichClosedExercise {
+  const v1cFixture = richClosedV1CExerciseFixture();
+
+  return {
+    ...v1cFixture,
+    id: 'rich-exercise-v1c-full-1',
+    title: 'Droit constitutionnel - exercice riche fermé V1-C complet',
+    questions: [
+      ...v1cFixture.questions,
+      richClosedQuestionFixture('diagram_labeling'),
+    ],
+  };
+}
+
 export function richClosedQuestionFixture(
   questionKind: RichClosedQuestionKind,
 ): RichClosedQuestion {
@@ -386,6 +400,128 @@ export function richClosedQuestionFixture(
         explanation:
           'La matrice distingue la légitimité présidentielle, la responsabilité du Gouvernement devant l’Assemblée nationale et le moyen de contrôle parlementaire.',
       };
+    case 'diagram_labeling':
+      return {
+        ...baseQuestion('diagram-labeling-1', 'diagram_labeling'),
+        prompt:
+          'Complète les étiquettes manquantes dans le schéma des rapports institutionnels.',
+        instruction:
+          'Choisis une option fermée pour chaque emplacement du schéma.',
+        diagram: {
+          title: 'Rapports institutionnels sous la Ve République',
+          description:
+            'Schéma sémantique borné entre Président, Gouvernement et Parlement.',
+          layout: 'vertical_flow',
+          nodes: [
+            {
+              id: 'node-president',
+              label: 'Président de la République',
+              description: 'Chef de l’État.',
+              groupId: 'group-executive',
+            },
+            {
+              id: 'node-government',
+              label: 'Gouvernement',
+              description: 'Conduit la politique de la Nation.',
+              groupId: 'group-executive',
+            },
+            {
+              id: 'node-assembly',
+              label: 'Assemblée nationale',
+              description: 'Chambre politiquement déterminante.',
+              groupId: 'group-parliament',
+            },
+            {
+              id: 'node-senate',
+              label: 'Sénat',
+              description: 'Chambre représentant les collectivités.',
+              groupId: 'group-parliament',
+            },
+          ],
+          groups: [
+            {
+              id: 'group-executive',
+              label: 'Exécutif',
+            },
+            {
+              id: 'group-parliament',
+              label: 'Parlement',
+            },
+          ],
+          edges: [
+            {
+              id: 'edge-president-government',
+              fromNodeId: 'node-president',
+              toNodeId: 'node-government',
+              label: 'nomination',
+            },
+            {
+              id: 'edge-government-assembly',
+              fromNodeId: 'node-government',
+              toNodeId: 'node-assembly',
+              label: 'responsabilité politique',
+            },
+            {
+              id: 'edge-assembly-government',
+              fromNodeId: 'node-assembly',
+              toNodeId: 'node-government',
+              label: 'contrôle',
+            },
+          ],
+        },
+        slots: [
+          {
+            id: 'slot-government-role',
+            anchorType: 'node',
+            anchorId: 'node-government',
+            prompt: 'Quel organe conduit la politique de la Nation ?',
+            options: [
+              { id: 'option-government', label: 'Gouvernement' },
+              { id: 'option-president', label: 'Président de la République' },
+              { id: 'option-senate', label: 'Sénat' },
+            ],
+          },
+          {
+            id: 'slot-censure',
+            anchorType: 'edge',
+            anchorId: 'edge-assembly-government',
+            prompt:
+              'Quel mécanisme peut renverser politiquement le Gouvernement ?',
+            options: [
+              { id: 'option-motion-censure', label: 'Motion de censure' },
+              { id: 'option-promulgation', label: 'Promulgation' },
+              { id: 'option-referendum', label: 'Référendum' },
+            ],
+          },
+          {
+            id: 'slot-nomination',
+            anchorType: 'edge',
+            anchorId: 'edge-president-government',
+            prompt: 'Quel pouvoir intervient dans la nomination ?',
+            options: [
+              { id: 'option-nomination', label: 'Pouvoir de nomination' },
+              { id: 'option-censure', label: 'Motion de censure' },
+              { id: 'option-amendment', label: 'Droit d’amendement' },
+            ],
+          },
+        ],
+        correctValues: [
+          {
+            slotId: 'slot-government-role',
+            optionId: 'option-government',
+          },
+          {
+            slotId: 'slot-censure',
+            optionId: 'option-motion-censure',
+          },
+          {
+            slotId: 'slot-nomination',
+            optionId: 'option-nomination',
+          },
+        ],
+        explanation:
+          'Le schéma relie le rôle du Gouvernement, sa responsabilité devant l’Assemblée nationale et le pouvoir de nomination présidentielle.',
+      };
     case 'case_qualification':
       return {
         ...baseQuestion('case-1', 'case_qualification'),
@@ -437,6 +573,8 @@ function baseQuestion<K extends RichClosedQuestionKind>(
         return 'causality';
       case 'institution_matrix':
         return 'comparison';
+      case 'diagram_labeling':
+        return 'classification';
       default:
         return 'case_application';
     }

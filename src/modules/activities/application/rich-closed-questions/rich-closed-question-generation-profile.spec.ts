@@ -21,6 +21,7 @@ describe('rich closed question generation profile', () => {
       true_false_grid: 0,
       cause_consequence: 0,
       institution_matrix: 0,
+      diagram_labeling: 0,
     });
   });
 
@@ -32,6 +33,7 @@ describe('rich closed question generation profile', () => {
     expect(mix.true_false_grid).toBe(0);
     expect(mix.cause_consequence).toBe(0);
     expect(mix.institution_matrix).toBe(0);
+    expect(mix.diagram_labeling).toBe(0);
     expect(sumMix(mix)).toBe(7);
   });
 
@@ -48,6 +50,7 @@ describe('rich closed question generation profile', () => {
       true_false_grid: 0,
       cause_consequence: 0,
       institution_matrix: 0,
+      diagram_labeling: 0,
     });
   });
 
@@ -59,6 +62,7 @@ describe('rich closed question generation profile', () => {
     expect(mix.true_false_grid).toBe(0);
     expect(mix.cause_consequence).toBe(0);
     expect(mix.institution_matrix).toBe(0);
+    expect(mix.diagram_labeling).toBe(0);
     expect(sumMix(mix)).toBe(9);
   });
 
@@ -80,10 +84,11 @@ describe('rich closed question generation profile', () => {
       true_false_grid: 1,
       cause_consequence: 1,
       institution_matrix: 0,
+      diagram_labeling: 0,
     });
   });
 
-  it('adds institution_matrix only from the eleven-question default mix', () => {
+  it('preserves the V1-019 default mix for eleven questions', () => {
     expect(resolveRichClosedQuestionTypeMix({ questionCount: 11 })).toEqual({
       case_qualification: 1,
       error_detection: 1,
@@ -96,6 +101,24 @@ describe('rich closed question generation profile', () => {
       true_false_grid: 1,
       cause_consequence: 1,
       institution_matrix: 1,
+      diagram_labeling: 0,
+    });
+  });
+
+  it('adds diagram_labeling only from the twelve-question default mix', () => {
+    expect(resolveRichClosedQuestionTypeMix({ questionCount: 12 })).toEqual({
+      case_qualification: 1,
+      error_detection: 1,
+      matching: 1,
+      ordering: 1,
+      multiple_choice: 1,
+      single_choice: 1,
+      timeline: 1,
+      date_slider: 1,
+      true_false_grid: 1,
+      cause_consequence: 1,
+      institution_matrix: 1,
+      diagram_labeling: 1,
     });
   });
 

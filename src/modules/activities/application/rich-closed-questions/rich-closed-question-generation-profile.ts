@@ -11,6 +11,7 @@ const V1A_FULL_EXERCISE_COUNT = 6;
 const V1B_017_FULL_EXERCISE_COUNT = 8;
 const V1B_018_FULL_EXERCISE_COUNT = 10;
 const V1C_019_FULL_EXERCISE_COUNT = 11;
+const V1C_020_FULL_EXERCISE_COUNT = 12;
 
 const SMALL_EXERCISE_KIND_ORDER: RichClosedQuestionKind[] = [
   'case_qualification',
@@ -32,6 +33,7 @@ const FULL_EXERCISE_BASE_MIX: Record<RichClosedQuestionKind, number> = {
   true_false_grid: 0,
   cause_consequence: 0,
   institution_matrix: 0,
+  diagram_labeling: 0,
 };
 
 const FULL_EXERCISE_V1B_BASE_MIX: Record<RichClosedQuestionKind, number> = {
@@ -51,6 +53,11 @@ const FULL_EXERCISE_V1C_FULL_MIX: Record<RichClosedQuestionKind, number> = {
   institution_matrix: 1,
 };
 
+const FULL_EXERCISE_V1C_DIAGRAM_MIX: Record<RichClosedQuestionKind, number> = {
+  ...FULL_EXERCISE_V1C_FULL_MIX,
+  diagram_labeling: 1,
+};
+
 const DISTRIBUTION_ORDER_BY_PROFILE: Record<
   RichClosedComplexityProfile,
   RichClosedQuestionKind[]
@@ -66,6 +73,7 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'true_false_grid',
     'cause_consequence',
     'institution_matrix',
+    'diagram_labeling',
     'single_choice',
   ],
   exam: [
@@ -79,6 +87,7 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'true_false_grid',
     'cause_consequence',
     'institution_matrix',
+    'diagram_labeling',
     'single_choice',
   ],
   advanced: [
@@ -91,6 +100,7 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'true_false_grid',
     'cause_consequence',
     'institution_matrix',
+    'diagram_labeling',
     'multiple_choice',
     'single_choice',
   ],
@@ -116,30 +126,39 @@ export function resolveRichClosedQuestionTypeMix(
     return buildSmallExerciseMix(input.questionCount);
   }
 
-  const usesV1C019Base = input.questionCount >= V1C_019_FULL_EXERCISE_COUNT;
+  const usesV1C020Base = input.questionCount >= V1C_020_FULL_EXERCISE_COUNT;
+  const usesV1C019Base =
+    !usesV1C020Base && input.questionCount >= V1C_019_FULL_EXERCISE_COUNT;
   const usesV1B018Base =
-    !usesV1C019Base && input.questionCount >= V1B_018_FULL_EXERCISE_COUNT;
+    !usesV1C020Base &&
+    !usesV1C019Base &&
+    input.questionCount >= V1B_018_FULL_EXERCISE_COUNT;
   const usesV1B017Base =
+    !usesV1C020Base &&
     !usesV1C019Base &&
     !usesV1B018Base &&
     input.questionCount >= V1B_017_FULL_EXERCISE_COUNT;
-  const mix = usesV1C019Base
-    ? { ...FULL_EXERCISE_V1C_FULL_MIX }
-    : usesV1B018Base
-      ? { ...FULL_EXERCISE_V1B_FULL_MIX }
-      : usesV1B017Base
-        ? { ...FULL_EXERCISE_V1B_BASE_MIX }
-        : { ...FULL_EXERCISE_BASE_MIX };
+  const mix = usesV1C020Base
+    ? { ...FULL_EXERCISE_V1C_DIAGRAM_MIX }
+    : usesV1C019Base
+      ? { ...FULL_EXERCISE_V1C_FULL_MIX }
+      : usesV1B018Base
+        ? { ...FULL_EXERCISE_V1B_FULL_MIX }
+        : usesV1B017Base
+          ? { ...FULL_EXERCISE_V1B_BASE_MIX }
+          : { ...FULL_EXERCISE_BASE_MIX };
   const profile = input.complexityProfile ?? 'standard';
   let remaining =
     input.questionCount -
-    (usesV1C019Base
-      ? V1C_019_FULL_EXERCISE_COUNT
-      : usesV1B018Base
-        ? V1B_018_FULL_EXERCISE_COUNT
-        : usesV1B017Base
-          ? V1B_017_FULL_EXERCISE_COUNT
-          : V1A_FULL_EXERCISE_COUNT);
+    (usesV1C020Base
+      ? V1C_020_FULL_EXERCISE_COUNT
+      : usesV1C019Base
+        ? V1C_019_FULL_EXERCISE_COUNT
+        : usesV1B018Base
+          ? V1B_018_FULL_EXERCISE_COUNT
+          : usesV1B017Base
+            ? V1B_017_FULL_EXERCISE_COUNT
+            : V1A_FULL_EXERCISE_COUNT);
   let cursor = 0;
 
   while (remaining > 0) {
@@ -182,5 +201,6 @@ function emptyMix(): Record<RichClosedQuestionKind, number> {
     true_false_grid: 0,
     cause_consequence: 0,
     institution_matrix: 0,
+    diagram_labeling: 0,
   };
 }

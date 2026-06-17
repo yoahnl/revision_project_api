@@ -13,6 +13,7 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 | V1-017  | Timeline/date slider V1-B                  | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_017_TIMELINE_DATE_SLIDER.md                        |
 | V1-018  | True/false grid + cause/consequence V1-B   | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_018_TRUE_FALSE_GRID_CAUSE_CONSEQUENCE.md           |
 | V1-019  | Institution matrix V1-C                    | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_019_INSTITUTION_MATRIX.md                          |
+| V1-020  | Diagram labeling V1-C                      | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_020_DIAGRAM_LABELING.md                            |
 
 ## Lots détaillés
 
@@ -87,3 +88,11 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 - Périmètre inclus : contrat backend, validation stricte rows/columns/cells/options, mapper public anti-fuite, parsing submit, scoring full-correct, correction post-submit, Genkit mockable, fixture V1-C dédiée, smoke E2E.
 - Non-objectifs : V1-020, `diagram_labeling`, `calculation_mcq`, `image_choice`, `fill_blank_dropdown`, widgets libres, provider IA réel, migration Prisma.
 - Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_019_INSTITUTION_MATRIX.md`.
+
+### V1-020 — Diagram labeling V1-C
+
+- Objectif : ajouter le type rich closed fermé `diagram_labeling`.
+- Pourquoi maintenant : V1-019 a stabilisé les matrices institutionnelles fermées; le moteur peut accepter un schéma textuel borné sans rendu arbitraire.
+- Périmètre inclus : contrat backend diagram/nodes/edges/slots/options, validation stricte, mapper public anti-fuite, parsing submit, scoring full-correct, correction post-submit, Genkit mockable, fixture V1-C full dédiée, smoke E2E.
+- Non-objectifs : V1-021, `calculation_mcq`, `image_choice`, `fill_blank_dropdown`, HTML/SVG/Mermaid/Canvas/image URL/widget libre, provider IA réel, migration Prisma.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_020_DIAGRAM_LABELING.md`.

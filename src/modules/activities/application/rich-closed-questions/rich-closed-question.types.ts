@@ -14,6 +14,7 @@ export const RICH_CLOSED_QUESTION_KINDS = [
   'true_false_grid',
   'cause_consequence',
   'institution_matrix',
+  'diagram_labeling',
 ] as const;
 
 export type RichClosedQuestionKind =
@@ -108,6 +109,63 @@ export interface RichClosedInstitutionMatrixValue {
   optionId: string;
 }
 
+export type RichClosedDiagramLayout =
+  | 'vertical_flow'
+  | 'two_column'
+  | 'cycle'
+  | 'hierarchy'
+  | 'plain';
+
+export type RichClosedDiagramAnchorType = 'node' | 'edge';
+
+export interface RichClosedDiagramGroup {
+  id: string;
+  label: string;
+  description?: string | null;
+}
+
+export interface RichClosedDiagramNode {
+  id: string;
+  label: string;
+  description?: string | null;
+  groupId?: string | null;
+}
+
+export interface RichClosedDiagramEdge {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+  label?: string | null;
+  description?: string | null;
+}
+
+export interface RichClosedDiagram {
+  title?: string | null;
+  description?: string | null;
+  layout: RichClosedDiagramLayout;
+  nodes: RichClosedDiagramNode[];
+  groups?: RichClosedDiagramGroup[];
+  edges: RichClosedDiagramEdge[];
+}
+
+export interface RichClosedDiagramLabelingOption {
+  id: string;
+  label: string;
+}
+
+export interface RichClosedDiagramLabelingSlot {
+  id: string;
+  anchorType: RichClosedDiagramAnchorType;
+  anchorId: string;
+  prompt: string;
+  options: RichClosedDiagramLabelingOption[];
+}
+
+export interface RichClosedDiagramLabelingValue {
+  slotId: string;
+  optionId: string;
+}
+
 export interface RichClosedQuestionBase {
   id: string;
   questionKind: RichClosedQuestionKind;
@@ -194,6 +252,15 @@ export interface RichClosedInstitutionMatrixQuestion extends RichClosedQuestionB
   explanation: string;
 }
 
+export interface RichClosedDiagramLabelingQuestion extends RichClosedQuestionBase {
+  questionKind: 'diagram_labeling';
+  instruction?: string | null;
+  diagram: RichClosedDiagram;
+  slots: RichClosedDiagramLabelingSlot[];
+  correctValues: RichClosedDiagramLabelingValue[];
+  explanation: string;
+}
+
 export interface RichClosedCaseQualificationQuestion extends RichClosedQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -221,7 +288,8 @@ export type RichClosedQuestion =
   | RichClosedDateSliderQuestion
   | RichClosedTrueFalseGridQuestion
   | RichClosedCauseConsequenceQuestion
-  | RichClosedInstitutionMatrixQuestion;
+  | RichClosedInstitutionMatrixQuestion
+  | RichClosedDiagramLabelingQuestion;
 
 export interface RichClosedPublicQuestionBase {
   id: string;
@@ -291,6 +359,13 @@ export interface RichClosedPublicInstitutionMatrixQuestion extends RichClosedPub
   cells: RichClosedInstitutionMatrixCell[];
 }
 
+export interface RichClosedPublicDiagramLabelingQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'diagram_labeling';
+  instruction?: string | null;
+  diagram: RichClosedDiagram;
+  slots: RichClosedDiagramLabelingSlot[];
+}
+
 export interface RichClosedPublicCaseQualificationQuestion extends RichClosedPublicQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -314,7 +389,8 @@ export type RichClosedPublicQuestion =
   | RichClosedPublicDateSliderQuestion
   | RichClosedPublicTrueFalseGridQuestion
   | RichClosedPublicCauseConsequenceQuestion
-  | RichClosedPublicInstitutionMatrixQuestion;
+  | RichClosedPublicInstitutionMatrixQuestion
+  | RichClosedPublicDiagramLabelingQuestion;
 
 export type RichClosedAnswer =
   | {
@@ -369,6 +445,11 @@ export type RichClosedAnswer =
     }
   | {
       questionId: string;
+      questionKind: 'diagram_labeling';
+      values: RichClosedDiagramLabelingValue[];
+    }
+  | {
+      questionId: string;
       questionKind: 'error_detection';
       errorId: string;
     };
@@ -388,6 +469,7 @@ export type RichClosedCorrectionPayload =
   | { correctValues: RichClosedTrueFalseValue[] }
   | { correctPairs: RichClosedCauseConsequencePair[] }
   | { correctValues: RichClosedInstitutionMatrixValue[] }
+  | { correctValues: RichClosedDiagramLabelingValue[] }
   | { correctOrder: string[] }
   | { correctYear: number; minAcceptedYear: number; maxAcceptedYear: number }
   | { correctErrorId: string };

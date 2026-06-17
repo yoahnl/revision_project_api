@@ -4,6 +4,14 @@ import {
   RICH_CLOSED_QUESTION_KINDS,
   type RichClosedChoice,
   type RichClosedCauseConsequencePair,
+  type RichClosedDiagram,
+  type RichClosedDiagramAnchorType,
+  type RichClosedDiagramEdge,
+  type RichClosedDiagramGroup,
+  type RichClosedDiagramLabelingSlot,
+  type RichClosedDiagramLabelingValue,
+  type RichClosedDiagramLayout,
+  type RichClosedDiagramNode,
   type RichClosedExerciseValidationIssue,
   type RichClosedExerciseValidationResult,
   type RichClosedInstitutionMatrixCell,
@@ -28,6 +36,39 @@ const MIN_MATRIX_AXIS_ITEMS = 2;
 const MAX_MATRIX_AXIS_ITEMS = 5;
 const MIN_MATRIX_CELLS = 3;
 const MAX_MATRIX_CELL_OPTIONS = 6;
+const MIN_DIAGRAM_NODES = 2;
+const MAX_DIAGRAM_NODES = 8;
+const MAX_DIAGRAM_EDGES = 12;
+const MAX_DIAGRAM_GROUPS = 4;
+const MIN_DIAGRAM_SLOTS = 2;
+const MAX_DIAGRAM_SLOTS = 8;
+const MAX_DIAGRAM_SLOT_OPTIONS = 6;
+const DIAGRAM_LAYOUTS = [
+  'vertical_flow',
+  'two_column',
+  'cycle',
+  'hierarchy',
+  'plain',
+] as const;
+
+const FORBIDDEN_RICH_CLOSED_RENDER_KEYS = new Set([
+  'html',
+  'svg',
+  'rawSvg',
+  'mermaid',
+  'markdown',
+  'widget',
+  'component',
+  'renderPayload',
+  'style',
+  'css',
+  'script',
+  'imageUrl',
+  'assetUrl',
+  'canvas',
+  'code',
+  'markup',
+]);
 
 export interface RichClosedQuestionValidationOptions {
   knownSourceChunkIds?: readonly string[] | ReadonlySet<string>;
@@ -116,6 +157,15 @@ export function validateRichClosedQuestion(
     );
   }
 
+  if (containsForbiddenRenderField(question)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_RENDER_PAYLOAD_FORBIDDEN',
+        'Rich closed questions cannot contain arbitrary render payload fields',
+      ),
+    );
+  }
+
   const questionKind = question.questionKind;
   if (!isRichClosedQuestionKind(questionKind)) {
     issues.push(
@@ -160,6 +210,9 @@ export function validateRichClosedQuestion(
       break;
     case 'institution_matrix':
       validateInstitutionMatrixQuestion(question, issues);
+      break;
+    case 'diagram_labeling':
+      validateDiagramLabelingQuestion(question, issues);
       break;
     case 'case_qualification':
       validateCaseQualificationQuestion(question, issues);
@@ -687,6 +740,105 @@ function hasDuplicateInstitutionMatrixCoordinates(
   return false;
 }
 
+function validateDiagramLabelingQuestion(
+  question: Record<string, unknown>,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  const diagram = readDiagram(question.diagram, issues, 'diagram');
+  const slots = readDiagramLabelingSlots(question.slots, issues, 'slots');
+  const correctValues = readDiagramLabelingValues(
+    question.correctValues,
+    issues,
+    'correctValues',
+  );
+
+  const groups = diagram?.groups ?? [];
+  const nodes = diagram?.nodes ?? [];
+  const edges = diagram?.edges ?? [];
+  const groupIds = [...idSet(groups)];
+  const nodeIds = [...idSet(nodes)];
+  const edgeIds = [...idSet(edges)];
+  const slotIds = [...idSet(slots)];
+  const correctedSlotIds = correctValues.map((value) => value.slotId);
+
+  if (
+    diagram === null ||
+    nodes.length < MIN_DIAGRAM_NODES ||
+    nodes.length > MAX_DIAGRAM_NODES ||
+    hasDuplicates(nodes.map((node) => node.id)) ||
+    groups.length > MAX_DIAGRAM_GROUPS ||
+    hasDuplicates(groups.map((group) => group.id)) ||
+    nodes.some(
+      (node) =>
+        node.groupId !== undefined &&
+        node.groupId !== null &&
+        !groupIds.includes(node.groupId),
+    ) ||
+    edges.length > MAX_DIAGRAM_EDGES ||
+    hasDuplicates(edges.map((edge) => edge.id)) ||
+    edges.some(
+      (edge) =>
+        !nodeIds.includes(edge.fromNodeId) || !nodeIds.includes(edge.toNodeId),
+    )
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DIAGRAM_LABELING_DIAGRAM_INVALID',
+        'Diagram labeling diagram must contain bounded semantic nodes, groups and edges',
+        'diagram',
+      ),
+    );
+  }
+
+  if (
+    slots.length < MIN_DIAGRAM_SLOTS ||
+    slots.length > MAX_DIAGRAM_SLOTS ||
+    hasDuplicates(slots.map((slot) => slot.id)) ||
+    slots.some((slot) => {
+      const knownAnchorIds = slot.anchorType === 'node' ? nodeIds : edgeIds;
+
+      return (
+        !knownAnchorIds.includes(slot.anchorId) ||
+        slot.options.length < MIN_CHOICES ||
+        slot.options.length > MAX_DIAGRAM_SLOT_OPTIONS ||
+        hasDuplicates(slot.options.map((option) => option.id))
+      );
+    })
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DIAGRAM_LABELING_SLOTS_INVALID',
+        'Diagram labeling slots must target known nodes/edges and carry bounded unique options',
+        'slots',
+      ),
+    );
+  }
+
+  if (
+    correctValues.length !== slotIds.length ||
+    hasDuplicates(correctedSlotIds) ||
+    correctValues.some((value) => {
+      const slot = slots.find((candidate) => candidate.id === value.slotId);
+
+      return (
+        slot === undefined ||
+        !slot.options.some((option) => option.id === value.optionId)
+      );
+    })
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DIAGRAM_LABELING_CORRECTION_INVALID',
+        'Diagram labeling correction must contain one existing option per slot',
+        'correctValues',
+      ),
+    );
+  }
+
+  validateOptionalInstruction(question.instruction, issues);
+  validateExplanation(question.explanation, issues);
+}
+
 function validateCaseQualificationQuestion(
   question: Record<string, unknown>,
   issues: RichClosedExerciseValidationIssue[],
@@ -1137,6 +1289,85 @@ function readInstitutionMatrixValues(
   return values;
 }
 
+function readDiagram(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedDiagram | null {
+  if (!isDiagram(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DIAGRAM_LABELING_DIAGRAM_INVALID',
+        'Diagram labeling diagram must be a bounded semantic object',
+        path,
+      ),
+    );
+    return null;
+  }
+
+  return value;
+}
+
+function readDiagramLabelingSlots(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedDiagramLabelingSlot[] {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DIAGRAM_LABELING_SLOTS_INVALID',
+        'Diagram labeling slots must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const slots = value.filter(isDiagramLabelingSlot);
+  if (slots.length !== value.length) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DIAGRAM_LABELING_SLOTS_INVALID',
+        'Diagram labeling slots must have ids, anchors, prompts and bounded options',
+        path,
+      ),
+    );
+  }
+
+  return slots;
+}
+
+function readDiagramLabelingValues(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedDiagramLabelingValue[] {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DIAGRAM_LABELING_CORRECTION_INVALID',
+        'Diagram labeling correction must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const values = value.filter(isDiagramLabelingValue);
+  if (values.length !== value.length) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DIAGRAM_LABELING_CORRECTION_INVALID',
+        'Diagram labeling correction values must have slotId and optionId',
+        path,
+      ),
+    );
+  }
+
+  return values;
+}
+
 function validateOptionalInstruction(
   instruction: unknown,
   issues: RichClosedExerciseValidationIssue[],
@@ -1303,11 +1534,133 @@ function isInstitutionMatrixValue(
   );
 }
 
+function isDiagram(value: unknown): value is RichClosedDiagram {
+  return (
+    isRecord(value) &&
+    (value.title === undefined ||
+      value.title === null ||
+      boundedString(value.title, 1, 180)) &&
+    (value.description === undefined ||
+      value.description === null ||
+      boundedString(
+        value.description,
+        1,
+        MAX_DESCRIBED_ITEM_DESCRIPTION_LENGTH,
+      )) &&
+    isDiagramLayout(value.layout) &&
+    Array.isArray(value.nodes) &&
+    value.nodes.every(isDiagramNode) &&
+    (value.groups === undefined ||
+      (Array.isArray(value.groups) && value.groups.every(isDiagramGroup))) &&
+    Array.isArray(value.edges) &&
+    value.edges.every(isDiagramEdge)
+  );
+}
+
+function isDiagramLayout(value: unknown): value is RichClosedDiagramLayout {
+  return (
+    typeof value === 'string' &&
+    DIAGRAM_LAYOUTS.includes(value as RichClosedDiagramLayout)
+  );
+}
+
+function isDiagramGroup(value: unknown): value is RichClosedDiagramGroup {
+  return isDescribedLabelItem(value);
+}
+
+function isDiagramNode(value: unknown): value is RichClosedDiagramNode {
+  if (!isRecord(value) || !isDescribedLabelItem(value)) {
+    return false;
+  }
+
+  const record = value as Record<string, unknown>;
+
+  return (
+    record.groupId === undefined ||
+    record.groupId === null ||
+    plainString(record.groupId)
+  );
+}
+
+function isDiagramEdge(value: unknown): value is RichClosedDiagramEdge {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    plainString(value.fromNodeId) &&
+    plainString(value.toNodeId) &&
+    (value.label === undefined ||
+      value.label === null ||
+      boundedString(value.label, 1, 220)) &&
+    (value.description === undefined ||
+      value.description === null ||
+      boundedString(
+        value.description,
+        1,
+        MAX_DESCRIBED_ITEM_DESCRIPTION_LENGTH,
+      ))
+  );
+}
+
+function isDiagramAnchorType(
+  value: unknown,
+): value is RichClosedDiagramAnchorType {
+  return value === 'node' || value === 'edge';
+}
+
+function isDiagramLabelingOption(value: unknown): value is {
+  id: string;
+  label: string;
+} {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    boundedString(value.label, 1, 220)
+  );
+}
+
+function isDiagramLabelingSlot(
+  value: unknown,
+): value is RichClosedDiagramLabelingSlot {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    isDiagramAnchorType(value.anchorType) &&
+    plainString(value.anchorId) &&
+    boundedString(value.prompt, 1, MAX_INSTRUCTION_LENGTH) &&
+    Array.isArray(value.options) &&
+    value.options.every(isDiagramLabelingOption)
+  );
+}
+
+function isDiagramLabelingValue(
+  value: unknown,
+): value is RichClosedDiagramLabelingValue {
+  return (
+    isRecord(value) && plainString(value.slotId) && plainString(value.optionId)
+  );
+}
+
 function containsFreeAnswerField(value: Record<string, unknown>): boolean {
   // Closed questions may contain private corrections, but never text-answer
   // shaped fields. This keeps V1-A separate from the open_question activity.
   return ['answerText', 'freeTextAnswer', 'textAnswer', 'modelAnswer'].some(
     (key) => Object.prototype.hasOwnProperty.call(value, key),
+  );
+}
+
+function containsForbiddenRenderField(value: unknown): boolean {
+  if (Array.isArray(value)) {
+    return value.some(containsForbiddenRenderField);
+  }
+
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return Object.entries(value).some(
+    ([key, nestedValue]) =>
+      FORBIDDEN_RICH_CLOSED_RENDER_KEYS.has(key) ||
+      containsForbiddenRenderField(nestedValue),
   );
 }
 

@@ -249,6 +249,37 @@ describe('rich closed question quality gate', () => {
     );
   });
 
+  it.each(['html', 'svg', 'mermaid', 'widget', 'renderPayload', 'imageUrl'])(
+    'rejects public pre-submit payloads containing arbitrary render key %s',
+    (key) => {
+      const exercise = richClosedExerciseFixture();
+      const publicExercise = {
+        ...toRichClosedPublicExercise(exercise),
+        questions: [
+          {
+            ...toRichClosedPublicExercise(exercise).questions[0],
+            metadata: {
+              nested: {
+                [key]: '<unsafe>',
+              },
+            },
+          },
+        ],
+      };
+
+      const result = evaluateRichClosedExerciseQuality(exercise, {
+        publicExercise,
+      });
+
+      expect(result.accepted).toBe(false);
+      expect(result.issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_PUBLIC_CORRECTION_LEAK',
+        }),
+      );
+    },
+  );
+
   it('detects basic definition prompts with or without accents', () => {
     const exercise = {
       ...richClosedExerciseFixture(),

@@ -1,5 +1,7 @@
 import type {
   RichClosedExercise,
+  RichClosedDiagram,
+  RichClosedDiagramLabelingSlot,
   RichClosedPublicChoice,
   RichClosedPublicExercise,
   RichClosedPublicExerciseEnvelope,
@@ -129,6 +131,16 @@ export function toRichClosedPublicQuestion(
         columns: cloneDescribedLabelItems(question.columns),
         cells: cloneInstitutionMatrixCells(question.cells),
       };
+    case 'diagram_labeling':
+      return {
+        ...base,
+        questionKind: question.questionKind,
+        ...(question.instruction === undefined
+          ? {}
+          : { instruction: question.instruction }),
+        diagram: cloneDiagram(question.diagram),
+        slots: cloneDiagramLabelingSlots(question.slots),
+      };
     case 'case_qualification':
       return {
         ...base,
@@ -211,5 +223,47 @@ function cloneInstitutionMatrixCells(
     columnId: cell.columnId,
     ...(cell.prompt === undefined ? {} : { prompt: cell.prompt }),
     options: publicChoices(cell.options),
+  }));
+}
+
+function cloneDiagram(diagram: RichClosedDiagram): RichClosedDiagram {
+  return {
+    ...(diagram.title === undefined ? {} : { title: diagram.title }),
+    ...(diagram.description === undefined
+      ? {}
+      : { description: diagram.description }),
+    layout: diagram.layout,
+    nodes: diagram.nodes.map((node) => ({
+      id: node.id,
+      label: node.label,
+      ...(node.description === undefined
+        ? {}
+        : { description: node.description }),
+      ...(node.groupId === undefined ? {} : { groupId: node.groupId }),
+    })),
+    ...(diagram.groups === undefined
+      ? {}
+      : { groups: cloneDescribedLabelItems(diagram.groups) }),
+    edges: diagram.edges.map((edge) => ({
+      id: edge.id,
+      fromNodeId: edge.fromNodeId,
+      toNodeId: edge.toNodeId,
+      ...(edge.label === undefined ? {} : { label: edge.label }),
+      ...(edge.description === undefined
+        ? {}
+        : { description: edge.description }),
+    })),
+  };
+}
+
+function cloneDiagramLabelingSlots(
+  slots: RichClosedDiagramLabelingSlot[],
+): RichClosedDiagramLabelingSlot[] {
+  return slots.map((slot) => ({
+    id: slot.id,
+    anchorType: slot.anchorType,
+    anchorId: slot.anchorId,
+    prompt: slot.prompt,
+    options: publicChoices(slot.options),
   }));
 }

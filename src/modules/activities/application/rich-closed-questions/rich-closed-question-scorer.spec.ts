@@ -4,6 +4,7 @@ import {
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
   richClosedV1CExerciseFixture,
+  richClosedV1CFullExerciseFixture,
 } from './rich-closed-question.fixtures';
 import { scoreRichClosedExerciseSubmission } from './rich-closed-question-scorer';
 import type { RichClosedAnswer } from './rich-closed-question.types';
@@ -651,6 +652,190 @@ describe('scoreRichClosedExerciseSubmission', () => {
     );
   });
 
+  it('scores diagram_labeling V1-C answers', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CFullExerciseFixture(),
+      answers: correctAnswersV1CFull(),
+    });
+
+    expect(result).toMatchObject({
+      correctAnswers: 12,
+      totalQuestions: 12,
+      score: 1,
+    });
+    expect(
+      result.items.find((item) => item.questionId === 'diagram-labeling-1'),
+    ).toMatchObject({
+      isCorrect: true,
+      correction: {
+        correctValues: [
+          {
+            slotId: 'slot-government-role',
+            optionId: 'option-government',
+          },
+          {
+            slotId: 'slot-censure',
+            optionId: 'option-motion-censure',
+          },
+          {
+            slotId: 'slot-nomination',
+            optionId: 'option-nomination',
+          },
+        ],
+      },
+    });
+  });
+
+  it('marks one wrong diagram_labeling value as incorrect without partial scoring', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CFullExerciseFixture(),
+      answers: replaceV1CFullAnswer({
+        questionId: 'diagram-labeling-1',
+        questionKind: 'diagram_labeling',
+        values: [
+          {
+            slotId: 'slot-government-role',
+            optionId: 'option-president',
+          },
+          {
+            slotId: 'slot-censure',
+            optionId: 'option-motion-censure',
+          },
+          {
+            slotId: 'slot-nomination',
+            optionId: 'option-nomination',
+          },
+        ],
+      }),
+    });
+
+    expect(
+      result.items.find((item) => item.questionId === 'diagram-labeling-1'),
+    ).toMatchObject({
+      isCorrect: false,
+      partialScore: 0,
+    });
+  });
+
+  it('keeps diagram_labeling value comparison structured when ids contain separators', () => {
+    const exercise = {
+      ...richClosedV1CFullExerciseFixture(),
+      questions: richClosedV1CFullExerciseFixture().questions.map((question) =>
+        question.questionKind === 'diagram_labeling'
+          ? {
+              ...question,
+              slots: [
+                {
+                  id: 'slot:a',
+                  anchorType: 'node',
+                  anchorId: 'node-government',
+                  prompt: 'Slot A',
+                  options: [
+                    { id: 'option:b', label: 'Option B' },
+                    { id: 'option:b:d', label: 'Option BD' },
+                  ],
+                },
+                {
+                  id: 'slot:a:b',
+                  anchorType: 'node',
+                  anchorId: 'node-assembly',
+                  prompt: 'Slot AB',
+                  options: [
+                    { id: 'option:c', label: 'Option C' },
+                    { id: 'option:d', label: 'Option D' },
+                  ],
+                },
+              ],
+              correctValues: [
+                { slotId: 'slot:a', optionId: 'option:b' },
+                { slotId: 'slot:a:b', optionId: 'option:c' },
+              ],
+            }
+          : question,
+      ),
+    };
+
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise,
+      answers: replaceV1CFullAnswer({
+        questionId: 'diagram-labeling-1',
+        questionKind: 'diagram_labeling',
+        values: [
+          { slotId: 'slot:a', optionId: 'option:b:d' },
+          { slotId: 'slot:a:b', optionId: 'option:c' },
+        ],
+      }),
+    });
+
+    expect(
+      result.items.find((item) => item.questionId === 'diagram-labeling-1'),
+    ).toMatchObject({
+      isCorrect: false,
+      partialScore: 0,
+    });
+  });
+
+  it('rejects duplicate, unknown, incomplete, invalid and render-bearing diagram_labeling answers', () => {
+    expectInvalidV1CFull(
+      replaceV1CFullAnswer({
+        questionId: 'diagram-labeling-1',
+        questionKind: 'diagram_labeling',
+        values: [
+          { slotId: 'slot-government-role', optionId: 'option-government' },
+          { slotId: 'slot-government-role', optionId: 'option-president' },
+          { slotId: 'slot-nomination', optionId: 'option-nomination' },
+        ],
+      }),
+    );
+    expectInvalidV1CFull(
+      replaceV1CFullAnswer({
+        questionId: 'diagram-labeling-1',
+        questionKind: 'diagram_labeling',
+        values: [
+          { slotId: 'unknown-slot', optionId: 'option-government' },
+          { slotId: 'slot-censure', optionId: 'option-motion-censure' },
+          { slotId: 'slot-nomination', optionId: 'option-nomination' },
+        ],
+      }),
+    );
+    expectInvalidV1CFull(
+      replaceV1CFullAnswer({
+        questionId: 'diagram-labeling-1',
+        questionKind: 'diagram_labeling',
+        values: [
+          { slotId: 'slot-government-role', optionId: 'option-motion-censure' },
+          { slotId: 'slot-censure', optionId: 'option-motion-censure' },
+          { slotId: 'slot-nomination', optionId: 'option-nomination' },
+        ],
+      }),
+    );
+    expectInvalidV1CFull(
+      replaceV1CFullAnswer({
+        questionId: 'diagram-labeling-1',
+        questionKind: 'diagram_labeling',
+        values: [
+          { slotId: 'slot-government-role', optionId: 'option-government' },
+          { slotId: 'slot-censure', optionId: 'option-motion-censure' },
+        ],
+      }),
+    );
+    expectInvalidV1CFull(
+      replaceV1CFullAnswer({
+        questionId: 'diagram-labeling-1',
+        questionKind: 'diagram_labeling',
+        values: [
+          { slotId: 'slot-government-role', optionId: 'option-government' },
+          { slotId: 'slot-censure', optionId: 'option-motion-censure' },
+          { slotId: 'slot-nomination', optionId: 'option-nomination' },
+        ],
+        renderPayload: { widget: 'free-form' },
+      }),
+    );
+  });
+
   it('rejects incomplete ordering answers', () => {
     expect(() =>
       scoreRichClosedExerciseSubmission({
@@ -818,6 +1003,16 @@ function expectInvalidV1C(answers: unknown[]) {
   ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
 }
 
+function expectInvalidV1CFull(answers: unknown[]) {
+  expect(() =>
+    scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CFullExerciseFixture(),
+      answers,
+    }),
+  ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+}
+
 function replaceAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return correctAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
@@ -848,6 +1043,17 @@ function replaceV1CAnswer(answer: unknown): unknown[] {
       : {};
 
   return correctAnswersV1C().map((currentAnswer) =>
+    currentAnswer.questionId === record.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceV1CFullAnswer(answer: unknown): unknown[] {
+  const record =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { questionId?: unknown })
+      : {};
+
+  return correctAnswersV1CFull().map((currentAnswer) =>
     currentAnswer.questionId === record.questionId ? answer : currentAnswer,
   );
 }
@@ -949,6 +1155,30 @@ function correctAnswersV1C(): RichClosedAnswer[] {
         {
           cellId: 'cell-assembly-action',
           optionId: 'option-action-censure',
+        },
+      ],
+    },
+  ];
+}
+
+function correctAnswersV1CFull(): RichClosedAnswer[] {
+  return [
+    ...correctAnswersV1C(),
+    {
+      questionId: 'diagram-labeling-1',
+      questionKind: 'diagram_labeling',
+      values: [
+        {
+          slotId: 'slot-government-role',
+          optionId: 'option-government',
+        },
+        {
+          slotId: 'slot-censure',
+          optionId: 'option-motion-censure',
+        },
+        {
+          slotId: 'slot-nomination',
+          optionId: 'option-nomination',
         },
       ],
     },

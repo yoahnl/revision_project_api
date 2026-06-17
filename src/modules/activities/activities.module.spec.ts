@@ -955,6 +955,19 @@ function richClosedPublicExercise(): RichClosedPublicExerciseEnvelope {
               options: cell.options.map(({ id, label }) => ({ id, label })),
             })),
           };
+        case 'diagram_labeling':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            ...(question.instruction === undefined
+              ? {}
+              : { instruction: question.instruction }),
+            diagram: question.diagram,
+            slots: question.slots.map((slot) => ({
+              ...slot,
+              options: slot.options.map(({ id, label }) => ({ id, label })),
+            })),
+          };
         case 'case_qualification':
           return {
             ...base,

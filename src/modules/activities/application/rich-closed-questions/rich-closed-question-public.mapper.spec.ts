@@ -8,6 +8,7 @@ import {
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
   richClosedV1CExerciseFixture,
+  richClosedV1CFullExerciseFixture,
 } from './rich-closed-question.fixtures';
 
 describe('rich closed question public mapper', () => {
@@ -23,6 +24,7 @@ describe('rich closed question public mapper', () => {
     'true_false_grid',
     'cause_consequence',
     'institution_matrix',
+    'diagram_labeling',
   ] as const)('maps %s without leaking correction fields', (questionKind) => {
     const publicQuestion = toRichClosedPublicQuestion(
       richClosedQuestionFixture(questionKind),
@@ -39,6 +41,9 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('correctYear');
     expect(serialized).not.toContain('correctionPayload');
     expect(serialized).not.toContain('explanation');
+    expect(serialized).not.toContain('rawSvg');
+    expect(serialized).not.toContain('mermaid');
+    expect(serialized).not.toContain('renderPayload');
   });
 
   it('maps a full exercise without leaking private correction data', () => {
@@ -141,6 +146,41 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('explanation');
     expect(serialized).not.toContain('correction');
     expect(serialized).not.toContain('score');
+  });
+
+  it('maps a V1-C full diagram exercise without leaking private correction or render payloads', () => {
+    const publicExercise = toRichClosedPublicExercise(
+      richClosedV1CFullExerciseFixture(),
+    );
+    const serialized = JSON.stringify(publicExercise);
+
+    expect(publicExercise.questions).toHaveLength(12);
+    expect(
+      publicExercise.questions.map((question) => question.questionKind),
+    ).toEqual([
+      'single_choice',
+      'multiple_choice',
+      'matching',
+      'ordering',
+      'case_qualification',
+      'error_detection',
+      'timeline',
+      'date_slider',
+      'true_false_grid',
+      'cause_consequence',
+      'institution_matrix',
+      'diagram_labeling',
+    ]);
+    expect(serialized).toContain('diagram');
+    expect(serialized).toContain('slots');
+    expect(serialized).not.toContain('correctValues');
+    expect(serialized).not.toContain('explanation');
+    expect(serialized).not.toContain('correction');
+    expect(serialized).not.toContain('score');
+    expect(serialized).not.toContain('rawSvg');
+    expect(serialized).not.toContain('mermaid');
+    expect(serialized).not.toContain('widget');
+    expect(serialized).not.toContain('renderPayload');
   });
 
   it('removes internal choice feedback from public choice payloads', () => {

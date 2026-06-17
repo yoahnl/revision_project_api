@@ -7,6 +7,7 @@ import {
   type RichClosedCauseConsequencePair,
   type RichClosedCorrectionItem,
   type RichClosedCorrectionPayload,
+  type RichClosedDiagramLabelingValue,
   type RichClosedExercise,
   type RichClosedExerciseResult,
   type RichClosedInstitutionMatrixValue,
@@ -145,6 +146,12 @@ function normalizeAnswer(answer: unknown): RichClosedAnswer {
         questionId,
         questionKind,
         values: readInstitutionMatrixValues(answer.values),
+      };
+    case 'diagram_labeling':
+      return {
+        questionId,
+        questionKind,
+        values: readDiagramLabelingValues(answer.values),
       };
     case 'error_detection':
       return {
@@ -395,6 +402,25 @@ function scoreQuestion(
         },
       });
     }
+    case 'diagram_labeling': {
+      const diagramLabelingAnswer = answer as Extract<
+        RichClosedAnswer,
+        { questionKind: 'diagram_labeling' }
+      >;
+      assertKnownDiagramLabelingValues(diagramLabelingAnswer.values, question);
+
+      return buildCorrectionItem({
+        question,
+        answer: diagramLabelingAnswer,
+        isCorrect: areDiagramLabelingValuesEqual(
+          diagramLabelingAnswer.values,
+          question.correctValues,
+        ),
+        correction: {
+          correctValues: cloneDiagramLabelingValues(question.correctValues),
+        },
+      });
+    }
   }
 }
 
@@ -541,6 +567,35 @@ function assertKnownInstitutionMatrixValues(
   }
 }
 
+function assertKnownDiagramLabelingValues(
+  values: RichClosedDiagramLabelingValue[],
+  question: Extract<RichClosedQuestion, { questionKind: 'diagram_labeling' }>,
+) {
+  const slotIds = question.slots.map((slot) => slot.id);
+  const slotsById = new Map(question.slots.map((slot) => [slot.id, slot]));
+  const submittedSlotIds = values.map((value) => value.slotId);
+
+  if (
+    values.length === 0 ||
+    values.length !== question.slots.length ||
+    hasDuplicates(submittedSlotIds)
+  ) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+
+  for (const value of values) {
+    const slot = slotsById.get(value.slotId);
+
+    if (
+      !slotIds.includes(value.slotId) ||
+      !slot ||
+      !slot.options.some((option) => option.id === value.optionId)
+    ) {
+      throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+    }
+  }
+}
+
 function readRequiredString(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
@@ -637,6 +692,25 @@ function readInstitutionMatrixValues(
   });
 }
 
+function readDiagramLabelingValues(
+  value: unknown,
+): RichClosedDiagramLabelingValue[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+
+  return value.map((item) => {
+    if (!isRecord(item)) {
+      throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+    }
+
+    return {
+      slotId: readRequiredString(item.slotId),
+      optionId: readRequiredString(item.optionId),
+    };
+  });
+}
+
 function hasForbiddenSubmitField(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.some(hasForbiddenSubmitField);
@@ -663,7 +737,8 @@ function hasForbiddenSubmitField(value: unknown): boolean {
       key === 'workedSteps' ||
       key === 'answersPayload' ||
       key === 'expectedAnswer' ||
-      key === 'expectedAnswers'
+      key === 'expectedAnswers' ||
+      isForbiddenRenderKey(key)
     ) {
       return true;
     }
@@ -693,6 +768,8 @@ function cloneAnswer(answer: RichClosedAnswer): RichClosedAnswer {
       return { ...answer, pairs: cloneCauseConsequencePairs(answer.pairs) };
     case 'institution_matrix':
       return { ...answer, values: cloneInstitutionMatrixValues(answer.values) };
+    case 'diagram_labeling':
+      return { ...answer, values: cloneDiagramLabelingValues(answer.values) };
     case 'error_detection':
       return { ...answer };
   }
@@ -717,6 +794,12 @@ function cloneCauseConsequencePairs(
 function cloneInstitutionMatrixValues(
   values: RichClosedInstitutionMatrixValue[],
 ): RichClosedInstitutionMatrixValue[] {
+  return values.map((value) => ({ ...value }));
+}
+
+function cloneDiagramLabelingValues(
+  values: RichClosedDiagramLabelingValue[],
+): RichClosedDiagramLabelingValue[] {
   return values.map((value) => ({ ...value }));
 }
 
@@ -762,6 +845,16 @@ function areInstitutionMatrixValuesEqual(
   );
 }
 
+function areDiagramLabelingValuesEqual(
+  left: RichClosedDiagramLabelingValue[],
+  right: RichClosedDiagramLabelingValue[],
+) {
+  return areStringSetsEqual(
+    diagramLabelingValueKeys(left),
+    diagramLabelingValueKeys(right),
+  );
+}
+
 function areStringArraysEqual(left: string[], right: string[]) {
   return (
     left.length === right.length &&
@@ -770,23 +863,54 @@ function areStringArraysEqual(left: string[], right: string[]) {
 }
 
 function pairKeys(pairs: RichClosedPair[]): string[] {
-  return pairs.map((pair) => `${pair.leftId}:${pair.rightId}`);
+  return pairs.map((pair) => tupleKey(pair.leftId, pair.rightId));
 }
 
 function trueFalseValueKeys(values: RichClosedTrueFalseValue[]): string[] {
-  return values.map((value) => `${value.rowId}:${value.value}`);
+  return values.map((value) => tupleKey(value.rowId, value.value));
 }
 
 function causeConsequencePairKeys(
   pairs: RichClosedCauseConsequencePair[],
 ): string[] {
-  return pairs.map((pair) => `${pair.causeId}:${pair.consequenceId}`);
+  return pairs.map((pair) => tupleKey(pair.causeId, pair.consequenceId));
 }
 
 function institutionMatrixValueKeys(
   values: RichClosedInstitutionMatrixValue[],
 ): string[] {
-  return values.map((value) => `${value.cellId}:${value.optionId}`);
+  return values.map((value) => tupleKey(value.cellId, value.optionId));
+}
+
+function diagramLabelingValueKeys(
+  values: RichClosedDiagramLabelingValue[],
+): string[] {
+  return values.map((value) => tupleKey(value.slotId, value.optionId));
+}
+
+function tupleKey(...values: Array<string | boolean>): string {
+  return JSON.stringify(values);
+}
+
+function isForbiddenRenderKey(key: string): boolean {
+  return [
+    'html',
+    'svg',
+    'rawSvg',
+    'mermaid',
+    'markdown',
+    'widget',
+    'component',
+    'renderPayload',
+    'style',
+    'css',
+    'script',
+    'imageUrl',
+    'assetUrl',
+    'canvas',
+    'code',
+    'markup',
+  ].includes(key);
 }
 
 function hasDuplicates(values: string[]): boolean {

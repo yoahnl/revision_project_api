@@ -719,6 +719,12 @@ function validateRichClosedAnswer(input: unknown): RichClosedAnswer {
         questionKind,
         values: validateRichClosedInstitutionMatrixValues(answer.values),
       };
+    case 'diagram_labeling':
+      return {
+        questionId,
+        questionKind,
+        values: validateRichClosedDiagramLabelingValues(answer.values),
+      };
     case 'error_detection':
       return {
         questionId,
@@ -827,6 +833,32 @@ function validateRichClosedInstitutionMatrixValues(input: unknown): Array<{
   });
 }
 
+function validateRichClosedDiagramLabelingValues(input: unknown): Array<{
+  slotId: string;
+  optionId: string;
+}> {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new BadRequestException(
+      'Rich closed diagram labeling values are required',
+    );
+  }
+
+  return input.map((value) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new BadRequestException(
+        'Rich closed diagram labeling value is invalid',
+      );
+    }
+
+    const record = value as Record<string, unknown>;
+
+    return {
+      slotId: validateRequiredId(record.slotId, 'Slot id'),
+      optionId: validateRequiredId(record.optionId, 'Option id'),
+    };
+  });
+}
+
 function validateRichClosedYear(input: unknown): number {
   if (!Number.isInteger(input)) {
     throw new BadRequestException('Rich closed year must be an integer');
@@ -861,13 +893,35 @@ function containsForbiddenRichClosedSubmitField(value: unknown): boolean {
       key === 'workedSteps' ||
       key === 'answersPayload' ||
       key === 'expectedAnswer' ||
-      key === 'expectedAnswers'
+      key === 'expectedAnswers' ||
+      isForbiddenRichClosedRenderKey(key)
     ) {
       return true;
     }
 
     return containsForbiddenRichClosedSubmitField(nested);
   });
+}
+
+function isForbiddenRichClosedRenderKey(key: string): boolean {
+  return [
+    'html',
+    'svg',
+    'rawSvg',
+    'mermaid',
+    'markdown',
+    'widget',
+    'component',
+    'renderPayload',
+    'style',
+    'css',
+    'script',
+    'imageUrl',
+    'assetUrl',
+    'canvas',
+    'code',
+    'markup',
+  ].includes(key);
 }
 
 function isRichClosedQuestionKind(

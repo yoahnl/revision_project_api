@@ -8,6 +8,7 @@ import {
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
   richClosedV1CExerciseFixture,
+  richClosedV1CFullExerciseFixture,
 } from './rich-closed-question.fixtures';
 import type { RichClosedQuestion } from './rich-closed-question.types';
 
@@ -24,6 +25,7 @@ describe('rich closed question validator', () => {
     'true_false_grid',
     'cause_consequence',
     'institution_matrix',
+    'diagram_labeling',
   ] as const)('accepts a valid rich closed %s question', (questionKind) => {
     const result = validateRichClosedQuestion(
       richClosedQuestionFixture(questionKind),
@@ -37,7 +39,7 @@ describe('rich closed question validator', () => {
   it('rejects a kind outside the rich closed allowlist', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
-      questionKind: 'diagram_labeling',
+      questionKind: 'calculation_mcq',
     } as unknown as RichClosedQuestion;
 
     const result = validateRichClosedQuestion(question);
@@ -52,6 +54,18 @@ describe('rich closed question validator', () => {
     const result = validateRichClosedExercise(richClosedV1CExerciseFixture(), {
       knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
     });
+
+    expect(result.accepted).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('accepts a valid V1-C diagram labeling exercise fixture', () => {
+    const result = validateRichClosedExercise(
+      richClosedV1CFullExerciseFixture(),
+      {
+        knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
+      },
+    );
 
     expect(result.accepted).toBe(true);
     expect(result.issues).toEqual([]);
@@ -658,6 +672,214 @@ describe('rich closed question validator', () => {
       );
     }
   });
+
+  it('requires diagram_labeling diagram, slots and corrections to be bounded and coherent', () => {
+    const base = richClosedQuestionFixture('diagram_labeling') as Extract<
+      RichClosedQuestion,
+      { questionKind: 'diagram_labeling' }
+    >;
+    const tooFewNodes = {
+      ...base,
+      diagram: { ...base.diagram, nodes: base.diagram.nodes.slice(0, 1) },
+    };
+    const tooManyNodes = {
+      ...base,
+      diagram: {
+        ...base.diagram,
+        nodes: Array.from({ length: 9 }, (_, index) => ({
+          id: `node-${index + 1}`,
+          label: `Noeud ${index + 1}`,
+        })),
+      },
+    };
+    const tooManyEdges = {
+      ...base,
+      diagram: {
+        ...base.diagram,
+        edges: Array.from({ length: 13 }, (_, index) => ({
+          id: `edge-${index + 1}`,
+          fromNodeId: 'node-president',
+          toNodeId: 'node-government',
+        })),
+      },
+    };
+    const tooManyGroups = {
+      ...base,
+      diagram: {
+        ...base.diagram,
+        groups: Array.from({ length: 5 }, (_, index) => ({
+          id: `group-${index + 1}`,
+          label: `Groupe ${index + 1}`,
+        })),
+      },
+    };
+    const unknownFromNode = {
+      ...base,
+      diagram: {
+        ...base.diagram,
+        edges: [
+          { ...base.diagram.edges[0], fromNodeId: 'unknown-node' },
+          ...base.diagram.edges.slice(1),
+        ],
+      },
+    };
+    const unknownToNode = {
+      ...base,
+      diagram: {
+        ...base.diagram,
+        edges: [
+          { ...base.diagram.edges[0], toNodeId: 'unknown-node' },
+          ...base.diagram.edges.slice(1),
+        ],
+      },
+    };
+    const unknownGroup = {
+      ...base,
+      diagram: {
+        ...base.diagram,
+        nodes: [
+          { ...base.diagram.nodes[0], groupId: 'unknown-group' },
+          ...base.diagram.nodes.slice(1),
+        ],
+      },
+    };
+    const tooFewSlots = {
+      ...base,
+      slots: base.slots.slice(0, 1),
+    };
+    const tooManySlots = {
+      ...base,
+      slots: Array.from({ length: 9 }, (_, index) => ({
+        ...base.slots[0],
+        id: `slot-${index + 1}`,
+      })),
+    };
+    const invalidAnchorType = {
+      ...base,
+      slots: [{ ...base.slots[0], anchorType: 'area' }, ...base.slots.slice(1)],
+    };
+    const unknownAnchor = {
+      ...base,
+      slots: [
+        { ...base.slots[0], anchorId: 'unknown-anchor' },
+        ...base.slots.slice(1),
+      ],
+    };
+    const tooFewOptions = {
+      ...base,
+      slots: [
+        { ...base.slots[0], options: [{ id: 'option-1', label: 'Oui' }] },
+        ...base.slots.slice(1),
+      ],
+    };
+    const tooManyOptions = {
+      ...base,
+      slots: [
+        {
+          ...base.slots[0],
+          options: Array.from({ length: 7 }, (_, index) => ({
+            id: `option-${index + 1}`,
+            label: `Option ${index + 1}`,
+          })),
+        },
+        ...base.slots.slice(1),
+      ],
+    };
+    const duplicateSlots = {
+      ...base,
+      slots: [{ ...base.slots[0] }, { ...base.slots[0] }],
+    };
+    const duplicateOptions = {
+      ...base,
+      slots: [
+        {
+          ...base.slots[0],
+          options: [
+            { id: 'option-a', label: 'Option A' },
+            { id: 'option-a', label: 'Option B' },
+          ],
+        },
+        ...base.slots.slice(1),
+      ],
+    };
+    const incompleteCorrection = {
+      ...base,
+      correctValues: base.correctValues.slice(0, -1),
+    };
+    const unknownSlotCorrection = {
+      ...base,
+      correctValues: [
+        ...base.correctValues.slice(0, -1),
+        { slotId: 'unknown-slot', optionId: 'option-government' },
+      ],
+    };
+    const unknownOptionCorrection = {
+      ...base,
+      correctValues: [
+        { slotId: base.slots[0].id, optionId: 'unknown-option' },
+        ...base.correctValues.slice(1),
+      ],
+    };
+
+    for (const question of [
+      tooFewNodes,
+      tooManyNodes,
+      tooManyEdges,
+      tooManyGroups,
+      unknownFromNode,
+      unknownToNode,
+      unknownGroup,
+    ]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_DIAGRAM_LABELING_DIAGRAM_INVALID',
+        }),
+      );
+    }
+    for (const question of [
+      tooFewSlots,
+      tooManySlots,
+      invalidAnchorType,
+      unknownAnchor,
+      tooFewOptions,
+      tooManyOptions,
+      duplicateSlots,
+      duplicateOptions,
+    ]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_DIAGRAM_LABELING_SLOTS_INVALID',
+        }),
+      );
+    }
+    for (const question of [
+      incompleteCorrection,
+      unknownSlotCorrection,
+      unknownOptionCorrection,
+    ]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_DIAGRAM_LABELING_CORRECTION_INVALID',
+        }),
+      );
+    }
+  });
+
+  it.each(['html', 'svg', 'mermaid', 'widget', 'renderPayload'] as const)(
+    'rejects arbitrary render field %s',
+    (field) => {
+      const question = {
+        ...richClosedQuestionFixture('diagram_labeling'),
+        [field]: '<unsafe>',
+      };
+
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_RENDER_PAYLOAD_FORBIDDEN',
+        }),
+      );
+    },
+  );
 
   it('requires case_qualification to have a short case and a unique correction', () => {
     const question = {
