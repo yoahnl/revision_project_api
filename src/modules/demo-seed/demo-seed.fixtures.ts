@@ -1,3 +1,9 @@
+import { richClosedExerciseFixture } from '../activities/application/rich-closed-questions/rich-closed-question.fixtures';
+import type {
+  RichClosedExercise,
+  RichClosedQuestion,
+} from '../activities/application/rich-closed-questions/rich-closed-question.types';
+
 type DemoSeedEnv = {
   NODE_ENV?: string;
   DEMO_SEED_CONFIRM?: string;
@@ -146,6 +152,47 @@ export type DemoSeedRevisionSheetSectionSourceFixture = {
   relevanceScore: number;
 };
 
+export type DemoSeedRichClosedActivitySessionFixture = {
+  id: string;
+  studentId: string;
+  subjectId: string;
+  knowledgeUnitId: string;
+  documentId: string;
+  version: number;
+  type: 'RICH_CLOSED_EXERCISE';
+  status: 'STARTED';
+  generationFlowName: string;
+  generationProvider: string;
+  generationModel: string;
+  generationPromptVersion: string;
+  generationSchemaVersion: string;
+  generationInputSize: number;
+};
+
+export type DemoSeedRichClosedExercisePayloadFixture = {
+  id: string;
+  activitySessionId: string;
+  version: string;
+  title: string;
+  subjectId: string;
+  documentId: string;
+  knowledgeUnitId: string;
+  exercisePayload: RichClosedExercise;
+  generationMetadata: {
+    flowName: string;
+    provider: string;
+    model: string;
+    promptVersion: string;
+    schemaVersion: string;
+    inputSize: number;
+  };
+  qualityMetrics: {
+    accepted: true;
+    questionKinds: string[];
+    sourceChunkIds: string[];
+  };
+};
+
 export type DemoSeedFixtures = {
   subject: DemoSeedSubjectFixture;
   document: DemoSeedDocumentFixture;
@@ -159,6 +206,8 @@ export type DemoSeedFixtures = {
   revisionSheet: DemoSeedRevisionSheetFixture;
   revisionSheetSections: DemoSeedRevisionSheetSectionFixture[];
   revisionSheetSectionSources: DemoSeedRevisionSheetSectionSourceFixture[];
+  richClosedActivitySession: DemoSeedRichClosedActivitySessionFixture;
+  richClosedExercisePayload: DemoSeedRichClosedExercisePayloadFixture;
 };
 
 export const demoSeedIds = {
@@ -167,6 +216,9 @@ export const demoSeedIds = {
   goalId: 'demo-revision-goal-constitution',
   summaryId: 'demo-summary-constitution',
   revisionSheetId: 'demo-sheet-constitution',
+  richClosedActivitySessionId: 'demo-rich-closed-session-regime-parlementaire',
+  richClosedExercisePayloadId: 'demo-rich-closed-payload-regime-parlementaire',
+  richClosedExerciseId: 'demo-rich-closed-exercise-regime-parlementaire-v1a',
   chunkIds: [
     'demo-chunk-constitution-001',
     'demo-chunk-constitution-002',
@@ -265,6 +317,8 @@ export function buildDemoSeedFixtures(input: {
     revisionSheet: buildRevisionSheet(input.studentId, generatedAt),
     revisionSheetSections: buildRevisionSheetSections(),
     revisionSheetSectionSources: buildRevisionSheetSectionSources(),
+    richClosedActivitySession: buildRichClosedActivitySession(input.studentId),
+    richClosedExercisePayload: buildRichClosedExercisePayload(),
   };
 }
 
@@ -277,6 +331,8 @@ export function buildDemoSeedPlan(fixtures: DemoSeedFixtures) {
       ),
       revisionSheetIds: [fixtures.revisionSheet.id],
       summaryIds: [fixtures.summary.id],
+      richClosedExercisePayloadIds: [fixtures.richClosedExercisePayload.id],
+      richClosedActivitySessionIds: [fixtures.richClosedActivitySession.id],
       revisionGoalIds: [fixtures.goal.id],
       knowledgeUnitIds: fixtures.knowledgeUnits.map((unit) => unit.id),
       chunkIds: fixtures.chunks.map((chunk) => chunk.id),
@@ -632,5 +688,101 @@ function sectionSource(
     subjectId: demoSeedIds.subjectId,
     chunkId: demoSeedIds.chunkIds[chunkIndex],
     relevanceScore,
+  };
+}
+
+function buildRichClosedActivitySession(
+  studentId: string,
+): DemoSeedRichClosedActivitySessionFixture {
+  return {
+    id: demoSeedIds.richClosedActivitySessionId,
+    studentId,
+    subjectId: demoSeedIds.subjectId,
+    knowledgeUnitId: demoSeedIds.knowledgeUnitIds.rationalizedParliamentary,
+    documentId: demoSeedIds.documentId,
+    version: 1,
+    type: 'RICH_CLOSED_EXERCISE',
+    status: 'STARTED',
+    generationFlowName: 'demoSeedRichClosedExercise',
+    generationProvider: 'demo-seed',
+    generationModel: 'demo-fixture',
+    generationPromptVersion: demoSeedVersion,
+    generationSchemaVersion: demoSeedVersion,
+    generationInputSize: 0,
+  };
+}
+
+function buildRichClosedExercisePayload(): DemoSeedRichClosedExercisePayloadFixture {
+  const exercise = buildRichClosedExercise();
+  const sourceChunkIds = Array.from(
+    new Set(exercise.questions.flatMap((question) => question.sourceChunkIds)),
+  );
+
+  return {
+    id: demoSeedIds.richClosedExercisePayloadId,
+    activitySessionId: demoSeedIds.richClosedActivitySessionId,
+    version: exercise.version,
+    title: exercise.title,
+    subjectId: demoSeedIds.subjectId,
+    documentId: demoSeedIds.documentId,
+    knowledgeUnitId: demoSeedIds.knowledgeUnitIds.rationalizedParliamentary,
+    exercisePayload: exercise,
+    generationMetadata: {
+      flowName: 'demoSeedRichClosedExercise',
+      provider: 'demo-seed',
+      model: 'demo-fixture',
+      promptVersion: demoSeedVersion,
+      schemaVersion: demoSeedVersion,
+      inputSize: 0,
+    },
+    qualityMetrics: {
+      accepted: true,
+      questionKinds: exercise.questions.map(
+        (question) => question.questionKind,
+      ),
+      sourceChunkIds,
+    },
+  };
+}
+
+function buildRichClosedExercise(): RichClosedExercise {
+  const exercise = richClosedExerciseFixture();
+
+  return {
+    ...exercise,
+    id: demoSeedIds.richClosedExerciseId,
+    title: 'Régime parlementaire rationalisé — exercice fermé riche V1-A',
+    subjectId: demoSeedIds.subjectId,
+    documentId: demoSeedIds.documentId,
+    knowledgeUnitId: demoSeedIds.knowledgeUnitIds.rationalizedParliamentary,
+    questions: exercise.questions.map((question) =>
+      withDemoSources(question, demoSourcesForQuestion(question.questionKind)),
+    ),
+  };
+}
+
+function demoSourcesForQuestion(
+  questionKind: RichClosedQuestion['questionKind'],
+): string[] {
+  switch (questionKind) {
+    case 'single_choice':
+    case 'multiple_choice':
+    case 'case_qualification':
+      return [demoSeedIds.chunkIds[1], demoSeedIds.chunkIds[3]];
+    case 'matching':
+    case 'ordering':
+      return [demoSeedIds.chunkIds[3]];
+    case 'error_detection':
+      return [demoSeedIds.chunkIds[1]];
+  }
+}
+
+function withDemoSources(
+  question: RichClosedQuestion,
+  sourceChunkIds: string[],
+): RichClosedQuestion {
+  return {
+    ...question,
+    sourceChunkIds,
   };
 }

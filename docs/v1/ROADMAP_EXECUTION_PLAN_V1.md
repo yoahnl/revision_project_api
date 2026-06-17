@@ -8,6 +8,8 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 | V1-012D | Dokploy runtime fix génération rich closed | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_012D_DOKPLOY_RICH_CLOSED_RUNTIME_FIX.md |
 | V1-013 | Today integration V1 | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_013_TODAY_INTEGRATION_V1.md |
 | V1-014 | Revision session integration V1 | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_014_REVISION_SESSION_INTEGRATION_V1.md |
+| V1-015 | Rich demo fixtures V1 | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_015_016_RICH_DEMO_SEED_AND_SMOKE.md |
+| V1-016 | E2E/smoke rich questions V1 | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_015_016_RICH_DEMO_SEED_AND_SMOKE.md |
 
 ## Lots détaillés
 
@@ -42,3 +44,19 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 - Périmètre inclus : contrat session, coach next-action, persistance enum, contrôleur, tests anti-fuite.
 - Non-objectifs : génération de questions rich closed depuis la session, rendu de widget arbitraire, correction pré-submit, provider IA réel dans les tests.
 - Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_014_REVISION_SESSION_INTEGRATION_V1.md`.
+
+### V1-015 — Rich demo fixtures V1
+
+- Objectif : disposer d'un seed démo riche fermé V1-A stable, rejouable et synthétique.
+- Pourquoi maintenant : les parcours Today, sessions de révision et rich closed sont intégrés, mais il manquait un jeu démo persistant couvrant les 6 types fermés riches.
+- Périmètre inclus : fixture `Droit constitutionnel`, notion `Régime parlementaire rationalisé`, chunks/sources synthétiques, session `RICH_CLOSED_EXERCISE`, payload rich closed V1-A à 6 questions, dry-run non destructif.
+- Non-objectifs : migration Prisma, provider IA réel, reset ou suppression de données, nouveau type de question.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_015_016_RICH_DEMO_SEED_AND_SMOKE.md`.
+
+### V1-016 — E2E/smoke rich questions V1
+
+- Objectif : protéger le contrat HTTP rich closed V1-A et les launchers Today/session de révision.
+- Pourquoi maintenant : le seed démo doit être validable et les parcours intégrés doivent garantir l'absence de fuite pré-submit.
+- Périmètre inclus : smoke `/activities/rich-closed/start`, get, result avant submit, submit, result après submit, invalides, Today rich closed, revision session rich closed, anti-fuite récursif.
+- Non-objectifs : refonte frontend, génération Genkit réelle, widgets libres, V1-017.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_015_016_RICH_DEMO_SEED_AND_SMOKE.md`.

@@ -10,8 +10,15 @@ import { StartNextActivityUseCase } from '../src/modules/activities/application/
 import { StartOpenQuestionActivityUseCase } from '../src/modules/activities/application/start-open-question-activity.use-case';
 import { SubmitActivityResultUseCase } from '../src/modules/activities/application/submit-activity-result.use-case';
 import { SubmitOpenAnswerUseCase } from '../src/modules/activities/application/submit-open-answer.use-case';
+import { richClosedExerciseFixture } from '../src/modules/activities/application/rich-closed-questions/rich-closed-question.fixtures';
 import { GetRichClosedExerciseResultUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise-result.use-case';
 import { GetRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise.use-case';
+import { toRichClosedPublicExerciseEnvelope } from '../src/modules/activities/application/rich-closed-questions/rich-closed-question-public.mapper';
+import { scoreRichClosedExerciseSubmission } from '../src/modules/activities/application/rich-closed-questions/rich-closed-question-scorer';
+import type {
+  RichClosedAnswer,
+  RichClosedQuestionKind,
+} from '../src/modules/activities/application/rich-closed-questions/rich-closed-question.types';
 import { StartRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/start-rich-closed-exercise.use-case';
 import { SubmitRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/submit-rich-closed-exercise.use-case';
 import { GetDocumentUseCase } from '../src/modules/documents/application/get-document.use-case';
@@ -199,8 +206,25 @@ describe('Critical demo paths (e2e)', () => {
       expect(todayBody.items.map((item) => item.action)).toEqual([
         'diagnostic_quiz',
         'open_question',
+        'rich_closed_exercise',
         'revision_session',
       ]);
+      const richClosedItem = todayBody.items.find(
+        (item) => item.action === 'rich_closed_exercise',
+      );
+      expect(richClosedItem).toMatchObject({
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        startPayload: {
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnitId: 'unit-1',
+        },
+      });
+      expect(richClosedItem).not.toHaveProperty('questions');
+      expect(richClosedItem).not.toHaveProperty('correction');
+      assertNoSensitivePreSubmitFields(response.body);
       expect(JSON.stringify(response.body)).not.toContain('other-student');
     });
 
@@ -390,19 +414,47 @@ describe('Critical demo paths (e2e)', () => {
         complexityProfile: 'exam',
         questionTypeMix: undefined,
       });
-      const startBody = startResponse.body as { type: string };
+      const startBody = startResponse.body as ReturnType<
+        typeof richClosedPublicExercise
+      >;
       expect(startBody.type).toBe('rich_closed_exercise');
-      assertNoSensitivePreSubmitFields(startResponse.body);
-      expect(JSON.stringify(startResponse.body)).not.toContain('explanation');
-      expect(JSON.stringify(startResponse.body)).not.toContain('feedback');
+      expect(
+        startBody.questions.map(
+          (question: { questionKind: RichClosedQuestionKind }) =>
+            question.questionKind,
+        ),
+      ).toEqual([
+        'single_choice',
+        'multiple_choice',
+        'matching',
+        'ordering',
+        'case_qualification',
+        'error_detection',
+      ]);
+      expect(
+        startBody.questions.every(
+          (question: { sourceChunkIds?: unknown[] }) =>
+            Array.isArray(question.sourceChunkIds) &&
+            question.sourceChunkIds.length > 0,
+        ),
+      ).toBe(true);
+      assertNoSensitivePreSubmitFields(startBody);
 
-      await request(server)
+      const getResponse = await request(server)
         .get('/activities/rich-closed/rich-session-1')
         .expect(200);
       expect(mocks.getRichClosedExercise.execute).toHaveBeenCalledWith({
         studentId: currentStudent.id,
         sessionId: 'rich-session-1',
       });
+      assertNoSensitivePreSubmitFields(getResponse.body);
+
+      mocks.getRichClosedExerciseResult.execute.mockRejectedValueOnce(
+        new Error('RICH_CLOSED_SESSION_NOT_COMPLETED'),
+      );
+      await request(server)
+        .get('/activities/rich-closed/rich-session-1/result')
+        .expect(409);
 
       const submitResponse = await request(server)
         .post('/activities/rich-closed/rich-session-1/submit')
@@ -417,14 +469,26 @@ describe('Critical demo paths (e2e)', () => {
       const submitBody = submitResponse.body as {
         items: Array<Record<string, unknown>>;
       };
+      expect(submitBody).toMatchObject({
+        correctAnswers: 6,
+        totalQuestions: 6,
+        score: 1,
+      });
+      expect(submitBody.items).toHaveLength(6);
       expect(submitBody.items[0]).toHaveProperty('correction');
+      expect(JSON.stringify(submitBody)).toContain('explanation');
 
-      await request(server)
+      const resultResponse = await request(server)
         .get('/activities/rich-closed/rich-session-1/result')
         .expect(200);
       expect(mocks.getRichClosedExerciseResult.execute).toHaveBeenCalledWith({
         studentId: currentStudent.id,
         sessionId: 'rich-session-1',
+      });
+      expect(resultResponse.body).toMatchObject({
+        status: 'completed',
+        correctAnswers: 6,
+        totalQuestions: 6,
       });
     });
 
@@ -455,6 +519,56 @@ describe('Critical demo paths (e2e)', () => {
         })
         .expect(400);
       expect(mocks.submitRichClosedExercise.execute).not.toHaveBeenCalled();
+
+      await request(server)
+        .post('/activities/rich-closed/rich-session-1/submit')
+        .send({
+          answers: [
+            ...richClosedAnswers(),
+            {
+              questionId: 'single-1',
+              questionKind: 'single_choice',
+              choiceId: 'choice-a',
+            },
+          ],
+        })
+        .expect(400);
+      expect(mocks.submitRichClosedExercise.execute).not.toHaveBeenCalled();
+
+      const semanticInvalidSubmissions = [
+        replaceRichClosedAnswer({
+          questionId: 'single-1',
+          questionKind: 'single_choice',
+          choiceId: 'unknown-choice',
+        }),
+        richClosedAnswers().filter(
+          (answer) => answer.questionId !== 'single-1',
+        ),
+        replaceRichClosedAnswer({
+          questionId: 'matching-1',
+          questionKind: 'matching',
+          pairs: [
+            { leftId: 'left-1', rightId: 'right-1' },
+            { leftId: 'left-2', rightId: 'unknown-right' },
+            { leftId: 'left-3', rightId: 'right-3' },
+          ],
+        }),
+        replaceRichClosedAnswer({
+          questionId: 'ordering-1',
+          questionKind: 'ordering',
+          orderedIds: ['item-1', 'item-2'],
+        }),
+      ];
+
+      for (const answers of semanticInvalidSubmissions) {
+        mocks.submitRichClosedExercise.execute.mockRejectedValueOnce(
+          new Error('RICH_CLOSED_SUBMIT_INVALID_INPUT'),
+        );
+        await request(server)
+          .post('/activities/rich-closed/rich-session-1/submit')
+          .send({ answers })
+          .expect(400);
+      }
 
       mocks.getRichClosedExercise.execute.mockRejectedValueOnce(
         new Error('RICH_CLOSED_SESSION_NOT_FOUND'),
@@ -525,6 +639,48 @@ describe('Critical demo paths (e2e)', () => {
       expect(
         JSON.stringify(mocks.requestNextAction.execute.mock.calls),
       ).not.toContain('ignore this free text');
+    });
+
+    it('routes rich closed revision sessions as bounded launchers', async () => {
+      mocks.startRevisionSession.execute.mockResolvedValueOnce(
+        richClosedRevisionSessionResponse(),
+      );
+
+      const response = await request(app.getHttpServer())
+        .post('/revision-sessions')
+        .send({
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnitId: 'unit-1',
+          preferredAction: 'rich_closed_exercise',
+        })
+        .expect(201);
+
+      expect(mocks.startRevisionSession.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        preferredAction: 'rich_closed_exercise',
+      });
+      const body = response.body as ReturnType<
+        typeof richClosedRevisionSessionResponse
+      >;
+
+      expect(body.currentAction).toMatchObject({
+        kind: 'RICH_CLOSED_EXERCISE',
+        activitySessionId: null,
+        payload: {
+          type: 'rich_closed_exercise',
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnitId: 'unit-1',
+          preferredAction: 'rich_closed_exercise',
+        },
+      });
+      expect(body.currentAction.payload).not.toHaveProperty('questions');
+      expect(body.currentAction.payload).not.toHaveProperty('correction');
+      assertNoSensitivePreSubmitFields(body);
     });
 
     it('validates and maps revision session errors', async () => {
@@ -839,6 +995,25 @@ function todayPlan() {
         id: 'today-3',
         subjectId: 'subject-1',
         subjectName: 'Droit constitutionnel',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        knowledgeUnitTitle: 'Séparation des pouvoirs',
+        masteryScore: 0.2,
+        action: 'rich_closed_exercise',
+        estimatedMinutes: 8,
+        priority: 130,
+        reasonCode: 'RICH_CLOSED_PRACTICE',
+        reason: 'Questions riches recommandées pour consolider la notion.',
+        startPayload: {
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnitId: 'unit-1',
+        },
+      },
+      {
+        id: 'today-4',
+        subjectId: 'subject-1',
+        subjectName: 'Droit constitutionnel',
         knowledgeUnitId: 'unit-1',
         knowledgeUnitTitle: 'Séparation des pouvoirs',
         masteryScore: 0.2,
@@ -941,71 +1116,63 @@ function openAnswerSubmissionResult() {
 }
 
 function richClosedPublicExercise() {
-  return {
+  return toRichClosedPublicExerciseEnvelope({
     sessionId: 'rich-session-1',
-    type: 'rich_closed_exercise',
-    id: 'rich-exercise-1',
-    version: 'rich-closed-question-v1',
-    title: 'Exercice fermé riche',
-    subjectId: 'subject-1',
-    documentId: 'document-1',
-    knowledgeUnitId: 'unit-1',
-    questions: [
-      {
-        id: 'single-1',
-        questionKind: 'single_choice',
-        prompt: 'Quel critère institutionnel caractérise le parlementarisme ?',
-        difficulty: 'MEDIUM',
-        cognitiveSkill: 'comparison',
-        sourceChunkIds: ['chunk-1'],
-        choices: [
-          { id: 'choice-a', label: 'Responsabilité politique' },
-          { id: 'choice-b', label: 'Indépendance absolue' },
-        ],
-      },
-    ],
-  };
+    exercise: richClosedExerciseFixture(),
+  });
 }
 
 function richClosedResult() {
-  return {
+  return scoreRichClosedExerciseSubmission({
     sessionId: 'rich-session-1',
-    type: 'rich_closed_exercise',
-    status: 'completed',
-    correctAnswers: 1,
-    totalQuestions: 1,
-    score: 1,
-    items: [
-      {
-        questionId: 'single-1',
-        questionKind: 'single_choice',
-        prompt: 'Quel critère institutionnel caractérise le parlementarisme ?',
-        submittedAnswer: {
-          questionId: 'single-1',
-          questionKind: 'single_choice',
-          choiceId: 'choice-a',
-        },
-        isCorrect: true,
-        partialScore: 1,
-        explanation:
-          'La responsabilité politique est un critère du régime parlementaire.',
-        sourceChunkIds: ['chunk-1'],
-        correction: {
-          correctChoiceId: 'choice-a',
-        },
-      },
-    ],
-  };
+    exercise: richClosedExerciseFixture(),
+    answers: richClosedAnswers(),
+  });
 }
 
-function richClosedAnswers() {
+function richClosedAnswers(): RichClosedAnswer[] {
   return [
     {
       questionId: 'single-1',
       questionKind: 'single_choice',
       choiceId: 'choice-a',
     },
+    {
+      questionId: 'multiple-1',
+      questionKind: 'multiple_choice',
+      choiceIds: ['choice-a', 'choice-b'],
+    },
+    {
+      questionId: 'matching-1',
+      questionKind: 'matching',
+      pairs: [
+        { leftId: 'left-1', rightId: 'right-1' },
+        { leftId: 'left-2', rightId: 'right-2' },
+        { leftId: 'left-3', rightId: 'right-3' },
+      ],
+    },
+    {
+      questionId: 'ordering-1',
+      questionKind: 'ordering',
+      orderedIds: ['item-1', 'item-2', 'item-3'],
+    },
+    {
+      questionId: 'case-1',
+      questionKind: 'case_qualification',
+      choiceId: 'choice-a',
+    },
+    {
+      questionId: 'error-1',
+      questionKind: 'error_detection',
+      errorId: 'error-a',
+    },
   ];
+}
+
+function replaceRichClosedAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
+  return richClosedAnswers().map((currentAnswer) =>
+    currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
+  );
 }
 
 function revisionSessionResponse() {
@@ -1043,13 +1210,95 @@ function revisionSessionResponse() {
   };
 }
 
-function assertNoSensitivePreSubmitFields(payload: unknown): void {
-  const serialized = JSON.stringify(payload);
+function richClosedRevisionSessionResponse() {
+  return {
+    session: {
+      id: 'revision-session-1',
+      status: 'STARTED',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      createdAt: new Date('2026-06-15T12:00:00.000Z'),
+      completedAt: null,
+    },
+    currentAction: {
+      id: 'action-rich-1',
+      kind: 'RICH_CLOSED_EXERCISE',
+      status: 'READY',
+      displayOrder: 0,
+      activitySessionId: null,
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      payload: {
+        type: 'rich_closed_exercise',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        reason: 'Questions riches recommandées.',
+        estimatedMinutes: 8,
+        preferredAction: 'rich_closed_exercise',
+      },
+    },
+    history: [
+      {
+        id: 'action-rich-1',
+        kind: 'RICH_CLOSED_EXERCISE',
+        status: 'READY',
+        displayOrder: 0,
+        activitySessionId: null,
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    ],
+  };
+}
 
-  expect(serialized).not.toContain('correctChoiceId');
-  expect(serialized).not.toContain('correctChoiceIds');
-  expect(serialized).not.toContain('modelAnswer');
-  expect(serialized).not.toContain('storagePath');
-  expect(serialized).not.toContain('promptVersion');
-  expect(serialized).not.toContain('completion');
+function assertNoSensitivePreSubmitFields(payload: unknown): void {
+  expect(collectSensitivePreSubmitFields(payload)).toEqual([]);
+}
+
+const forbiddenPreSubmitFields = new Set([
+  'correction',
+  'correctionPayload',
+  'explanation',
+  'feedback',
+  'choiceFeedback',
+  'modelAnswer',
+  'answerText',
+  'freeTextAnswer',
+  'textAnswer',
+  'score',
+  'partialScore',
+  'answersPayload',
+  'storagePath',
+  'promptVersion',
+  'completion',
+]);
+
+function collectSensitivePreSubmitFields(
+  value: unknown,
+  path: string[] = [],
+): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      collectSensitivePreSubmitFields(item, [...path, String(index)]),
+    );
+  }
+
+  if (typeof value !== 'object' || value === null) {
+    return [];
+  }
+
+  return Object.entries(value).flatMap(([key, nestedValue]) => {
+    const nextPath = [...path, key];
+    const currentViolation =
+      key.startsWith('correct') || forbiddenPreSubmitFields.has(key)
+        ? [nextPath.join('.')]
+        : [];
+
+    return [
+      ...currentViolation,
+      ...collectSensitivePreSubmitFields(nestedValue, nextPath),
+    ];
+  });
 }

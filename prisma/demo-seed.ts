@@ -163,19 +163,21 @@ async function seedFixtures(
     });
   }
 
-  await tx.knowledgeUnitSource.deleteMany({
-    where: {
-      knowledgeUnitId: {
-        in: fixtures.knowledgeUnits.map((unit) => unit.id),
+  for (const source of fixtures.knowledgeUnitSources) {
+    await tx.knowledgeUnitSource.upsert({
+      where: {
+        knowledgeUnitId_chunkId: {
+          knowledgeUnitId: source.knowledgeUnitId,
+          chunkId: source.chunkId,
+        },
       },
-      chunkId: {
-        in: fixtures.chunks.map((chunk) => chunk.id),
+      create: source,
+      update: {
+        subjectId: source.subjectId,
+        relevanceScore: source.relevanceScore,
       },
-    },
-  });
-  await tx.knowledgeUnitSource.createMany({
-    data: fixtures.knowledgeUnitSources,
-  });
+    });
+  }
 
   await tx.revisionGoal.upsert({
     where: { id: fixtures.goal.id },
@@ -226,15 +228,24 @@ async function seedFixtures(
       errorCode: fixtures.summary.errorCode,
     },
   });
-  await tx.summarySource.deleteMany({
-    where: { summaryId: summary.id },
-  });
-  await tx.summarySource.createMany({
-    data: fixtures.summarySources.map((source) => ({
-      ...source,
-      summaryId: summary.id,
-    })),
-  });
+  for (const source of fixtures.summarySources) {
+    await tx.summarySource.upsert({
+      where: {
+        summaryId_chunkId: {
+          summaryId: summary.id,
+          chunkId: source.chunkId,
+        },
+      },
+      create: {
+        ...source,
+        summaryId: summary.id,
+      },
+      update: {
+        subjectId: source.subjectId,
+        relevanceScore: source.relevanceScore,
+      },
+    });
+  }
 
   const revisionSheet = await tx.revisionSheet.upsert({
     where: { documentId: fixtures.revisionSheet.documentId },
@@ -260,25 +271,77 @@ async function seedFixtures(
       errorCode: fixtures.revisionSheet.errorCode,
     },
   });
-  const sectionIds = fixtures.revisionSheetSections.map(
-    (section) => section.id,
-  );
-  await tx.revisionSheetSectionSource.deleteMany({
-    where: { sectionId: { in: sectionIds } },
-  });
-  await tx.revisionSheetSection.deleteMany({
-    where: {
-      OR: [{ revisionSheetId: revisionSheet.id }, { id: { in: sectionIds } }],
+  for (const section of fixtures.revisionSheetSections) {
+    await tx.revisionSheetSection.upsert({
+      where: { id: section.id },
+      create: {
+        ...section,
+        revisionSheetId: revisionSheet.id,
+      },
+      update: {
+        revisionSheetId: revisionSheet.id,
+        subjectId: section.subjectId,
+        displayOrder: section.displayOrder,
+        title: section.title,
+        content: section.content,
+      },
+    });
+  }
+
+  for (const source of fixtures.revisionSheetSectionSources) {
+    await tx.revisionSheetSectionSource.upsert({
+      where: {
+        sectionId_chunkId: {
+          sectionId: source.sectionId,
+          chunkId: source.chunkId,
+        },
+      },
+      create: source,
+      update: {
+        subjectId: source.subjectId,
+        relevanceScore: source.relevanceScore,
+      },
+    });
+  }
+
+  await tx.activitySession.upsert({
+    where: { id: fixtures.richClosedActivitySession.id },
+    create: fixtures.richClosedActivitySession,
+    update: {
+      studentId: fixtures.richClosedActivitySession.studentId,
+      subjectId: fixtures.richClosedActivitySession.subjectId,
+      knowledgeUnitId: fixtures.richClosedActivitySession.knowledgeUnitId,
+      documentId: fixtures.richClosedActivitySession.documentId,
+      version: fixtures.richClosedActivitySession.version,
+      type: fixtures.richClosedActivitySession.type,
+      status: fixtures.richClosedActivitySession.status,
+      generationFlowName: fixtures.richClosedActivitySession.generationFlowName,
+      generationProvider: fixtures.richClosedActivitySession.generationProvider,
+      generationModel: fixtures.richClosedActivitySession.generationModel,
+      generationPromptVersion:
+        fixtures.richClosedActivitySession.generationPromptVersion,
+      generationSchemaVersion:
+        fixtures.richClosedActivitySession.generationSchemaVersion,
+      generationInputSize:
+        fixtures.richClosedActivitySession.generationInputSize,
     },
   });
-  await tx.revisionSheetSection.createMany({
-    data: fixtures.revisionSheetSections.map((section) => ({
-      ...section,
-      revisionSheetId: revisionSheet.id,
-    })),
-  });
-  await tx.revisionSheetSectionSource.createMany({
-    data: fixtures.revisionSheetSectionSources,
+
+  await tx.richClosedExercisePayload.upsert({
+    where: {
+      activitySessionId: fixtures.richClosedExercisePayload.activitySessionId,
+    },
+    create: fixtures.richClosedExercisePayload,
+    update: {
+      version: fixtures.richClosedExercisePayload.version,
+      title: fixtures.richClosedExercisePayload.title,
+      subjectId: fixtures.richClosedExercisePayload.subjectId,
+      documentId: fixtures.richClosedExercisePayload.documentId,
+      knowledgeUnitId: fixtures.richClosedExercisePayload.knowledgeUnitId,
+      exercisePayload: fixtures.richClosedExercisePayload.exercisePayload,
+      generationMetadata: fixtures.richClosedExercisePayload.generationMetadata,
+      qualityMetrics: fixtures.richClosedExercisePayload.qualityMetrics,
+    },
   });
 }
 
@@ -300,6 +363,13 @@ function printSeedSummary(input: {
     masteryStates: input.fixtures.masteryStates.length,
     summaryId: input.fixtures.summary.id,
     revisionSheetId: input.fixtures.revisionSheet.id,
+    richClosedSessionId: input.fixtures.richClosedActivitySession.id,
+    richClosedExerciseId:
+      input.fixtures.richClosedExercisePayload.exercisePayload.id,
+    richClosedQuestionKinds:
+      input.fixtures.richClosedExercisePayload.exercisePayload.questions.map(
+        (question) => question.questionKind,
+      ),
     deletePlan: input.deletePlan,
   };
 
