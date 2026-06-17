@@ -18,7 +18,7 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 | V1-022  | Image choice/personnages historiques V1-D  | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_022_IMAGE_CHOICE.md                                |
 | V1-023  | Runbook demo V1                            | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_023_DEMO_RUNBOOK_V1.md                             |
 | V1-024  | Polish UI/accessibilité/performance        | Non applicable côté API (app-only) | Voir revision_app/docs/v1/ROADMAP_EXECUTION_LOT_V1_024_UI_ACCESSIBILITY_PERFORMANCE.md |
-| V1-025  | Revue finale V1 et readiness audit         | À faire | À créer                                                                             |
+| V1-025  | Revue finale V1 et readiness audit         | Bloqué | docs/v1/ROADMAP_EXECUTION_LOT_V1_025_READINESS_AUDIT.md                            |
 
 ## Lots détaillés
 
@@ -136,5 +136,7 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 ### V1-025 — Revue finale V1 et readiness audit
 
 - Objectif : auditer la readiness finale V1 après runbook et polish.
-- Statut : à faire séparément.
-- Non-objectifs du présent plan : ne pas marquer réalisé dans V1-023/V1-024.
+- Statut : bloqué par l'audit V1-025; readiness non validée.
+- Blocker principal : `date_slider` peut valider une correction `correctYear` non sélectionnable par le `step` public.
+- Suite recommandée : `V1-025B — Readiness blockers fix`.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_025_READINESS_AUDIT.md`.
