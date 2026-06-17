@@ -16,6 +16,9 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 | V1-020  | Diagram labeling V1-C                      | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_020_DIAGRAM_LABELING.md                            |
 | V1-021  | Calculation MCQ modes de scrutin V1-C      | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_021_CALCULATION_MCQ.md                             |
 | V1-022  | Image choice/personnages historiques V1-D  | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_022_IMAGE_CHOICE.md                                |
+| V1-023  | Runbook demo V1                            | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_023_DEMO_RUNBOOK_V1.md                             |
+| V1-024  | Polish UI/accessibilité/performance        | Non applicable côté API (app-only) | Voir revision_app/docs/v1/ROADMAP_EXECUTION_LOT_V1_024_UI_ACCESSIBILITY_PERFORMANCE.md |
+| V1-025  | Revue finale V1 et readiness audit         | À faire | À créer                                                                             |
 
 ## Lots détaillés
 
@@ -114,3 +117,24 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 - Périmètre inclus : catalogue contrôlé d'assets image, contrat backend, validation stricte des choix et IDs allowlistés, mapper public anti-fuite, parsing submit, scoring full-correct, correction post-submit, Genkit mockable, fixture V1-D dédiée, smoke E2E.
 - Non-objectifs : V1-023, `fill_blank_dropdown`, upload d'images, URL distante, base64, storage path, rendu libre, provider IA réel, migration Prisma.
 - Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_022_IMAGE_CHOICE.md`.
+
+### V1-023 — Runbook demo V1
+
+- Objectif : créer un runbook local/dev clair, rejouable, non destructif et honnête pour démontrer la V1 rich closed.
+- Pourquoi maintenant : les 14 types V1 existent; il faut rendre le parcours présentable avant l'audit final.
+- Périmètre inclus : runbook canonique `docs/v1/DEMO_RUNBOOK_V1.md`, commandes vérifiées/non vérifiées/interdites, seed dry-run, scénarios direct/Today/revision session, anti-fuite, limites connues.
+- Non-objectifs : V1-025, readiness audit, déploiement, migration, provider IA réel, nouveau type de question.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_023_DEMO_RUNBOOK_V1.md`.
+
+### V1-024 — Polish UI/accessibilité/performance
+
+- Objectif : améliorer côté Flutter la robustesse de démo du parcours rich closed sans refonte.
+- Pourquoi maintenant : la V1 est fonctionnelle; il faut réduire les risques d'overflow et clarifier les fallbacks avant présentation.
+- Périmètre API : non applicable hors documentation de plan, car le polish est app-only.
+- Rapport attendu : voir `revision_app/docs/v1/ROADMAP_EXECUTION_LOT_V1_024_UI_ACCESSIBILITY_PERFORMANCE.md`.
+
+### V1-025 — Revue finale V1 et readiness audit
+
+- Objectif : auditer la readiness finale V1 après runbook et polish.
+- Statut : à faire séparément.
+- Non-objectifs du présent plan : ne pas marquer réalisé dans V1-023/V1-024.
