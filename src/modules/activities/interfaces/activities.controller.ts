@@ -689,6 +689,18 @@ function validateRichClosedAnswer(input: unknown): RichClosedAnswer {
         questionKind,
         orderedIds: validateChoiceIds(answer.orderedIds),
       };
+    case 'timeline':
+      return {
+        questionId,
+        questionKind,
+        orderedEventIds: validateChoiceIds(answer.orderedEventIds),
+      };
+    case 'date_slider':
+      return {
+        questionId,
+        questionKind,
+        year: validateRichClosedYear(answer.year),
+      };
     case 'error_detection':
       return {
         questionId,
@@ -720,6 +732,14 @@ function validateRichClosedPairs(input: unknown): Array<{
   });
 }
 
+function validateRichClosedYear(input: unknown): number {
+  if (!Number.isInteger(input)) {
+    throw new BadRequestException('Rich closed year must be an integer');
+  }
+
+  return input as number;
+}
+
 function containsForbiddenRichClosedSubmitField(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.some(containsForbiddenRichClosedSubmitField);
@@ -732,6 +752,7 @@ function containsForbiddenRichClosedSubmitField(value: unknown): boolean {
   return Object.entries(value).some(([key, nested]) => {
     if (
       key.startsWith('correct') ||
+      key === 'correction' ||
       key === 'correctionPayload' ||
       key === 'explanation' ||
       key === 'feedback' ||
@@ -742,7 +763,10 @@ function containsForbiddenRichClosedSubmitField(value: unknown): boolean {
       key === 'textAnswer' ||
       key === 'score' ||
       key === 'partialScore' ||
-      key === 'workedSteps'
+      key === 'workedSteps' ||
+      key === 'answersPayload' ||
+      key === 'expectedAnswer' ||
+      key === 'expectedAnswers'
     ) {
       return true;
     }

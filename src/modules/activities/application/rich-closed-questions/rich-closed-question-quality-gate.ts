@@ -299,6 +299,7 @@ function privateFieldPaths(value: unknown, path = '$'): string[] {
 function isPrivatePublicPayloadKey(key: string): boolean {
   return (
     key.startsWith('correct') ||
+    key === 'correction' ||
     key === 'correctionPayload' ||
     key === 'explanation' ||
     key === 'feedback' ||
@@ -310,6 +311,7 @@ function isPrivatePublicPayloadKey(key: string): boolean {
     key === 'score' ||
     key === 'partialScore' ||
     key === 'workedSteps' ||
+    key === 'answersPayload' ||
     key === 'expectedAnswer' ||
     key === 'expectedAnswers'
   );

@@ -30,6 +30,21 @@ export function richClosedExerciseFixture(): RichClosedExercise {
   };
 }
 
+export function richClosedV1BExerciseFixture(): RichClosedExercise {
+  const v1aFixture = richClosedExerciseFixture();
+
+  return {
+    ...v1aFixture,
+    id: 'rich-exercise-v1b-1',
+    title: 'Droit constitutionnel - exercice riche fermé V1-B',
+    questions: [
+      ...v1aFixture.questions,
+      richClosedQuestionFixture('timeline'),
+      richClosedQuestionFixture('date_slider'),
+    ],
+  };
+}
+
 export function richClosedQuestionFixture(
   questionKind: RichClosedQuestionKind,
 ): RichClosedQuestion {
@@ -100,6 +115,46 @@ export function richClosedQuestionFixture(
         explanation:
           'La qualification vient après l’identification des critères institutionnels.',
       };
+    case 'timeline':
+      return {
+        ...baseQuestion('timeline-1', 'timeline'),
+        prompt: 'Remets dans l’ordre ces étapes du contrôle parlementaire.',
+        instruction:
+          'Classe les événements de la première étape à la dernière.',
+        events: [
+          {
+            id: 'event-1',
+            label: 'Dépôt de la motion',
+            description: 'Des parlementaires engagent la procédure.',
+          },
+          {
+            id: 'event-2',
+            label: 'Débat politique',
+            description: 'La chambre discute la responsabilité engagée.',
+          },
+          {
+            id: 'event-3',
+            label: 'Vote de la chambre',
+            description: 'La chambre décide si la motion est adoptée.',
+          },
+        ],
+        correctOrder: ['event-1', 'event-2', 'event-3'],
+        explanation:
+          'Le contrôle suit une séquence procédurale : initiative, discussion, puis vote.',
+      };
+    case 'date_slider':
+      return {
+        ...baseQuestion('date-slider-1', 'date_slider'),
+        prompt:
+          'Place approximativement l’adoption de la Constitution de la Ve République.',
+        instruction: 'Choisis une année entière dans la période proposée.',
+        minYear: 1945,
+        maxYear: 1970,
+        step: 1,
+        correctYear: 1958,
+        toleranceYears: 0,
+        explanation: 'La Constitution de la Ve République est adoptée en 1958.',
+      };
     case 'case_qualification':
       return {
         ...baseQuestion('case-1', 'case_qualification'),
@@ -137,8 +192,18 @@ function baseQuestion<K extends RichClosedQuestionKind>(
   id: string,
   questionKind: K,
 ): RichClosedBaseQuestionFields<K> {
-  const cognitiveSkill: RichClosedCognitiveSkill =
-    questionKind === 'single_choice' ? 'comparison' : 'case_application';
+  const cognitiveSkill: RichClosedCognitiveSkill = (() => {
+    switch (questionKind) {
+      case 'single_choice':
+        return 'comparison';
+      case 'timeline':
+        return 'procedure';
+      case 'date_slider':
+        return 'comprehension';
+      default:
+        return 'case_application';
+    }
+  })();
 
   return {
     id,

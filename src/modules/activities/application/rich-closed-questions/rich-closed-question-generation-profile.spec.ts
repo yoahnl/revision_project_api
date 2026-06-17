@@ -16,7 +16,17 @@ describe('rich closed question generation profile', () => {
       ordering: 1,
       case_qualification: 1,
       error_detection: 1,
+      timeline: 0,
+      date_slider: 0,
     });
+  });
+
+  it('keeps V1-B out of the default mix below eight questions', () => {
+    const mix = resolveRichClosedQuestionTypeMix({ questionCount: 7 });
+
+    expect(mix.timeline).toBe(0);
+    expect(mix.date_slider).toBe(0);
+    expect(sumMix(mix)).toBe(7);
   });
 
   it('returns the expected exam-style mix for ten questions', () => {
@@ -28,10 +38,12 @@ describe('rich closed question generation profile', () => {
     ).toEqual({
       case_qualification: 2,
       error_detection: 2,
-      matching: 2,
+      matching: 1,
       ordering: 1,
-      multiple_choice: 2,
+      multiple_choice: 1,
       single_choice: 1,
+      timeline: 1,
+      date_slider: 1,
     });
   });
 
@@ -43,7 +55,7 @@ describe('rich closed question generation profile', () => {
     }
   });
 
-  it('never returns a type outside V1-A', () => {
+  it('never returns a type outside the rich closed allowlist', () => {
     const mix = resolveRichClosedQuestionTypeMix({ questionCount: 12 });
     const allowedKinds = new Set<string>(RICH_CLOSED_QUESTION_KINDS);
 

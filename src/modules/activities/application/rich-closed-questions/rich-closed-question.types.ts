@@ -9,6 +9,8 @@ export const RICH_CLOSED_QUESTION_KINDS = [
   'ordering',
   'case_qualification',
   'error_detection',
+  'timeline',
+  'date_slider',
 ] as const;
 
 export type RichClosedQuestionKind =
@@ -51,6 +53,12 @@ export interface RichClosedLabelItem {
   label: string;
 }
 
+export interface RichClosedTimelineEvent {
+  id: string;
+  label: string;
+  description?: string | null;
+}
+
 export interface RichClosedQuestionBase {
   id: string;
   questionKind: RichClosedQuestionKind;
@@ -91,6 +99,25 @@ export interface RichClosedOrderingQuestion extends RichClosedQuestionBase {
   explanation: string;
 }
 
+export interface RichClosedTimelineQuestion extends RichClosedQuestionBase {
+  questionKind: 'timeline';
+  instruction?: string | null;
+  events: RichClosedTimelineEvent[];
+  correctOrder: string[];
+  explanation: string;
+}
+
+export interface RichClosedDateSliderQuestion extends RichClosedQuestionBase {
+  questionKind: 'date_slider';
+  instruction?: string | null;
+  minYear: number;
+  maxYear: number;
+  step: number;
+  correctYear: number;
+  toleranceYears: number;
+  explanation: string;
+}
+
 export interface RichClosedCaseQualificationQuestion extends RichClosedQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -113,7 +140,9 @@ export type RichClosedQuestion =
   | RichClosedMatchingQuestion
   | RichClosedOrderingQuestion
   | RichClosedCaseQualificationQuestion
-  | RichClosedErrorDetectionQuestion;
+  | RichClosedErrorDetectionQuestion
+  | RichClosedTimelineQuestion
+  | RichClosedDateSliderQuestion;
 
 export interface RichClosedPublicQuestionBase {
   id: string;
@@ -147,6 +176,21 @@ export interface RichClosedPublicOrderingQuestion extends RichClosedPublicQuesti
   items: RichClosedLabelItem[];
 }
 
+export interface RichClosedPublicTimelineQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'timeline';
+  instruction?: string | null;
+  events: RichClosedTimelineEvent[];
+}
+
+export interface RichClosedPublicDateSliderQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'date_slider';
+  instruction?: string | null;
+  minYear: number;
+  maxYear: number;
+  step: number;
+  toleranceYears: number;
+}
+
 export interface RichClosedPublicCaseQualificationQuestion extends RichClosedPublicQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -165,7 +209,9 @@ export type RichClosedPublicQuestion =
   | RichClosedPublicMatchingQuestion
   | RichClosedPublicOrderingQuestion
   | RichClosedPublicCaseQualificationQuestion
-  | RichClosedPublicErrorDetectionQuestion;
+  | RichClosedPublicErrorDetectionQuestion
+  | RichClosedPublicTimelineQuestion
+  | RichClosedPublicDateSliderQuestion;
 
 export type RichClosedAnswer =
   | {
@@ -195,6 +241,16 @@ export type RichClosedAnswer =
     }
   | {
       questionId: string;
+      questionKind: 'timeline';
+      orderedEventIds: string[];
+    }
+  | {
+      questionId: string;
+      questionKind: 'date_slider';
+      year: number;
+    }
+  | {
+      questionId: string;
       questionKind: 'error_detection';
       errorId: string;
     };
@@ -212,6 +268,7 @@ export type RichClosedCorrectionPayload =
   | { correctChoiceIds: string[] }
   | { correctPairs: RichClosedPair[] }
   | { correctOrder: string[] }
+  | { correctYear: number; minAcceptedYear: number; maxAcceptedYear: number }
   | { correctErrorId: string };
 
 export interface RichClosedCorrectionItem {

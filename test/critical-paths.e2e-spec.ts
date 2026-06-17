@@ -10,7 +10,10 @@ import { StartNextActivityUseCase } from '../src/modules/activities/application/
 import { StartOpenQuestionActivityUseCase } from '../src/modules/activities/application/start-open-question-activity.use-case';
 import { SubmitActivityResultUseCase } from '../src/modules/activities/application/submit-activity-result.use-case';
 import { SubmitOpenAnswerUseCase } from '../src/modules/activities/application/submit-open-answer.use-case';
-import { richClosedExerciseFixture } from '../src/modules/activities/application/rich-closed-questions/rich-closed-question.fixtures';
+import {
+  richClosedExerciseFixture,
+  richClosedV1BExerciseFixture,
+} from '../src/modules/activities/application/rich-closed-questions/rich-closed-question.fixtures';
 import { GetRichClosedExerciseResultUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise-result.use-case';
 import { GetRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise.use-case';
 import { toRichClosedPublicExerciseEnvelope } from '../src/modules/activities/application/rich-closed-questions/rich-closed-question-public.mapper';
@@ -490,6 +493,150 @@ describe('Critical demo paths (e2e)', () => {
         correctAnswers: 6,
         totalQuestions: 6,
       });
+    });
+
+    it('routes rich closed V1-B timeline and date slider without pre-submit leaks', async () => {
+      const server = app.getHttpServer();
+      const questionTypeMix = {
+        single_choice: 1,
+        multiple_choice: 1,
+        matching: 1,
+        ordering: 1,
+        case_qualification: 1,
+        error_detection: 1,
+        timeline: 1,
+        date_slider: 1,
+      };
+      mocks.startRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1BPublicExercise(),
+      );
+      mocks.getRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1BPublicExercise(),
+      );
+      mocks.submitRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1BResult(),
+      );
+      mocks.getRichClosedExerciseResult.execute.mockResolvedValueOnce(
+        richClosedV1BResult(),
+      );
+
+      const startResponse = await request(server)
+        .post('/activities/rich-closed/start')
+        .send({
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-1',
+          questionCount: 8,
+          questionTypeMix,
+        })
+        .expect(201);
+
+      const startBody = startResponse.body as {
+        questions: Array<{ questionKind: RichClosedQuestionKind }>;
+        [key: string]: unknown;
+      };
+      expect(mocks.startRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        subjectId: 'subject-1',
+        documentId: undefined,
+        knowledgeUnitId: 'unit-1',
+        questionCount: 8,
+        complexityProfile: 'exam',
+        questionTypeMix,
+      });
+      expect(
+        startBody.questions.map(
+          (question: { questionKind: RichClosedQuestionKind }) =>
+            question.questionKind,
+        ),
+      ).toEqual([
+        'single_choice',
+        'multiple_choice',
+        'matching',
+        'ordering',
+        'case_qualification',
+        'error_detection',
+        'timeline',
+        'date_slider',
+      ]);
+      assertNoSensitivePreSubmitFields(startBody);
+      expect(JSON.stringify(startBody)).not.toContain('correctYear');
+      expect(JSON.stringify(startBody)).not.toContain('correctOrder');
+
+      const getResponse = await request(server)
+        .get('/activities/rich-closed/rich-session-v1b')
+        .expect(200);
+      assertNoSensitivePreSubmitFields(getResponse.body);
+
+      const submitResponse = await request(server)
+        .post('/activities/rich-closed/rich-session-v1b/submit')
+        .send({ answers: richClosedV1BAnswers() })
+        .expect(201);
+
+      expect(mocks.submitRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'rich-session-v1b',
+        answers: richClosedV1BAnswers(),
+      });
+      expect(submitResponse.body).toMatchObject({
+        correctAnswers: 8,
+        totalQuestions: 8,
+        score: 1,
+      });
+      expect(JSON.stringify(submitResponse.body)).toContain('correctYear');
+      expect(JSON.stringify(submitResponse.body)).toContain('correctOrder');
+
+      const resultResponse = await request(server)
+        .get('/activities/rich-closed/rich-session-v1b/result')
+        .expect(200);
+      expect(resultResponse.body).toMatchObject({
+        status: 'completed',
+        correctAnswers: 8,
+        totalQuestions: 8,
+      });
+
+      await request(server)
+        .post('/activities/rich-closed/rich-session-v1b/submit')
+        .send({
+          answers: replaceRichClosedV1BAnswer({
+            questionId: 'date-slider-1',
+            questionKind: 'date_slider',
+            year: 1958.5,
+          } as unknown as RichClosedAnswer),
+        })
+        .expect(400);
+
+      const semanticInvalidSubmissions = [
+        replaceRichClosedV1BAnswer({
+          questionId: 'timeline-1',
+          questionKind: 'timeline',
+          orderedEventIds: ['event-1', 'event-1', 'event-3'],
+        }),
+        replaceRichClosedV1BAnswer({
+          questionId: 'timeline-1',
+          questionKind: 'timeline',
+          orderedEventIds: ['event-1', 'event-2', 'unknown-event'],
+        }),
+        replaceRichClosedV1BAnswer({
+          questionId: 'timeline-1',
+          questionKind: 'timeline',
+          orderedEventIds: ['event-1', 'event-2'],
+        }),
+        replaceRichClosedV1BAnswer({
+          questionId: 'date-slider-1',
+          questionKind: 'date_slider',
+          year: 1971,
+        }),
+      ];
+
+      for (const answers of semanticInvalidSubmissions) {
+        mocks.submitRichClosedExercise.execute.mockRejectedValueOnce(
+          new Error('RICH_CLOSED_SUBMIT_INVALID_INPUT'),
+        );
+        await request(server)
+          .post('/activities/rich-closed/rich-session-v1b/submit')
+          .send({ answers })
+          .expect(400);
+      }
     });
 
     it('validates and maps rich closed errors', async () => {
@@ -1122,11 +1269,26 @@ function richClosedPublicExercise() {
   });
 }
 
+function richClosedV1BPublicExercise() {
+  return toRichClosedPublicExerciseEnvelope({
+    sessionId: 'rich-session-v1b',
+    exercise: richClosedV1BExerciseFixture(),
+  });
+}
+
 function richClosedResult() {
   return scoreRichClosedExerciseSubmission({
     sessionId: 'rich-session-1',
     exercise: richClosedExerciseFixture(),
     answers: richClosedAnswers(),
+  });
+}
+
+function richClosedV1BResult() {
+  return scoreRichClosedExerciseSubmission({
+    sessionId: 'rich-session-v1b',
+    exercise: richClosedV1BExerciseFixture(),
+    answers: richClosedV1BAnswers(),
   });
 }
 
@@ -1169,8 +1331,32 @@ function richClosedAnswers(): RichClosedAnswer[] {
   ];
 }
 
+function richClosedV1BAnswers(): RichClosedAnswer[] {
+  return [
+    ...richClosedAnswers(),
+    {
+      questionId: 'timeline-1',
+      questionKind: 'timeline',
+      orderedEventIds: ['event-1', 'event-2', 'event-3'],
+    },
+    {
+      questionId: 'date-slider-1',
+      questionKind: 'date_slider',
+      year: 1958,
+    },
+  ];
+}
+
 function replaceRichClosedAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return richClosedAnswers().map((currentAnswer) =>
+    currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceRichClosedV1BAnswer(
+  answer: RichClosedAnswer,
+): RichClosedAnswer[] {
+  return richClosedV1BAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
   );
 }

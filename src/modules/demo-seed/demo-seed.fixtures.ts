@@ -774,6 +774,10 @@ function demoSourcesForQuestion(
       return [demoSeedIds.chunkIds[3]];
     case 'error_detection':
       return [demoSeedIds.chunkIds[1]];
+    case 'timeline':
+      return [demoSeedIds.chunkIds[3]];
+    case 'date_slider':
+      return [demoSeedIds.chunkIds[1]];
   }
 }
 

@@ -901,6 +901,27 @@ function richClosedPublicExercise(): RichClosedPublicExerciseEnvelope {
             questionKind: question.questionKind,
             items: question.items,
           };
+        case 'timeline':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            ...(question.instruction === undefined
+              ? {}
+              : { instruction: question.instruction }),
+            events: question.events,
+          };
+        case 'date_slider':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            ...(question.instruction === undefined
+              ? {}
+              : { instruction: question.instruction }),
+            minYear: question.minYear,
+            maxYear: question.maxYear,
+            step: question.step,
+            toleranceYears: question.toleranceYears,
+          };
         case 'case_qualification':
           return {
             ...base,

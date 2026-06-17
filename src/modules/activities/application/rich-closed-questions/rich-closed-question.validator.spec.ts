@@ -5,6 +5,7 @@ import {
 import {
   richClosedExerciseFixture,
   richClosedQuestionFixture,
+  richClosedV1BExerciseFixture,
 } from './rich-closed-question.fixtures';
 import type { RichClosedQuestion } from './rich-closed-question.types';
 
@@ -16,7 +17,9 @@ describe('rich closed question validator', () => {
     'ordering',
     'case_qualification',
     'error_detection',
-  ] as const)('accepts a valid V1-A %s question', (questionKind) => {
+    'timeline',
+    'date_slider',
+  ] as const)('accepts a valid rich closed %s question', (questionKind) => {
     const result = validateRichClosedQuestion(
       richClosedQuestionFixture(questionKind),
       { knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'] },
@@ -26,10 +29,10 @@ describe('rich closed question validator', () => {
     expect(result.issues).toEqual([]);
   });
 
-  it('rejects a kind outside V1-A', () => {
+  it('rejects a kind outside the rich closed allowlist', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
-      questionKind: 'timeline',
+      questionKind: 'true_false_grid',
     } as unknown as RichClosedQuestion;
 
     const result = validateRichClosedQuestion(question);
@@ -54,7 +57,7 @@ describe('rich closed question validator', () => {
     );
   });
 
-  it('rejects cognitive skills outside the V1-A allowlist', () => {
+  it('rejects cognitive skills outside the rich closed allowlist', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
       cognitiveSkill: 'creative_writing',
@@ -70,7 +73,7 @@ describe('rich closed question validator', () => {
     );
   });
 
-  it('accepts a cognitive skill from the V1-A allowlist', () => {
+  it('accepts a cognitive skill from the rich closed allowlist', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
       cognitiveSkill: 'comparison',
@@ -214,6 +217,93 @@ describe('rich closed question validator', () => {
     );
   });
 
+  it('requires timeline questions to have at least three unique events', () => {
+    const tooSmall = {
+      ...richClosedQuestionFixture('timeline'),
+      events: [
+        { id: 'event-1', label: 'Dépôt de la motion' },
+        { id: 'event-2', label: 'Débat politique' },
+      ],
+      correctOrder: ['event-1', 'event-2'],
+    };
+    const duplicateIds = {
+      ...richClosedQuestionFixture('timeline'),
+      events: [
+        { id: 'event-1', label: 'Dépôt de la motion' },
+        { id: 'event-1', label: 'Débat politique' },
+        { id: 'event-3', label: 'Vote de la chambre' },
+      ],
+    };
+
+    expect(validateRichClosedQuestion(tooSmall).issues).toContainEqual(
+      expect.objectContaining({ code: 'RICH_CLOSED_TIMELINE_TOO_SMALL' }),
+    );
+    expect(validateRichClosedQuestion(duplicateIds).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_TIMELINE_EVENTS_INVALID',
+      }),
+    );
+  });
+
+  it('requires timeline correctOrder to contain each event exactly once', () => {
+    const incomplete = {
+      ...richClosedQuestionFixture('timeline'),
+      correctOrder: ['event-1', 'event-2'],
+    };
+    const unknownId = {
+      ...richClosedQuestionFixture('timeline'),
+      correctOrder: ['event-1', 'event-2', 'unknown-event'],
+    };
+
+    expect(validateRichClosedQuestion(incomplete).issues).toContainEqual(
+      expect.objectContaining({ code: 'RICH_CLOSED_TIMELINE_INCOMPLETE' }),
+    );
+    expect(validateRichClosedQuestion(unknownId).issues).toContainEqual(
+      expect.objectContaining({ code: 'RICH_CLOSED_TIMELINE_INCOMPLETE' }),
+    );
+  });
+
+  it('requires date_slider to define a valid integer range and correction', () => {
+    const invalidRange = {
+      ...richClosedQuestionFixture('date_slider'),
+      minYear: 1970,
+      maxYear: 1970,
+    };
+    const invalidStep = {
+      ...richClosedQuestionFixture('date_slider'),
+      step: 0,
+    };
+    const invalidCorrection = {
+      ...richClosedQuestionFixture('date_slider'),
+      correctYear: 1971,
+    };
+    const invalidTolerance = {
+      ...richClosedQuestionFixture('date_slider'),
+      toleranceYears: -1,
+    };
+
+    expect(validateRichClosedQuestion(invalidRange).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_DATE_SLIDER_RANGE_INVALID',
+      }),
+    );
+    expect(validateRichClosedQuestion(invalidStep).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_DATE_SLIDER_STEP_INVALID',
+      }),
+    );
+    expect(validateRichClosedQuestion(invalidCorrection).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_DATE_SLIDER_CORRECTION_INVALID',
+      }),
+    );
+    expect(validateRichClosedQuestion(invalidTolerance).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_DATE_SLIDER_TOLERANCE_INVALID',
+      }),
+    );
+  });
+
   it('requires case_qualification to have a short case and a unique correction', () => {
     const question = {
       ...richClosedQuestionFixture('case_qualification'),
@@ -260,6 +350,15 @@ describe('rich closed question validator', () => {
 
   it('validates a complete V1-A exercise', () => {
     const result = validateRichClosedExercise(richClosedExerciseFixture(), {
+      knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('validates a complete V1-B exercise fixture', () => {
+    const result = validateRichClosedExercise(richClosedV1BExerciseFixture(), {
       knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
     });
 

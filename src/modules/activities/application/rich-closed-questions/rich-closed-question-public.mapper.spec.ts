@@ -5,6 +5,7 @@ import {
 import {
   richClosedExerciseFixture,
   richClosedQuestionFixture,
+  richClosedV1BExerciseFixture,
 } from './rich-closed-question.fixtures';
 
 describe('rich closed question public mapper', () => {
@@ -15,6 +16,8 @@ describe('rich closed question public mapper', () => {
     'ordering',
     'case_qualification',
     'error_detection',
+    'timeline',
+    'date_slider',
   ] as const)('maps %s without leaking correction fields', (questionKind) => {
     const publicQuestion = toRichClosedPublicQuestion(
       richClosedQuestionFixture(questionKind),
@@ -27,6 +30,7 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('correctPairs');
     expect(serialized).not.toContain('correctOrder');
     expect(serialized).not.toContain('correctErrorId');
+    expect(serialized).not.toContain('correctYear');
     expect(serialized).not.toContain('correctionPayload');
     expect(serialized).not.toContain('explanation');
   });
@@ -42,6 +46,32 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('correct');
     expect(serialized).not.toContain('correctionPayload');
     expect(serialized).not.toContain('explanation');
+    expect(serialized).not.toContain('score');
+  });
+
+  it('maps a V1-B exercise without leaking private correction data', () => {
+    const publicExercise = toRichClosedPublicExercise(
+      richClosedV1BExerciseFixture(),
+    );
+    const serialized = JSON.stringify(publicExercise);
+
+    expect(publicExercise.questions).toHaveLength(8);
+    expect(
+      publicExercise.questions.map((question) => question.questionKind),
+    ).toEqual([
+      'single_choice',
+      'multiple_choice',
+      'matching',
+      'ordering',
+      'case_qualification',
+      'error_detection',
+      'timeline',
+      'date_slider',
+    ]);
+    expect(serialized).not.toContain('correctOrder');
+    expect(serialized).not.toContain('correctYear');
+    expect(serialized).not.toContain('explanation');
+    expect(serialized).not.toContain('correction');
     expect(serialized).not.toContain('score');
   });
 

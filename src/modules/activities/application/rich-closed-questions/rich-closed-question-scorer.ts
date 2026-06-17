@@ -113,6 +113,18 @@ function normalizeAnswer(answer: unknown): RichClosedAnswer {
         questionKind,
         orderedIds: readStringArray(answer.orderedIds),
       };
+    case 'timeline':
+      return {
+        questionId,
+        questionKind,
+        orderedEventIds: readStringArray(answer.orderedEventIds),
+      };
+    case 'date_slider':
+      return {
+        questionId,
+        questionKind,
+        year: readRequiredInteger(answer.year),
+      };
     case 'error_detection':
       return {
         questionId,
@@ -249,6 +261,59 @@ function scoreQuestion(
         correction: { correctOrder: [...question.correctOrder] },
       });
     }
+    case 'timeline': {
+      const timelineAnswer = answer as Extract<
+        RichClosedAnswer,
+        { questionKind: 'timeline' }
+      >;
+      assertKnownIds(
+        timelineAnswer.orderedEventIds,
+        question.events.map((event) => event.id),
+      );
+
+      if (timelineAnswer.orderedEventIds.length !== question.events.length) {
+        throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+      }
+
+      return buildCorrectionItem({
+        question,
+        answer: timelineAnswer,
+        isCorrect: areStringArraysEqual(
+          timelineAnswer.orderedEventIds,
+          question.correctOrder,
+        ),
+        correction: { correctOrder: [...question.correctOrder] },
+      });
+    }
+    case 'date_slider': {
+      const dateSliderAnswer = answer as Extract<
+        RichClosedAnswer,
+        { questionKind: 'date_slider' }
+      >;
+      assertDateSliderYear(dateSliderAnswer.year, question);
+
+      const minAcceptedYear = Math.max(
+        question.minYear,
+        question.correctYear - question.toleranceYears,
+      );
+      const maxAcceptedYear = Math.min(
+        question.maxYear,
+        question.correctYear + question.toleranceYears,
+      );
+
+      return buildCorrectionItem({
+        question,
+        answer: dateSliderAnswer,
+        isCorrect:
+          Math.abs(dateSliderAnswer.year - question.correctYear) <=
+          question.toleranceYears,
+        correction: {
+          correctYear: question.correctYear,
+          minAcceptedYear,
+          maxAcceptedYear,
+        },
+      });
+    }
   }
 }
 
@@ -287,6 +352,19 @@ function assertKnownIds(submittedIds: string[], knownIds: string[]) {
   }
 }
 
+function assertDateSliderYear(
+  year: number,
+  question: Extract<RichClosedQuestion, { questionKind: 'date_slider' }>,
+) {
+  if (
+    year < question.minYear ||
+    year > question.maxYear ||
+    (year - question.minYear) % question.step !== 0
+  ) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+}
+
 function assertKnownPairs(
   pairs: RichClosedPair[],
   question: Extract<RichClosedQuestion, { questionKind: 'matching' }>,
@@ -316,6 +394,14 @@ function readRequiredString(value: unknown): string {
   }
 
   return value.trim();
+}
+
+function readRequiredInteger(value: unknown): number {
+  if (!Number.isInteger(value)) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+
+  return value as number;
 }
 
 function readStringArray(value: unknown): string[] {
@@ -355,6 +441,7 @@ function hasForbiddenSubmitField(value: unknown): boolean {
   return Object.entries(value).some(([key, nestedValue]) => {
     if (
       key.startsWith('correct') ||
+      key === 'correction' ||
       key === 'correctionPayload' ||
       key === 'explanation' ||
       key === 'feedback' ||
@@ -366,6 +453,7 @@ function hasForbiddenSubmitField(value: unknown): boolean {
       key === 'score' ||
       key === 'partialScore' ||
       key === 'workedSteps' ||
+      key === 'answersPayload' ||
       key === 'expectedAnswer' ||
       key === 'expectedAnswers'
     ) {
@@ -387,6 +475,10 @@ function cloneAnswer(answer: RichClosedAnswer): RichClosedAnswer {
       return { ...answer, pairs: clonePairs(answer.pairs) };
     case 'ordering':
       return { ...answer, orderedIds: [...answer.orderedIds] };
+    case 'timeline':
+      return { ...answer, orderedEventIds: [...answer.orderedEventIds] };
+    case 'date_slider':
+      return { ...answer };
     case 'error_detection':
       return { ...answer };
   }

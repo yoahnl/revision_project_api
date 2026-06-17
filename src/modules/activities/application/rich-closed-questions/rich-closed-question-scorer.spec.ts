@@ -1,5 +1,8 @@
 import { RICH_CLOSED_SUBMIT_INVALID_INPUT } from './rich-closed-question-errors';
-import { richClosedExerciseFixture } from './rich-closed-question.fixtures';
+import {
+  richClosedExerciseFixture,
+  richClosedV1BExerciseFixture,
+} from './rich-closed-question.fixtures';
 import { scoreRichClosedExerciseSubmission } from './rich-closed-question-scorer';
 import type { RichClosedAnswer } from './rich-closed-question.types';
 
@@ -190,6 +193,143 @@ describe('scoreRichClosedExerciseSubmission', () => {
     });
   });
 
+  it('scores timeline and date slider V1-B answers', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1BExerciseFixture(),
+      answers: correctAnswersV1B(),
+    });
+
+    expect(result).toMatchObject({
+      correctAnswers: 8,
+      totalQuestions: 8,
+      score: 1,
+    });
+    expect(
+      result.items.find((item) => item.questionId === 'timeline-1'),
+    ).toMatchObject({
+      isCorrect: true,
+      correction: { correctOrder: ['event-1', 'event-2', 'event-3'] },
+    });
+    expect(
+      result.items.find((item) => item.questionId === 'date-slider-1'),
+    ).toMatchObject({
+      isCorrect: true,
+      correction: {
+        correctYear: 1958,
+        minAcceptedYear: 1958,
+        maxAcceptedYear: 1958,
+      },
+    });
+  });
+
+  it('marks a wrong timeline order as incorrect without partial scoring', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1BExerciseFixture(),
+      answers: correctAnswersV1B().map((answer) =>
+        answer.questionId === 'timeline-1'
+          ? {
+              questionId: 'timeline-1',
+              questionKind: 'timeline',
+              orderedEventIds: ['event-1', 'event-3', 'event-2'],
+            }
+          : answer,
+      ),
+    });
+
+    expect(
+      result.items.find((item) => item.questionId === 'timeline-1'),
+    ).toMatchObject({
+      isCorrect: false,
+      partialScore: 0,
+    });
+  });
+
+  it('rejects duplicate, unknown and incomplete timeline answers', () => {
+    expectInvalidV1B(
+      replaceV1BAnswer({
+        questionId: 'timeline-1',
+        questionKind: 'timeline',
+        orderedEventIds: ['event-1', 'event-1', 'event-3'],
+      }),
+    );
+    expectInvalidV1B(
+      replaceV1BAnswer({
+        questionId: 'timeline-1',
+        questionKind: 'timeline',
+        orderedEventIds: ['event-1', 'event-2', 'unknown-event'],
+      }),
+    );
+    expectInvalidV1B(
+      replaceV1BAnswer({
+        questionId: 'timeline-1',
+        questionKind: 'timeline',
+        orderedEventIds: ['event-1', 'event-2'],
+      }),
+    );
+  });
+
+  it('scores date slider answers with tolerance and rejects invalid years', () => {
+    const exercise = {
+      ...richClosedV1BExerciseFixture(),
+      questions: richClosedV1BExerciseFixture().questions.map((question) =>
+        question.questionKind === 'date_slider'
+          ? { ...question, toleranceYears: 2 }
+          : question,
+      ),
+    };
+    const withinTolerance = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise,
+      answers: correctAnswersV1B().map((answer) =>
+        answer.questionId === 'date-slider-1'
+          ? {
+              questionId: 'date-slider-1',
+              questionKind: 'date_slider',
+              year: 1960,
+            }
+          : answer,
+      ),
+    });
+    const outsideTolerance = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise,
+      answers: correctAnswersV1B().map((answer) =>
+        answer.questionId === 'date-slider-1'
+          ? {
+              questionId: 'date-slider-1',
+              questionKind: 'date_slider',
+              year: 1961,
+            }
+          : answer,
+      ),
+    });
+
+    expect(
+      withinTolerance.items.find((item) => item.questionId === 'date-slider-1'),
+    ).toMatchObject({ isCorrect: true });
+    expect(
+      outsideTolerance.items.find(
+        (item) => item.questionId === 'date-slider-1',
+      ),
+    ).toMatchObject({ isCorrect: false });
+    expectInvalidV1B(
+      replaceV1BAnswer({
+        questionId: 'date-slider-1',
+        questionKind: 'date_slider',
+        year: 1971,
+      }),
+    );
+    expectInvalidV1B(
+      replaceV1BAnswer({
+        questionId: 'date-slider-1',
+        questionKind: 'date_slider',
+        year: 1958.5,
+      } as unknown as RichClosedAnswer),
+    );
+  });
+
   it('rejects incomplete ordering answers', () => {
     expect(() =>
       scoreRichClosedExerciseSubmission({
@@ -327,8 +467,24 @@ function expectInvalid(answers: unknown[]) {
   ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
 }
 
+function expectInvalidV1B(answers: unknown[]) {
+  expect(() =>
+    scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1BExerciseFixture(),
+      answers,
+    }),
+  ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+}
+
 function replaceAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return correctAnswers().map((currentAnswer) =>
+    currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceV1BAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
+  return correctAnswersV1B().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
   );
 }
@@ -368,6 +524,22 @@ function correctAnswers(): RichClosedAnswer[] {
       questionId: 'error-1',
       questionKind: 'error_detection',
       errorId: 'error-a',
+    },
+  ];
+}
+
+function correctAnswersV1B(): RichClosedAnswer[] {
+  return [
+    ...correctAnswers(),
+    {
+      questionId: 'timeline-1',
+      questionKind: 'timeline',
+      orderedEventIds: ['event-1', 'event-2', 'event-3'],
+    },
+    {
+      questionId: 'date-slider-1',
+      questionKind: 'date_slider',
+      year: 1958,
     },
   ];
 }

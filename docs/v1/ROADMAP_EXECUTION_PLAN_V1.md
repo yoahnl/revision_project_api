@@ -10,6 +10,7 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 | V1-014 | Revision session integration V1 | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_014_REVISION_SESSION_INTEGRATION_V1.md |
 | V1-015 | Rich demo fixtures V1 | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_015_016_RICH_DEMO_SEED_AND_SMOKE.md |
 | V1-016 | E2E/smoke rich questions V1 | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_015_016_RICH_DEMO_SEED_AND_SMOKE.md |
+| V1-017 | Timeline/date slider V1-B | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_017_TIMELINE_DATE_SLIDER.md |
 
 ## Lots détaillés
 
@@ -60,3 +61,11 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 - Périmètre inclus : smoke `/activities/rich-closed/start`, get, result avant submit, submit, result après submit, invalides, Today rich closed, revision session rich closed, anti-fuite récursif.
 - Non-objectifs : refonte frontend, génération Genkit réelle, widgets libres, V1-017.
 - Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_015_016_RICH_DEMO_SEED_AND_SMOKE.md`.
+
+### V1-017 — Timeline/date slider V1-B
+
+- Objectif : ajouter les types rich closed fermés `timeline` et `date_slider`.
+- Pourquoi maintenant : V1-A, Today, revision sessions, seed et smoke sont stabilisés.
+- Périmètre inclus : contrat backend, validation, mapper public anti-fuite, scoring, Genkit mockable, fixture V1-B dédiée, smoke E2E.
+- Non-objectifs : V1-018, widgets libres, provider IA réel, migration Prisma.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_017_TIMELINE_DATE_SLIDER.md`.

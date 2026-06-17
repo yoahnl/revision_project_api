@@ -54,6 +54,7 @@ import {
 import {
   richClosedExerciseFixture,
   richClosedQuestionFixture,
+  richClosedV1BExerciseFixture,
 } from '../application/rich-closed-questions/rich-closed-question.fixtures';
 import type {
   AiGenerationObservation,
@@ -181,6 +182,47 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     );
   });
 
+  it('generates a validated V1-B rich closed exercise when the mix requests timeline and date_slider', async () => {
+    mockGenerate.mockResolvedValue({ output: generatedExerciseV1B() });
+    const observer = createObserver();
+
+    const exercise = await new GenkitRichClosedQuestionGenerator(
+      observer,
+    ).generate(generationInputV1B());
+    const [generateInput] = mockGenerate.mock.calls[0] ?? [];
+
+    expect(exercise.questions.map((question) => question.questionKind)).toEqual(
+      [
+        'single_choice',
+        'multiple_choice',
+        'matching',
+        'ordering',
+        'case_qualification',
+        'error_detection',
+        'timeline',
+        'date_slider',
+      ],
+    );
+    expect(generateInput?.prompt).toContain('timeline');
+    expect(generateInput?.prompt).toContain('date_slider');
+    expect(generateInput?.prompt).toContain(
+      'timeline et date_slider sont des types V1-B fermés',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Tu ne dois jamais produire true_false, true_false_grid',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Tu ne dois jamais produire de widget libre.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Clés exactes timeline: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, events, correctOrder, explanation.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Clés exactes date_slider: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, minYear, maxYear, step, correctYear, toleranceYears, explanation.',
+    );
+    expect(getObservedObservation(observer).status).toBe('success');
+  });
+
   it('logs metadata-only diagnostics when generated question count is wrong', async () => {
     mockGenerate.mockResolvedValue({
       output: {
@@ -273,14 +315,14 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     expectNoSensitiveDiagnosticLog(errorLog);
   });
 
-  it('rejects output with a question kind outside V1-A', async () => {
+  it('rejects output with a question kind outside the rich closed allowlist', async () => {
     mockGenerate.mockResolvedValue({
       output: {
         ...generatedExercise(),
         questions: [
           {
             ...richClosedQuestionFixture('single_choice'),
-            questionKind: 'timeline',
+            questionKind: 'true_false_grid',
           },
         ],
       },
@@ -296,6 +338,23 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     expect(getObservedObservation(observer).errorCode).toBe(
       RICH_CLOSED_GENERATION_SCHEMA_INVALID,
     );
+  });
+
+  it('rejects V1-B output carrying free-answer fields', async () => {
+    mockGenerate.mockResolvedValue({
+      output: {
+        ...generatedExerciseV1B(),
+        questions: generatedExerciseV1B().questions.map((question) =>
+          question.questionKind === 'timeline'
+            ? { ...question, answerText: 'réponse libre interdite' }
+            : question,
+        ),
+      },
+    });
+
+    await expect(
+      new GenkitRichClosedQuestionGenerator().generate(generationInputV1B()),
+    ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_SCHEMA_INVALID });
   });
 
   it('logs schema diagnostics from direct issues without leaking sensitive context', async () => {
@@ -689,6 +748,10 @@ function generatedExercise(): RichClosedExercise {
   return richClosedExerciseFixture();
 }
 
+function generatedExerciseV1B(): RichClosedExercise {
+  return richClosedV1BExerciseFixture();
+}
+
 function generationInput() {
   return {
     studentId: 'student-1',
@@ -721,6 +784,23 @@ function generationInput() {
       error_detection: 1,
     },
     complexityProfile: 'exam' as const,
+  };
+}
+
+function generationInputV1B() {
+  return {
+    ...generationInput(),
+    questionCount: 8,
+    questionTypeMix: {
+      single_choice: 1,
+      multiple_choice: 1,
+      matching: 1,
+      ordering: 1,
+      case_qualification: 1,
+      error_detection: 1,
+      timeline: 1,
+      date_slider: 1,
+    },
   };
 }
 

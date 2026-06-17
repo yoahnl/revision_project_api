@@ -78,6 +78,27 @@ export function toRichClosedPublicQuestion(
         questionKind: question.questionKind,
         items: cloneLabelItems(question.items),
       };
+    case 'timeline':
+      return {
+        ...base,
+        questionKind: question.questionKind,
+        ...(question.instruction === undefined
+          ? {}
+          : { instruction: question.instruction }),
+        events: cloneTimelineEvents(question.events),
+      };
+    case 'date_slider':
+      return {
+        ...base,
+        questionKind: question.questionKind,
+        ...(question.instruction === undefined
+          ? {}
+          : { instruction: question.instruction }),
+        minYear: question.minYear,
+        maxYear: question.maxYear,
+        step: question.step,
+        toleranceYears: question.toleranceYears,
+      };
     case 'case_qualification':
       return {
         ...base,
@@ -108,5 +129,17 @@ function cloneLabelItems(items: Array<{ id: string; label: string }>) {
   return items.map((item) => ({
     id: item.id,
     label: item.label,
+  }));
+}
+
+function cloneTimelineEvents(
+  events: Array<{ id: string; label: string; description?: string | null }>,
+) {
+  return events.map((event) => ({
+    id: event.id,
+    label: event.label,
+    ...(event.description === undefined
+      ? {}
+      : { description: event.description }),
   }));
 }

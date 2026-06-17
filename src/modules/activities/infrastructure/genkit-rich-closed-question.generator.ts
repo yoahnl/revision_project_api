@@ -33,7 +33,7 @@ import {
 } from '../application/rich-closed-questions/rich-closed-question-generation-profile';
 
 export const RICH_CLOSED_FLOW_NAME = 'richClosedQuestionGeneration';
-export const RICH_CLOSED_PROMPT_VERSION = 'rich-closed-v1a-001';
+export const RICH_CLOSED_PROMPT_VERSION = 'rich-closed-v1b-001';
 export const RICH_CLOSED_SCHEMA_VERSION = RICH_CLOSED_EXERCISE_VERSION;
 export const RICH_CLOSED_GENERATION_FAILED = 'RICH_CLOSED_GENERATION_FAILED';
 export const RICH_CLOSED_GENERATION_SCHEMA_INVALID =
@@ -64,6 +64,14 @@ const LabelItemSchema = z
   .object({
     id: NonEmptyStringSchema,
     label: NonEmptyStringSchema,
+  })
+  .strict();
+
+const TimelineEventSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    label: NonEmptyStringSchema,
+    description: NonEmptyStringSchema.nullable().optional(),
   })
   .strict();
 
@@ -125,6 +133,31 @@ const OrderingQuestionSchema = z
   })
   .strict();
 
+const TimelineQuestionSchema = z
+  .object({
+    ...QuestionBaseSchema,
+    questionKind: z.literal('timeline'),
+    instruction: NonEmptyStringSchema.nullable().optional(),
+    events: z.array(TimelineEventSchema).min(3).max(6),
+    correctOrder: z.array(NonEmptyStringSchema).min(3).max(6),
+    explanation: z.string().trim().min(8),
+  })
+  .strict();
+
+const DateSliderQuestionSchema = z
+  .object({
+    ...QuestionBaseSchema,
+    questionKind: z.literal('date_slider'),
+    instruction: NonEmptyStringSchema.nullable().optional(),
+    minYear: z.number().int(),
+    maxYear: z.number().int(),
+    step: z.number().int().min(1),
+    correctYear: z.number().int(),
+    toleranceYears: z.number().int().min(0),
+    explanation: z.string().trim().min(8),
+  })
+  .strict();
+
 const CaseQualificationQuestionSchema = z
   .object({
     ...QuestionBaseSchema,
@@ -154,6 +187,8 @@ const RichClosedQuestionSchema = z.discriminatedUnion('questionKind', [
   OrderingQuestionSchema,
   CaseQualificationQuestionSchema,
   ErrorDetectionQuestionSchema,
+  TimelineQuestionSchema,
+  DateSliderQuestionSchema,
 ]);
 
 const GeneratedRichClosedExerciseSchema = z
@@ -573,7 +608,8 @@ function buildRichClosedPrompt(input: {
     'Tu dois respecter exactement les questionKind demandés.',
     'Tu dois respecter questionTypeMix.',
     `questionTypeMix: ${JSON.stringify(input.questionTypeMix)}`,
-    'Tu dois produire uniquement les types V1-A: single_choice, multiple_choice, matching, ordering, case_qualification, error_detection.',
+    'Tu dois produire uniquement les types rich closed autorisés: single_choice, multiple_choice, matching, ordering, case_qualification, error_detection, timeline, date_slider.',
+    'timeline et date_slider sont des types V1-B fermés: ils ne doivent jamais demander une réponse libre.',
     'Tu dois produire des questions fermées.',
     'Tu dois interdire toute réponse libre.',
     'Tu dois utiliser les chunks fournis comme seule source de vérité.',
@@ -584,13 +620,16 @@ function buildRichClosedPrompt(input: {
     'Tu dois produire error_detection avec une erreur dominante unique.',
     'Tu dois produire matching avec au moins 3 paires univoques.',
     'Tu dois produire ordering avec au moins 3 items et un ordre complet.',
+    'Tu dois produire timeline avec 3 à 6 events, des ids uniques, et un correctOrder complet.',
+    'Tu dois produire date_slider avec des années entières, minYear < maxYear, step >= 1, correctYear dans les bornes et toleranceYears >= 0.',
     'Tu dois produire multiple_choice avec au moins 2 bonnes réponses.',
     'Tu dois éviter les questions de pure restitution.',
     'Tu dois éviter les prompts commençant par “Qui”, “Quand”, “Quelle date”, “Quelle est la définition”, sauf nécessité exceptionnelle.',
     'Tu dois produire des explications privées de correction.',
+    'Les corrections privées correctChoiceId, correctChoiceIds, correctPairs, correctOrder, correctErrorId et correctYear ne doivent jamais être exposées dans un payload public pré-submit.',
     'Tu ne dois jamais inclure de modelAnswer, answerText, freeTextAnswer, textAnswer, HTML, SVG, Mermaid, markdown rendu libre ou widget libre.',
     'Tu ne dois jamais produire de widget libre.',
-    'Tu ne dois jamais produire true_false, true_false_grid, timeline, date_slider, image_choice, diagram_labeling, institution_matrix, cause_consequence, calculation_mcq ou fill_blank_dropdown.',
+    'Tu ne dois jamais produire true_false, true_false_grid, image_choice, diagram_labeling, institution_matrix, cause_consequence, calculation_mcq ou fill_blank_dropdown.',
     'Tu dois retourner un JSON object only: un objet JSON brut, sans Markdown, sans code fences, sans texte avant ou après.',
     'Aucun champ additionnel n’est autorisé.',
     `cognitiveSkill autorisés: ${RICH_CLOSED_COGNITIVE_SKILLS.join(', ')}`,
@@ -599,6 +638,8 @@ function buildRichClosedPrompt(input: {
     'Clés exactes multiple_choice: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, choices, minSelections, maxSelections, correctChoiceIds, explanation.',
     'Clés exactes matching: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, leftItems, rightItems, correctPairs, explanation.',
     'Clés exactes ordering: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, items, correctOrder, explanation.',
+    'Clés exactes timeline: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, events, correctOrder, explanation.',
+    'Clés exactes date_slider: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, minYear, maxYear, step, correctYear, toleranceYears, explanation.',
     'Clés exactes case_qualification: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, caseText, choices, correctChoiceId, explanation.',
     'Clés exactes error_detection: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, statement, errorOptions, correctErrorId, explanation.',
     'Tu dois retourner uniquement du JSON strict conforme au schema demandé.',
@@ -628,6 +669,8 @@ function buildRichClosedRepairPrompt(input: {
     '- multiple_choice: choices, minSelections, maxSelections, correctChoiceIds, explanation.',
     '- matching: leftItems, rightItems, correctPairs, explanation.',
     '- ordering: items, correctOrder, explanation.',
+    '- timeline: events (3 à 6), correctOrder complet, explanation.',
+    '- date_slider: minYear, maxYear, step, correctYear, toleranceYears, explanation.',
     '- case_qualification: caseText, choices, correctChoiceId, explanation.',
     '- error_detection: statement, errorOptions, correctErrorId, explanation.',
     'Tu dois respecter le nombre exact de questions, le mix exact, et uniquement les sourceChunkIds autorisés.',

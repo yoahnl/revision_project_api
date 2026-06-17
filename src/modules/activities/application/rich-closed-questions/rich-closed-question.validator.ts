@@ -13,6 +13,8 @@ const MAX_PROMPT_LENGTH = 700;
 const MAX_CASE_TEXT_LENGTH = 900;
 const MAX_STATEMENT_LENGTH = 900;
 const MAX_EXPLANATION_LENGTH = 1200;
+const MAX_INSTRUCTION_LENGTH = 400;
+const MAX_TIMELINE_EVENT_DESCRIPTION_LENGTH = 500;
 const MIN_CHOICES = 2;
 const MAX_CHOICES = 6;
 const MIN_STRUCTURED_ITEMS = 3;
@@ -109,7 +111,7 @@ export function validateRichClosedQuestion(
     issues.push(
       issue(
         'RICH_CLOSED_KIND_UNSUPPORTED',
-        'Question kind is not part of V1-A',
+        'Question kind is not part of the rich closed allowlist',
         'questionKind',
       ),
     );
@@ -133,6 +135,12 @@ export function validateRichClosedQuestion(
       break;
     case 'ordering':
       validateOrderingQuestion(question, issues);
+      break;
+    case 'timeline':
+      validateTimelineQuestion(question, issues);
+      break;
+    case 'date_slider':
+      validateDateSliderQuestion(question, issues);
       break;
     case 'case_qualification':
       validateCaseQualificationQuestion(question, issues);
@@ -187,7 +195,7 @@ function validateCommonQuestionFields(
     issues.push(
       issue(
         'RICH_CLOSED_COGNITIVE_SKILL_INVALID',
-        'Question cognitive skill is not part of the V1-A allowlist',
+        'Question cognitive skill is not part of the rich closed allowlist',
         'cognitiveSkill',
       ),
     );
@@ -355,6 +363,101 @@ function validateOrderingQuestion(
     );
   }
 
+  validateExplanation(question.explanation, issues);
+}
+
+function validateTimelineQuestion(
+  question: Record<string, unknown>,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  const events = readTimelineEvents(question.events, issues, 'events');
+  const eventIds = [...idSet(events)];
+  const correctOrder = readStringArray(question.correctOrder);
+
+  if (events.length < MIN_STRUCTURED_ITEMS) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TIMELINE_TOO_SMALL',
+        'Timeline requires at least three events',
+        'events',
+      ),
+    );
+  }
+
+  if (
+    correctOrder.length !== eventIds.length ||
+    hasDuplicates(correctOrder) ||
+    correctOrder.some((eventId) => !eventIds.includes(eventId))
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TIMELINE_INCOMPLETE',
+        'Timeline correction must contain each event exactly once',
+        'correctOrder',
+      ),
+    );
+  }
+
+  validateOptionalInstruction(question.instruction, issues);
+  validateExplanation(question.explanation, issues);
+}
+
+function validateDateSliderQuestion(
+  question: Record<string, unknown>,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  const minYear = readInteger(question.minYear);
+  const maxYear = readInteger(question.maxYear);
+  const step = readInteger(question.step);
+  const correctYear = readInteger(question.correctYear);
+  const toleranceYears = readInteger(question.toleranceYears);
+
+  if (minYear === null || maxYear === null || minYear >= maxYear) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DATE_SLIDER_RANGE_INVALID',
+        'Date slider must define an increasing integer year range',
+      ),
+    );
+  }
+
+  if (step === null || step < 1) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DATE_SLIDER_STEP_INVALID',
+        'Date slider step must be an integer greater than or equal to one',
+        'step',
+      ),
+    );
+  }
+
+  if (
+    correctYear === null ||
+    minYear === null ||
+    maxYear === null ||
+    correctYear < minYear ||
+    correctYear > maxYear
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DATE_SLIDER_CORRECTION_INVALID',
+        'Date slider correction must be within the public year range',
+        'correctYear',
+      ),
+    );
+  }
+
+  if (toleranceYears === null || toleranceYears < 0) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_DATE_SLIDER_TOLERANCE_INVALID',
+        'Date slider tolerance must be a positive or zero integer',
+        'toleranceYears',
+      ),
+    );
+  }
+
+  validateOptionalInstruction(question.instruction, issues);
   validateExplanation(question.explanation, issues);
 }
 
@@ -536,6 +639,39 @@ function readLabelItems(
   return items;
 }
 
+function readTimelineEvents(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+) {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TIMELINE_EVENTS_INVALID',
+        'Timeline events must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const events = value.filter(isTimelineEvent);
+  if (
+    events.length !== value.length ||
+    hasDuplicates(events.map((event) => event.id))
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TIMELINE_EVENTS_INVALID',
+        'Timeline events must have unique non-empty ids and labels',
+        path,
+      ),
+    );
+  }
+
+  return events;
+}
+
 function readPairs(value: unknown): RichClosedPair[] {
   if (!Array.isArray(value)) {
     return [];
@@ -545,6 +681,25 @@ function readPairs(value: unknown): RichClosedPair[] {
     (pair): pair is RichClosedPair =>
       isRecord(pair) && plainString(pair.leftId) && plainString(pair.rightId),
   );
+}
+
+function validateOptionalInstruction(
+  instruction: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  if (
+    instruction !== undefined &&
+    instruction !== null &&
+    !boundedString(instruction, 1, MAX_INSTRUCTION_LENGTH)
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTRUCTION_INVALID',
+        'Optional instruction must be bounded when provided',
+        'instruction',
+      ),
+    );
+  }
 }
 
 function validateExplanation(
@@ -598,6 +753,25 @@ function isLabelItem(value: unknown): value is { id: string; label: string } {
   );
 }
 
+function isTimelineEvent(value: unknown): value is {
+  id: string;
+  label: string;
+  description?: string | null;
+} {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    boundedString(value.label, 1, 220) &&
+    (value.description === undefined ||
+      value.description === null ||
+      boundedString(
+        value.description,
+        1,
+        MAX_TIMELINE_EVENT_DESCRIPTION_LENGTH,
+      ))
+  );
+}
+
 function containsFreeAnswerField(value: Record<string, unknown>): boolean {
   // Closed questions may contain private corrections, but never text-answer
   // shaped fields. This keeps V1-A separate from the open_question activity.
@@ -616,6 +790,10 @@ function idSet(items: Array<{ id: string }>): Set<string> {
 
 function readString(value: unknown): string {
   return typeof value === 'string' ? value : '';
+}
+
+function readInteger(value: unknown): number | null {
+  return Number.isInteger(value) ? (value as number) : null;
 }
 
 function readStringArray(value: unknown): string[] {

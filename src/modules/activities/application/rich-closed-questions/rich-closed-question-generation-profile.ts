@@ -10,6 +10,8 @@ export const RICH_CLOSED_QUESTION_COUNT_INVALID =
 const MIN_QUESTION_COUNT = 1;
 const MAX_QUESTION_COUNT = 20;
 const MAX_SINGLE_CHOICE_RATIO = 0.4;
+const V1A_FULL_EXERCISE_COUNT = 6;
+const V1B_FULL_EXERCISE_COUNT = RICH_CLOSED_QUESTION_KINDS.length;
 
 const SMALL_EXERCISE_KIND_ORDER: RichClosedQuestionKind[] = [
   'case_qualification',
@@ -26,6 +28,14 @@ const FULL_EXERCISE_BASE_MIX: Record<RichClosedQuestionKind, number> = {
   ordering: 1,
   case_qualification: 1,
   error_detection: 1,
+  timeline: 0,
+  date_slider: 0,
+};
+
+const FULL_EXERCISE_V1B_BASE_MIX: Record<RichClosedQuestionKind, number> = {
+  ...FULL_EXERCISE_BASE_MIX,
+  timeline: 1,
+  date_slider: 1,
 };
 
 const DISTRIBUTION_ORDER_BY_PROFILE: Record<
@@ -38,6 +48,8 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'matching',
     'multiple_choice',
     'ordering',
+    'timeline',
+    'date_slider',
     'single_choice',
   ],
   exam: [
@@ -46,6 +58,8 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'matching',
     'multiple_choice',
     'ordering',
+    'timeline',
+    'date_slider',
     'single_choice',
   ],
   advanced: [
@@ -53,6 +67,8 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'error_detection',
     'ordering',
     'matching',
+    'timeline',
+    'date_slider',
     'multiple_choice',
     'single_choice',
   ],
@@ -74,13 +90,18 @@ export function resolveRichClosedQuestionTypeMix(
     throw new Error(RICH_CLOSED_QUESTION_COUNT_INVALID);
   }
 
-  if (input.questionCount < RICH_CLOSED_QUESTION_KINDS.length) {
+  if (input.questionCount < V1A_FULL_EXERCISE_COUNT) {
     return buildSmallExerciseMix(input.questionCount);
   }
 
-  const mix = { ...FULL_EXERCISE_BASE_MIX };
+  const usesV1BBase = input.questionCount >= V1B_FULL_EXERCISE_COUNT;
+  const mix = usesV1BBase
+    ? { ...FULL_EXERCISE_V1B_BASE_MIX }
+    : { ...FULL_EXERCISE_BASE_MIX };
   const profile = input.complexityProfile ?? 'standard';
-  let remaining = input.questionCount - RICH_CLOSED_QUESTION_KINDS.length;
+  let remaining =
+    input.questionCount -
+    (usesV1BBase ? V1B_FULL_EXERCISE_COUNT : V1A_FULL_EXERCISE_COUNT);
   let cursor = 0;
 
   while (remaining > 0) {
@@ -118,5 +139,7 @@ function emptyMix(): Record<RichClosedQuestionKind, number> {
     ordering: 0,
     case_qualification: 0,
     error_detection: 0,
+    timeline: 0,
+    date_slider: 0,
   };
 }
