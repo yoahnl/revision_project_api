@@ -149,6 +149,60 @@ describe('StartRevisionSessionUseCase', () => {
     expect(result.currentAction.kind).toBe('DIAGNOSTIC_QUIZ');
   });
 
+  it('creates a bounded rich closed exercise launcher without starting an activity', async () => {
+    const repository = createRevisionSessionsRepository();
+    const startNextActivity = createStartNextActivityUseCase();
+    const startOpenQuestionActivity = createStartOpenQuestionActivityUseCase();
+    const useCase = new StartRevisionSessionUseCase(
+      repository,
+      startNextActivity,
+      startOpenQuestionActivity,
+    );
+
+    const result = await useCase.execute({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      knowledgeUnitId: 'unit-1',
+      preferredAction: 'rich_closed_exercise',
+    });
+
+    expect(startNextActivity.execute.mock.calls).toHaveLength(0);
+    expect(startOpenQuestionActivity.execute.mock.calls).toHaveLength(0);
+    expect(repository.createWithInitialAction.mock.calls).toEqual([
+      [
+        {
+          studentId: 'student-1',
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnitId: 'unit-1',
+          action: {
+            kind: 'RICH_CLOSED_EXERCISE',
+            status: 'READY',
+            displayOrder: 0,
+            activitySessionId: null,
+            documentId: 'document-1',
+            knowledgeUnitId: 'unit-1',
+          },
+        },
+      ],
+    ]);
+    expect(result.currentAction.kind).toBe('RICH_CLOSED_EXERCISE');
+    expect(result.currentAction.activitySessionId).toBeNull();
+    expect(result.currentAction.payload).toEqual({
+      type: 'rich_closed_exercise',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      knowledgeUnitTitle: 'Notion 1',
+      reason: 'Questions riches recommandées pour consolider cette notion.',
+      estimatedMinutes: 8,
+      preferredAction: 'rich_closed_exercise',
+    });
+    expect(JSON.stringify(result)).not.toContain('questions');
+    expect(JSON.stringify(result)).not.toContain('correction');
+    expect(JSON.stringify(result)).not.toContain('correctChoiceId');
+  });
+
   it('rejects open question preferred action without a knowledge unit', async () => {
     const useCase = new StartRevisionSessionUseCase(
       createRevisionSessionsRepository(),
@@ -165,6 +219,22 @@ describe('StartRevisionSessionUseCase', () => {
     ).rejects.toThrow(
       'Open question revision session requires a knowledge unit',
     );
+  });
+
+  it('rejects rich closed preferred action without a knowledge unit', async () => {
+    const useCase = new StartRevisionSessionUseCase(
+      createRevisionSessionsRepository(),
+      createStartNextActivityUseCase(),
+      createStartOpenQuestionActivityUseCase(),
+    );
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        preferredAction: 'rich_closed_exercise',
+      }),
+    ).rejects.toThrow('Rich closed revision session requires a knowledge unit');
   });
 });
 
@@ -202,6 +272,7 @@ function createRevisionSessionsRepository(): jest.Mocked<RevisionSessionsReposit
           subjectId: input.subjectId,
           documentId: input.knowledgeUnitId ? 'document-1' : null,
           knowledgeUnitId: input.knowledgeUnitId ?? null,
+          knowledgeUnitTitle: input.knowledgeUnitId ? 'Notion 1' : null,
         }),
       ),
     createWithInitialAction: jest
@@ -237,16 +308,19 @@ function createStartOpenQuestionActivityUseCase(): jest.Mocked<StartOpenQuestion
 }
 
 function revisionSessionResponse(
-  kind: 'DIAGNOSTIC_QUIZ' | 'OPEN_QUESTION',
+  kind: 'DIAGNOSTIC_QUIZ' | 'OPEN_QUESTION' | 'RICH_CLOSED_EXERCISE',
   activitySessionId: string,
 ) {
+  const isKnowledgeUnitAction =
+    kind === 'OPEN_QUESTION' || kind === 'RICH_CLOSED_EXERCISE';
+
   return {
     session: {
       id: 'revision-session-1',
       status: 'STARTED' as const,
       subjectId: 'subject-1',
-      documentId: kind === 'OPEN_QUESTION' ? 'document-1' : null,
-      knowledgeUnitId: kind === 'OPEN_QUESTION' ? 'unit-1' : null,
+      documentId: isKnowledgeUnitAction ? 'document-1' : null,
+      knowledgeUnitId: isKnowledgeUnitAction ? 'unit-1' : null,
       createdAt: new Date('2026-06-15T10:00:00.000Z'),
       completedAt: null,
     },
@@ -255,13 +329,25 @@ function revisionSessionResponse(
       kind,
       status: 'READY' as const,
       displayOrder: 0,
-      activitySessionId,
-      documentId: kind === 'OPEN_QUESTION' ? 'document-1' : null,
-      knowledgeUnitId: kind === 'OPEN_QUESTION' ? 'unit-1' : null,
+      activitySessionId:
+        kind === 'RICH_CLOSED_EXERCISE' ? null : activitySessionId,
+      documentId: isKnowledgeUnitAction ? 'document-1' : null,
+      knowledgeUnitId: isKnowledgeUnitAction ? 'unit-1' : null,
       payload:
-        kind === 'OPEN_QUESTION'
-          ? { type: 'open_question', sessionId: activitySessionId }
-          : { type: 'diagnostic_quiz', sessionId: activitySessionId },
+        kind === 'RICH_CLOSED_EXERCISE'
+          ? {
+              type: 'rich_closed_exercise',
+              subjectId: 'subject-1',
+              documentId: 'document-1',
+              knowledgeUnitId: 'unit-1',
+              reason:
+                'Questions riches recommandées pour consolider cette notion.',
+              estimatedMinutes: 8,
+              preferredAction: 'rich_closed_exercise',
+            }
+          : kind === 'OPEN_QUESTION'
+            ? { type: 'open_question', sessionId: activitySessionId }
+            : { type: 'diagnostic_quiz', sessionId: activitySessionId },
     },
     history: [
       {
@@ -269,9 +355,10 @@ function revisionSessionResponse(
         kind,
         status: 'READY' as const,
         displayOrder: 0,
-        activitySessionId,
-        documentId: kind === 'OPEN_QUESTION' ? 'document-1' : null,
-        knowledgeUnitId: kind === 'OPEN_QUESTION' ? 'unit-1' : null,
+        activitySessionId:
+          kind === 'RICH_CLOSED_EXERCISE' ? null : activitySessionId,
+        documentId: isKnowledgeUnitAction ? 'document-1' : null,
+        knowledgeUnitId: isKnowledgeUnitAction ? 'unit-1' : null,
       },
     ],
   };

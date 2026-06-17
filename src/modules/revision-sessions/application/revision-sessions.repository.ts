@@ -13,6 +13,13 @@ export interface RevisionSessionStartContext {
   subjectId: string;
   documentId: string | null;
   knowledgeUnitId: string | null;
+  knowledgeUnitTitle: string | null;
+}
+
+export interface RevisionSessionAllowedKnowledgeUnit {
+  id: string;
+  documentId: string | null;
+  title: string | null;
 }
 
 export interface RevisionSessionPlanningContext {
@@ -31,6 +38,7 @@ export interface RevisionSessionPlanningContext {
     knowledgeUnitId: string | null;
   }>;
   allowedKnowledgeUnitIds: string[];
+  allowedKnowledgeUnits: RevisionSessionAllowedKnowledgeUnit[];
 }
 
 export interface RevisionSessionsRepository {

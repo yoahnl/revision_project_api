@@ -1,16 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { StartNextActivityUseCase } from '../../activities/application/start-next-activity.use-case';
 import { StartOpenQuestionActivityUseCase } from '../../activities/application/start-open-question-activity.use-case';
-import type {
-  DiagnosticQuizActivity,
-  OpenQuestionActivity,
-} from '../../activities/application/activities.repository';
 import { selectDeterministicRevisionSessionAction } from '../domain/deterministic-revision-session-action-selector';
 import type {
   RevisionCoachNextActionDecision,
   RevisionCoachNextActionInput,
 } from '../domain/revision-coach-next-action.entity';
-import type { RevisionSessionResponseDto } from '../domain/revision-session.entity';
+import type {
+  RevisionSessionActionPayload,
+  RevisionSessionResponseDto,
+  RevisionSessionRichClosedExercisePayload,
+} from '../domain/revision-session.entity';
 import {
   REVISION_COACH_NEXT_ACTION_GENERATOR,
   type RevisionCoachNextActionGenerator,
@@ -47,9 +47,11 @@ export class RequestNextRevisionSessionActionUseCase {
 
     const coachInput = toCoachInput(input.studentId, context);
     const decision = await this.resolveDecision(coachInput);
-    const activity = await this.createActivity({
+    const actionPayload = await this.createActionPayload({
       studentId: input.studentId,
       subjectId: context.session.subjectId,
+      sessionDocumentId: context.session.documentId,
+      context,
       decision,
     });
     const response = await this.revisionSessionsRepository.appendAction({
@@ -58,12 +60,9 @@ export class RequestNextRevisionSessionActionUseCase {
       action: {
         kind: decision.actionKind,
         status: 'READY',
-        activitySessionId: activity.sessionId,
-        documentId: activity.documentId ?? context.session.documentId,
-        knowledgeUnitId:
-          decision.actionKind === 'OPEN_QUESTION'
-            ? decision.knowledgeUnitId
-            : decision.knowledgeUnitId,
+        activitySessionId: actionPayload.activitySessionId,
+        documentId: actionPayload.documentId,
+        knowledgeUnitId: actionPayload.knowledgeUnitId,
       },
     });
 
@@ -72,7 +71,7 @@ export class RequestNextRevisionSessionActionUseCase {
       currentAction: response.currentAction
         ? {
             ...response.currentAction,
-            payload: activity,
+            payload: actionPayload.payload,
           }
         : null,
     };
@@ -91,28 +90,73 @@ export class RequestNextRevisionSessionActionUseCase {
     }
   }
 
-  private async createActivity(input: {
+  private async createActionPayload(input: {
     studentId: string;
     subjectId: string;
+    sessionDocumentId: string | null;
+    context: RevisionSessionPlanningContext;
     decision: RevisionCoachNextActionDecision;
-  }): Promise<DiagnosticQuizActivity | OpenQuestionActivity> {
+  }): Promise<{
+    payload: RevisionSessionActionPayload;
+    activitySessionId: string | null;
+    documentId: string | null;
+    knowledgeUnitId: string | null;
+  }> {
     if (input.decision.actionKind === 'OPEN_QUESTION') {
       if (!input.decision.knowledgeUnitId) {
         throw new Error('Revision coach no action available');
       }
 
-      return this.startOpenQuestionActivity.execute({
+      const activity = await this.startOpenQuestionActivity.execute({
         studentId: input.studentId,
         subjectId: input.subjectId,
         knowledgeUnitId: input.decision.knowledgeUnitId,
       });
+
+      return {
+        payload: activity,
+        activitySessionId: activity.sessionId,
+        documentId: activity.documentId ?? input.sessionDocumentId,
+        knowledgeUnitId: activity.knowledgeUnitId,
+      };
     }
 
-    return this.startNextActivity.execute({
+    if (input.decision.actionKind === 'RICH_CLOSED_EXERCISE') {
+      if (!input.decision.knowledgeUnitId) {
+        throw new Error('Revision coach no action available');
+      }
+
+      const knowledgeUnit = input.context.allowedKnowledgeUnits.find(
+        (unit) => unit.id === input.decision.knowledgeUnitId,
+      );
+      const documentId = knowledgeUnit?.documentId ?? input.sessionDocumentId;
+
+      return {
+        payload: createRichClosedExercisePayload({
+          subjectId: input.subjectId,
+          documentId,
+          knowledgeUnitId: input.decision.knowledgeUnitId,
+          knowledgeUnitTitle: knowledgeUnit?.title ?? null,
+          reasonCode: input.decision.reasonCode,
+        }),
+        activitySessionId: null,
+        documentId,
+        knowledgeUnitId: input.decision.knowledgeUnitId,
+      };
+    }
+
+    const activity = await this.startNextActivity.execute({
       studentId: input.studentId,
       subjectId: input.subjectId,
       knowledgeUnitId: input.decision.knowledgeUnitId ?? undefined,
     });
+
+    return {
+      payload: activity,
+      activitySessionId: activity.sessionId,
+      documentId: activity.documentId ?? input.sessionDocumentId,
+      knowledgeUnitId: input.decision.knowledgeUnitId,
+    };
   }
 }
 
@@ -127,7 +171,7 @@ function toCoachInput(
       : null;
   const availableActions =
     context.allowedKnowledgeUnitIds.length > 0
-      ? (['DIAGNOSTIC_QUIZ', 'OPEN_QUESTION'] as const)
+      ? (['DIAGNOSTIC_QUIZ', 'OPEN_QUESTION', 'RICH_CLOSED_EXERCISE'] as const)
       : (['DIAGNOSTIC_QUIZ'] as const);
 
   return {
@@ -168,7 +212,8 @@ function normalizeDecision(
   }
 
   if (
-    decision.actionKind === 'OPEN_QUESTION' &&
+    (decision.actionKind === 'OPEN_QUESTION' ||
+      decision.actionKind === 'RICH_CLOSED_EXERCISE') &&
     (decision.knowledgeUnitId === null ||
       !input.allowedKnowledgeUnitIds.includes(decision.knowledgeUnitId))
   ) {
@@ -176,4 +221,38 @@ function normalizeDecision(
   }
 
   return decision;
+}
+
+function createRichClosedExercisePayload(input: {
+  subjectId: string;
+  documentId: string | null;
+  knowledgeUnitId: string;
+  knowledgeUnitTitle: string | null;
+  reasonCode: RevisionCoachNextActionDecision['reasonCode'];
+}): RevisionSessionRichClosedExercisePayload {
+  return {
+    type: 'rich_closed_exercise',
+    subjectId: input.subjectId,
+    documentId: input.documentId,
+    knowledgeUnitId: input.knowledgeUnitId,
+    knowledgeUnitTitle: input.knowledgeUnitTitle,
+    reason: revisionRichClosedReason(input.reasonCode),
+    estimatedMinutes: 8,
+    preferredAction: 'rich_closed_exercise',
+  };
+}
+
+function revisionRichClosedReason(
+  reasonCode: RevisionCoachNextActionDecision['reasonCode'],
+): string {
+  return {
+    ALTERNATE_ACTIVITY_TYPE:
+      'Questions riches recommandées pour varier la révision.',
+    REINFORCE_CURRENT_KNOWLEDGE_UNIT:
+      'Questions riches recommandées pour consolider cette notion.',
+    CHECK_UNDERSTANDING:
+      'Questions riches recommandées pour vérifier la compréhension.',
+    CONTINUE_SESSION_DEFAULT:
+      'Questions riches recommandées pour poursuivre la session.',
+  }[reasonCode];
 }

@@ -11,6 +11,9 @@ type GenerateResult = {
     knowledgeUnitId?: string | null;
     reasonCode?: string;
     message?: string;
+    questions?: unknown;
+    correction?: unknown;
+    widget?: unknown;
   };
 };
 
@@ -115,6 +118,44 @@ describe('GenkitRevisionCoachNextActionGenerator', () => {
     });
   });
 
+  it('returns a bounded rich closed decision without exercise content', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        actionKind: 'RICH_CLOSED_EXERCISE',
+        knowledgeUnitId: 'unit-2',
+        reasonCode: 'CHECK_UNDERSTANDING',
+      },
+    });
+    const observer = createObserver();
+
+    const decision = await new GenkitRevisionCoachNextActionGenerator(
+      observer,
+    ).generate({
+      ...baseInput(),
+      availableActions: [
+        'DIAGNOSTIC_QUIZ',
+        'OPEN_QUESTION',
+        'RICH_CLOSED_EXERCISE',
+      ],
+    });
+
+    expect(decision).toEqual({
+      actionKind: 'RICH_CLOSED_EXERCISE',
+      knowledgeUnitId: 'unit-2',
+      reasonCode: 'CHECK_UNDERSTANDING',
+    });
+    const [generateInput] = mockGenerate.mock.calls[0] ?? [];
+    expect(generateInput?.prompt).toContain('RICH_CLOSED_EXERCISE');
+    expect(generateInput?.prompt).toContain('ne produis jamais de question');
+    expect(JSON.stringify(decision)).not.toContain('questions');
+    expect(JSON.stringify(decision)).not.toContain('correction');
+    expect(getObservedObservation(observer)).toMatchObject({
+      status: 'success',
+      knowledgeUnitId: 'unit-2',
+    });
+  });
+
   it('rejects actions that are not allowed', async () => {
     process.env.AI_PROVIDER = 'google';
     mockGenerate.mockResolvedValue({
@@ -133,7 +174,7 @@ describe('GenkitRevisionCoachNextActionGenerator', () => {
     ).rejects.toThrow('REVISION_COACH_ACTION_NOT_ALLOWED');
   });
 
-  it('rejects open question decisions without an allowed knowledge unit', async () => {
+  it('rejects knowledge-unit actions without an allowed knowledge unit', async () => {
     process.env.AI_PROVIDER = 'google';
     mockGenerate.mockResolvedValue({
       output: {
@@ -149,15 +190,53 @@ describe('GenkitRevisionCoachNextActionGenerator', () => {
 
     mockGenerate.mockResolvedValue({
       output: {
-        actionKind: 'OPEN_QUESTION',
+        actionKind: 'RICH_CLOSED_EXERCISE',
         knowledgeUnitId: 'unit-unknown',
         reasonCode: 'CHECK_UNDERSTANDING',
       },
     });
 
     await expect(
-      new GenkitRevisionCoachNextActionGenerator().generate(baseInput()),
+      new GenkitRevisionCoachNextActionGenerator().generate({
+        ...baseInput(),
+        availableActions: [
+          'DIAGNOSTIC_QUIZ',
+          'OPEN_QUESTION',
+          'RICH_CLOSED_EXERCISE',
+        ],
+      }),
     ).rejects.toThrow('REVISION_COACH_KNOWLEDGE_UNIT_NOT_ALLOWED');
+  });
+
+  it('rejects arbitrary rich closed exercise fields from the coach output', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockResolvedValue({
+      output: {
+        actionKind: 'RICH_CLOSED_EXERCISE',
+        knowledgeUnitId: 'unit-1',
+        reasonCode: 'CHECK_UNDERSTANDING',
+        questions: [{ id: 'question-1' }],
+        correction: { correctChoiceId: 'choice-1' },
+        widget: { type: 'free_widget' },
+      },
+    });
+    const observer = createObserver();
+
+    await expect(
+      new GenkitRevisionCoachNextActionGenerator(observer).generate({
+        ...baseInput(),
+        availableActions: [
+          'DIAGNOSTIC_QUIZ',
+          'OPEN_QUESTION',
+          'RICH_CLOSED_EXERCISE',
+        ],
+      }),
+    ).rejects.toThrow();
+
+    expect(getObservedObservation(observer)).toMatchObject({
+      status: 'error',
+      errorCode: 'REVISION_COACH_INVALID_OUTPUT',
+    });
   });
 
   it('observes provider errors with a controlled failure code', async () => {

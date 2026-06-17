@@ -47,7 +47,11 @@ describe('RequestNextRevisionSessionActionUseCase', () => {
               knowledgeUnitId: 'unit-1',
             },
           ],
-          availableActions: ['DIAGNOSTIC_QUIZ', 'OPEN_QUESTION'],
+          availableActions: [
+            'DIAGNOSTIC_QUIZ',
+            'OPEN_QUESTION',
+            'RICH_CLOSED_EXERCISE',
+          ],
           allowedKnowledgeUnitIds: ['unit-1', 'unit-2'],
         },
       ],
@@ -131,7 +135,7 @@ describe('RequestNextRevisionSessionActionUseCase', () => {
     expect(JSON.stringify(result)).not.toContain('score');
   });
 
-  it('uses deterministic fallback when the coach generator fails', async () => {
+  it('uses deterministic rich closed fallback when the coach generator fails', async () => {
     const repository = createRepository();
     const generator = createGenerator(new Error('provider exploded'));
     const startNextActivity = createStartNextActivityUseCase();
@@ -147,16 +151,75 @@ describe('RequestNextRevisionSessionActionUseCase', () => {
       sessionId: 'revision-session-1',
     });
 
-    expect(startNextActivity.execute.mock.calls).toEqual([
+    expect(startNextActivity.execute.mock.calls).toHaveLength(0);
+    expect(startOpenQuestionActivity.execute.mock.calls).toHaveLength(0);
+    expect(repository.appendAction.mock.calls).toEqual([
       [
         {
           studentId: 'student-1',
-          subjectId: 'subject-1',
-          knowledgeUnitId: undefined,
+          sessionId: 'revision-session-1',
+          action: {
+            kind: 'RICH_CLOSED_EXERCISE',
+            status: 'READY',
+            activitySessionId: null,
+            documentId: 'document-1',
+            knowledgeUnitId: 'unit-1',
+          },
         },
       ],
     ]);
-    expect(repository.appendAction.mock.calls).toHaveLength(1);
+  });
+
+  it('creates a rich closed launcher from a coach decision without starting activities', async () => {
+    const repository = createRepository();
+    const generator = createGenerator({
+      actionKind: 'RICH_CLOSED_EXERCISE',
+      knowledgeUnitId: 'unit-2',
+      reasonCode: 'CHECK_UNDERSTANDING',
+    });
+    const startNextActivity = createStartNextActivityUseCase();
+    const startOpenQuestionActivity = createStartOpenQuestionActivityUseCase();
+
+    const result = await new RequestNextRevisionSessionActionUseCase(
+      repository,
+      generator,
+      startNextActivity,
+      startOpenQuestionActivity,
+    ).execute({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+
+    expect(startNextActivity.execute.mock.calls).toHaveLength(0);
+    expect(startOpenQuestionActivity.execute.mock.calls).toHaveLength(0);
+    expect(repository.appendAction.mock.calls).toEqual([
+      [
+        {
+          studentId: 'student-1',
+          sessionId: 'revision-session-1',
+          action: {
+            kind: 'RICH_CLOSED_EXERCISE',
+            status: 'READY',
+            activitySessionId: null,
+            documentId: 'document-2',
+            knowledgeUnitId: 'unit-2',
+          },
+        },
+      ],
+    ]);
+    expect(result.currentAction?.payload).toEqual({
+      type: 'rich_closed_exercise',
+      subjectId: 'subject-1',
+      documentId: 'document-2',
+      knowledgeUnitId: 'unit-2',
+      knowledgeUnitTitle: 'Notion 2',
+      reason: 'Questions riches recommandées pour vérifier la compréhension.',
+      estimatedMinutes: 8,
+      preferredAction: 'rich_closed_exercise',
+    });
+    expect(JSON.stringify(result)).not.toContain('questions');
+    expect(JSON.stringify(result)).not.toContain('correction');
+    expect(JSON.stringify(result)).not.toContain('correctChoiceId');
   });
 
   it('does not persist an action when activity creation fails', async () => {
@@ -208,6 +271,10 @@ function createRepository(): jest.Mocked<RevisionSessionsRepository> {
         },
       ],
       allowedKnowledgeUnitIds: ['unit-1', 'unit-2'],
+      allowedKnowledgeUnits: [
+        { id: 'unit-1', documentId: 'document-1', title: 'Notion 1' },
+        { id: 'unit-2', documentId: 'document-2', title: 'Notion 2' },
+      ],
     }),
     appendAction: jest
       .fn()
@@ -281,6 +348,25 @@ function openQuestionActivity() {
 }
 
 function revisionSessionResponse(input: AppendActionInput) {
+  const payload =
+    input.action.kind === 'RICH_CLOSED_EXERCISE'
+      ? {
+          type: 'rich_closed_exercise' as const,
+          subjectId: 'subject-1',
+          documentId: input.action.documentId,
+          knowledgeUnitId: input.action.knowledgeUnitId ?? 'unit-2',
+          reason: 'Questions riches recommandées pour consolider cette notion.',
+          estimatedMinutes: 8,
+          preferredAction: 'rich_closed_exercise' as const,
+        }
+      : {
+          type:
+            input.action.kind === 'OPEN_QUESTION'
+              ? ('open_question' as const)
+              : ('diagnostic_quiz' as const),
+          sessionId: input.action.activitySessionId,
+        };
+
   return {
     session: {
       id: 'revision-session-1',
@@ -299,13 +385,7 @@ function revisionSessionResponse(input: AppendActionInput) {
       activitySessionId: input.action.activitySessionId,
       documentId: input.action.documentId,
       knowledgeUnitId: input.action.knowledgeUnitId,
-      payload: {
-        type:
-          input.action.kind === 'OPEN_QUESTION'
-            ? ('open_question' as const)
-            : ('diagnostic_quiz' as const),
-        sessionId: input.action.activitySessionId,
-      },
+      payload,
     },
     history: [
       {

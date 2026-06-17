@@ -8,6 +8,7 @@ describe('PrismaRevisionSessionsRepository', () => {
     prisma.knowledgeUnit.findFirst.mockResolvedValue({
       id: 'unit-1',
       documentId: 'document-1',
+      title: 'Notion 1',
     });
 
     await expect(
@@ -21,6 +22,7 @@ describe('PrismaRevisionSessionsRepository', () => {
       subjectId: 'subject-1',
       documentId: 'document-1',
       knowledgeUnitId: 'unit-1',
+      knowledgeUnitTitle: 'Notion 1',
     });
     expect(prisma.subject.findFirst).toHaveBeenCalledWith({
       where: { id: 'subject-1', studentId: 'student-1' },
@@ -88,6 +90,59 @@ describe('PrismaRevisionSessionsRepository', () => {
     expect(result.currentAction?.kind).toBe('OPEN_QUESTION');
   });
 
+  it('persists a rich closed session action without activity session id', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.create.mockResolvedValue(revisionSessionRecord());
+    prisma.revisionSessionAction.create.mockResolvedValue(
+      actionRecord({
+        kind: 'RICH_CLOSED_EXERCISE',
+        activitySessionId: null,
+      }),
+    );
+
+    const result = await repository.createWithInitialAction({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      action: {
+        kind: 'RICH_CLOSED_EXERCISE',
+        status: 'READY',
+        displayOrder: 0,
+        activitySessionId: null,
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    });
+
+    expect(prisma.revisionSessionAction.create).toHaveBeenCalledWith({
+      data: {
+        sessionId: 'revision-session-1',
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        kind: 'RICH_CLOSED_EXERCISE',
+        status: 'READY',
+        displayOrder: 0,
+        activitySessionId: null,
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    });
+    expect(result.currentAction?.kind).toBe('RICH_CLOSED_EXERCISE');
+    expect(result.currentAction?.payload).toEqual({
+      type: 'rich_closed_exercise',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      reason: 'Questions riches recommandées pour consolider cette notion.',
+      estimatedMinutes: 8,
+      preferredAction: 'rich_closed_exercise',
+    });
+  });
+
   it('loads an owned session with sorted action history', async () => {
     const { prisma, repository } = createRepository();
     prisma.revisionSession.findFirst.mockResolvedValue({
@@ -127,8 +182,12 @@ describe('PrismaRevisionSessionsRepository', () => {
       ],
     });
     prisma.knowledgeUnit.findMany.mockResolvedValue([
-      { id: 'unit-1' },
-      { id: 'unit-from-activity' },
+      { id: 'unit-1', documentId: 'document-1', title: 'Notion 1' },
+      {
+        id: 'unit-from-activity',
+        documentId: 'document-2',
+        title: 'Notion 2',
+      },
     ]);
 
     const result = await repository.findPlanningContextByIdForStudent({
@@ -156,12 +215,20 @@ describe('PrismaRevisionSessionsRepository', () => {
       },
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
       take: 20,
-      select: { id: true },
+      select: { id: true, documentId: true, title: true },
     });
     expect(result.actions[0]?.knowledgeUnitId).toBe('unit-from-activity');
     expect(result.allowedKnowledgeUnitIds).toEqual([
       'unit-1',
       'unit-from-activity',
+    ]);
+    expect(result.allowedKnowledgeUnits).toEqual([
+      { id: 'unit-1', documentId: 'document-1', title: 'Notion 1' },
+      {
+        id: 'unit-from-activity',
+        documentId: 'document-2',
+        title: 'Notion 2',
+      },
     ]);
   });
 
@@ -278,7 +345,13 @@ function revisionSessionRecord() {
   };
 }
 
-function actionRecord() {
+function actionRecord(
+  overrides: Partial<ReturnType<typeof actionRecordShape>> = {},
+) {
+  return { ...actionRecordShape(), ...overrides };
+}
+
+function actionRecordShape() {
   return {
     id: 'action-1',
     sessionId: 'revision-session-1',

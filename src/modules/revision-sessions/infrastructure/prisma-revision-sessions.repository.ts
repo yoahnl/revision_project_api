@@ -93,6 +93,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     }
 
     let knowledgeUnitId: string | null = null;
+    let knowledgeUnitTitle: string | null = null;
 
     if (input.knowledgeUnitId) {
       const knowledgeUnit = await this.prisma.knowledgeUnit.findFirst({
@@ -107,6 +108,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
         select: {
           id: true,
           documentId: true,
+          title: true,
         },
       });
 
@@ -115,6 +117,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       }
 
       knowledgeUnitId = knowledgeUnit.id;
+      knowledgeUnitTitle = knowledgeUnit.title;
       documentId = documentId ?? knowledgeUnit.documentId;
     }
 
@@ -122,6 +125,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       subjectId: input.subjectId,
       documentId,
       knowledgeUnitId,
+      knowledgeUnitTitle,
     };
   }
 
@@ -222,7 +226,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       },
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
       take: 20,
-      select: { id: true },
+      select: { id: true, documentId: true, title: true },
     });
 
     return {
@@ -244,6 +248,11 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
           null,
       })),
       allowedKnowledgeUnitIds: knowledgeUnits.map((unit) => unit.id),
+      allowedKnowledgeUnits: knowledgeUnits.map((unit) => ({
+        id: unit.id,
+        documentId: unit.documentId,
+        title: unit.title,
+      })),
     };
   }
 
@@ -359,6 +368,18 @@ function toRevisionSessionResponse(
 }
 
 function toMinimalActionPayload(action: RevisionSessionActionRecord) {
+  if (action.kind === 'RICH_CLOSED_EXERCISE') {
+    return {
+      type: 'rich_closed_exercise' as const,
+      subjectId: action.subjectId,
+      documentId: action.documentId,
+      knowledgeUnitId: action.knowledgeUnitId ?? '',
+      reason: 'Questions riches recommandées pour consolider cette notion.',
+      estimatedMinutes: 8,
+      preferredAction: 'rich_closed_exercise' as const,
+    };
+  }
+
   return {
     type:
       action.kind === 'OPEN_QUESTION'
@@ -369,9 +390,15 @@ function toMinimalActionPayload(action: RevisionSessionActionRecord) {
 }
 
 function toPrismaActionKind(kind: RevisionSessionActionKindValue) {
-  return kind === 'OPEN_QUESTION'
-    ? RevisionSessionActionKind.OPEN_QUESTION
-    : RevisionSessionActionKind.DIAGNOSTIC_QUIZ;
+  if (kind === 'OPEN_QUESTION') {
+    return RevisionSessionActionKind.OPEN_QUESTION;
+  }
+
+  if (kind === 'RICH_CLOSED_EXERCISE') {
+    return RevisionSessionActionKind.RICH_CLOSED_EXERCISE;
+  }
+
+  return RevisionSessionActionKind.DIAGNOSTIC_QUIZ;
 }
 
 function toPrismaActionStatus(status: RevisionSessionActionStatusValue) {

@@ -144,7 +144,11 @@ function validatePreferredAction(
 
   const normalized = input.trim();
 
-  if (normalized !== 'diagnostic_quiz' && normalized !== 'open_question') {
+  if (
+    normalized !== 'diagnostic_quiz' &&
+    normalized !== 'open_question' &&
+    normalized !== 'rich_closed_exercise'
+  ) {
     throw new BadRequestException('Revision session preferred action invalid');
   }
 
@@ -164,7 +168,8 @@ function normalizeRevisionSessionError(error: unknown): never {
 
     if (
       error.message ===
-      'Open question revision session requires a knowledge unit'
+        'Open question revision session requires a knowledge unit' ||
+      error.message === 'Rich closed revision session requires a knowledge unit'
     ) {
       throw new UnprocessableEntityException(error.message);
     }

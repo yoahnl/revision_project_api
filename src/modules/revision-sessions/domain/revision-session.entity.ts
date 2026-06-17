@@ -7,17 +7,31 @@ export type RevisionSessionStatusValue = 'STARTED' | 'COMPLETED' | 'ABANDONED';
 
 export type RevisionSessionActionKindValue =
   | 'DIAGNOSTIC_QUIZ'
-  | 'OPEN_QUESTION';
+  | 'OPEN_QUESTION'
+  | 'RICH_CLOSED_EXERCISE';
 
 export type RevisionSessionActionStatusValue = 'READY' | 'COMPLETED' | 'FAILED';
 
 export type RevisionSessionPreferredAction =
   | 'diagnostic_quiz'
-  | 'open_question';
+  | 'open_question'
+  | 'rich_closed_exercise';
+
+export interface RevisionSessionRichClosedExercisePayload {
+  type: 'rich_closed_exercise';
+  subjectId: string;
+  documentId: string | null;
+  knowledgeUnitId: string;
+  knowledgeUnitTitle?: string | null;
+  reason: string;
+  estimatedMinutes: number;
+  preferredAction: 'rich_closed_exercise';
+}
 
 export type RevisionSessionActionPayload =
   | DiagnosticQuizActivity
   | OpenQuestionActivity
+  | RevisionSessionRichClosedExercisePayload
   | {
       type: 'diagnostic_quiz' | 'open_question';
       sessionId: string | null;

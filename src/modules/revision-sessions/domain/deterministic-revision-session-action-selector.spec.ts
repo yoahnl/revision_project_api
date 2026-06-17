@@ -24,7 +24,7 @@ describe('selectDeterministicRevisionSessionAction', () => {
     });
   });
 
-  it('selects a diagnostic quiz after an open question', () => {
+  it('selects a rich closed exercise after an open question when available', () => {
     expect(
       selectDeterministicRevisionSessionAction({
         ...baseInput(),
@@ -35,6 +35,51 @@ describe('selectDeterministicRevisionSessionAction', () => {
             status: 'READY',
             displayOrder: 0,
             activitySessionId: 'open-session-1',
+            knowledgeUnitId: 'unit-1',
+          },
+        ],
+      }),
+    ).toEqual({
+      actionKind: 'RICH_CLOSED_EXERCISE',
+      knowledgeUnitId: 'unit-1',
+      reasonCode: 'ALTERNATE_ACTIVITY_TYPE',
+    });
+  });
+
+  it('selects a diagnostic quiz after an open question when rich closed is unavailable', () => {
+    expect(
+      selectDeterministicRevisionSessionAction({
+        ...baseInput(),
+        availableActions: ['DIAGNOSTIC_QUIZ', 'OPEN_QUESTION'],
+        sessionKnowledgeUnitId: 'unit-1',
+        history: [
+          {
+            kind: 'OPEN_QUESTION',
+            status: 'READY',
+            displayOrder: 0,
+            activitySessionId: 'open-session-1',
+            knowledgeUnitId: 'unit-1',
+          },
+        ],
+      }),
+    ).toEqual({
+      actionKind: 'DIAGNOSTIC_QUIZ',
+      knowledgeUnitId: null,
+      reasonCode: 'ALTERNATE_ACTIVITY_TYPE',
+    });
+  });
+
+  it('selects a diagnostic quiz after a rich closed exercise', () => {
+    expect(
+      selectDeterministicRevisionSessionAction({
+        ...baseInput(),
+        sessionKnowledgeUnitId: 'unit-1',
+        history: [
+          {
+            kind: 'RICH_CLOSED_EXERCISE',
+            status: 'READY',
+            displayOrder: 0,
+            activitySessionId: null,
             knowledgeUnitId: 'unit-1',
           },
         ],
@@ -87,7 +132,11 @@ function baseInput(): RevisionCoachNextActionInput {
     documentId: 'document-1',
     sessionKnowledgeUnitId: 'unit-1',
     history: [],
-    availableActions: ['DIAGNOSTIC_QUIZ', 'OPEN_QUESTION'],
+    availableActions: [
+      'DIAGNOSTIC_QUIZ',
+      'OPEN_QUESTION',
+      'RICH_CLOSED_EXERCISE',
+    ],
     allowedKnowledgeUnitIds: ['unit-1', 'unit-2'],
   };
 }

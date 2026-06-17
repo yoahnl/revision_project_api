@@ -676,6 +676,7 @@ enum RevisionSessionStatus {
 enum RevisionSessionActionKind {
   DIAGNOSTIC_QUIZ
   OPEN_QUESTION
+  RICH_CLOSED_EXERCISE
 }
 
 enum RevisionSessionActionStatus {

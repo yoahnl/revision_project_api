@@ -19,11 +19,22 @@ export function selectDeterministicRevisionSessionAction(
   });
   const canOpenQuestion =
     availableActions.has('OPEN_QUESTION') && reliableKnowledgeUnitId !== null;
+  const canRichClosedExercise =
+    availableActions.has('RICH_CLOSED_EXERCISE') &&
+    reliableKnowledgeUnitId !== null;
   const canDiagnosticQuiz = availableActions.has('DIAGNOSTIC_QUIZ');
 
   if (lastAction?.kind === 'DIAGNOSTIC_QUIZ' && canOpenQuestion) {
     return {
       actionKind: 'OPEN_QUESTION',
+      knowledgeUnitId: reliableKnowledgeUnitId,
+      reasonCode: 'ALTERNATE_ACTIVITY_TYPE',
+    };
+  }
+
+  if (lastAction?.kind === 'OPEN_QUESTION' && canRichClosedExercise) {
+    return {
+      actionKind: 'RICH_CLOSED_EXERCISE',
       knowledgeUnitId: reliableKnowledgeUnitId,
       reasonCode: 'ALTERNATE_ACTIVITY_TYPE',
     };
@@ -37,9 +48,25 @@ export function selectDeterministicRevisionSessionAction(
     };
   }
 
+  if (lastAction?.kind === 'RICH_CLOSED_EXERCISE' && canDiagnosticQuiz) {
+    return {
+      actionKind: 'DIAGNOSTIC_QUIZ',
+      knowledgeUnitId: null,
+      reasonCode: 'ALTERNATE_ACTIVITY_TYPE',
+    };
+  }
+
   if (canOpenQuestion) {
     return {
       actionKind: 'OPEN_QUESTION',
+      knowledgeUnitId: reliableKnowledgeUnitId,
+      reasonCode: 'REINFORCE_CURRENT_KNOWLEDGE_UNIT',
+    };
+  }
+
+  if (canRichClosedExercise) {
+    return {
+      actionKind: 'RICH_CLOSED_EXERCISE',
       knowledgeUnitId: reliableKnowledgeUnitId,
       reasonCode: 'REINFORCE_CURRENT_KNOWLEDGE_UNIT',
     };

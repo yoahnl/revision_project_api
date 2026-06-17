@@ -97,6 +97,44 @@ describe('RevisionSessionsController', () => {
     expect(JSON.stringify(response.body)).not.toContain('modelAnswer');
   });
 
+  it('accepts rich closed preferred action as a bounded session action', async () => {
+    startRevisionSession.execute.mockResolvedValueOnce(
+      richClosedRevisionSessionResponse(),
+    );
+
+    const response = await request(app.getHttpServer())
+      .post('/revision-sessions')
+      .send({
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        preferredAction: 'rich_closed_exercise',
+      })
+      .expect(201);
+
+    expect(startRevisionSession.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      preferredAction: 'rich_closed_exercise',
+    });
+    const body = response.body as RevisionSessionResponseDto;
+    expect(body.currentAction?.kind).toBe('RICH_CLOSED_EXERCISE');
+    expect(body.currentAction?.activitySessionId).toBeNull();
+    expect(body.currentAction?.payload).toEqual({
+      type: 'rich_closed_exercise',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      reason: 'Questions riches recommandées.',
+      estimatedMinutes: 8,
+      preferredAction: 'rich_closed_exercise',
+    });
+    expect(JSON.stringify(response.body)).not.toContain('questions');
+    expect(JSON.stringify(response.body)).not.toContain('correction');
+  });
+
   it('rejects malformed create payloads before calling the use case', async () => {
     await request(app.getHttpServer())
       .post('/revision-sessions')
@@ -119,6 +157,20 @@ describe('RevisionSessionsController', () => {
     await request(app.getHttpServer())
       .post('/revision-sessions')
       .send({ subjectId: 'subject-1', preferredAction: 'open_question' })
+      .expect(422);
+  });
+
+  it('maps impossible rich closed actions to 422', async () => {
+    startRevisionSession.execute.mockRejectedValue(
+      new Error('Rich closed revision session requires a knowledge unit'),
+    );
+
+    await request(app.getHttpServer())
+      .post('/revision-sessions')
+      .send({
+        subjectId: 'subject-1',
+        preferredAction: 'rich_closed_exercise',
+      })
       .expect(422);
   });
 
@@ -209,6 +261,49 @@ function revisionSessionResponse() {
         status: 'READY',
         displayOrder: 0,
         activitySessionId: 'open-session-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    ],
+  };
+}
+
+function richClosedRevisionSessionResponse() {
+  return {
+    session: {
+      id: 'revision-session-1',
+      status: 'STARTED',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      createdAt: new Date('2026-06-15T10:00:00.000Z'),
+      completedAt: null,
+    },
+    currentAction: {
+      id: 'action-1',
+      kind: 'RICH_CLOSED_EXERCISE',
+      status: 'READY',
+      displayOrder: 0,
+      activitySessionId: null,
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      payload: {
+        type: 'rich_closed_exercise',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        reason: 'Questions riches recommandées.',
+        estimatedMinutes: 8,
+        preferredAction: 'rich_closed_exercise',
+      },
+    },
+    history: [
+      {
+        id: 'action-1',
+        kind: 'RICH_CLOSED_EXERCISE',
+        status: 'READY',
+        displayOrder: 0,
+        activitySessionId: null,
         documentId: 'document-1',
         knowledgeUnitId: 'unit-1',
       },
