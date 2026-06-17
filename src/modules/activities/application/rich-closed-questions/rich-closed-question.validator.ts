@@ -3,10 +3,12 @@ import {
   RICH_CLOSED_COGNITIVE_SKILLS,
   RICH_CLOSED_QUESTION_KINDS,
   type RichClosedChoice,
+  type RichClosedCauseConsequencePair,
   type RichClosedExerciseValidationIssue,
   type RichClosedExerciseValidationResult,
   type RichClosedPair,
   type RichClosedQuestionKind,
+  type RichClosedTrueFalseValue,
 } from './rich-closed-question.types';
 
 const MAX_PROMPT_LENGTH = 700;
@@ -15,9 +17,11 @@ const MAX_STATEMENT_LENGTH = 900;
 const MAX_EXPLANATION_LENGTH = 1200;
 const MAX_INSTRUCTION_LENGTH = 400;
 const MAX_TIMELINE_EVENT_DESCRIPTION_LENGTH = 500;
+const MAX_DESCRIBED_ITEM_DESCRIPTION_LENGTH = 500;
 const MIN_CHOICES = 2;
 const MAX_CHOICES = 6;
 const MIN_STRUCTURED_ITEMS = 3;
+const MAX_TRUE_FALSE_ROWS = 8;
 
 export interface RichClosedQuestionValidationOptions {
   knownSourceChunkIds?: readonly string[] | ReadonlySet<string>;
@@ -141,6 +145,12 @@ export function validateRichClosedQuestion(
       break;
     case 'date_slider':
       validateDateSliderQuestion(question, issues);
+      break;
+    case 'true_false_grid':
+      validateTrueFalseGridQuestion(question, issues);
+      break;
+    case 'cause_consequence':
+      validateCauseConsequenceQuestion(question, issues);
       break;
     case 'case_qualification':
       validateCaseQualificationQuestion(question, issues);
@@ -461,6 +471,102 @@ function validateDateSliderQuestion(
   validateExplanation(question.explanation, issues);
 }
 
+function validateTrueFalseGridQuestion(
+  question: Record<string, unknown>,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  const rows = readTrueFalseRows(question.rows, issues, 'rows');
+  const rowIds = [...idSet(rows)];
+  const correctValues = readTrueFalseValues(
+    question.correctValues,
+    issues,
+    'correctValues',
+  );
+  const correctedRowIds = correctValues.map((value) => value.rowId);
+
+  if (rows.length < MIN_STRUCTURED_ITEMS || rows.length > MAX_TRUE_FALSE_ROWS) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TRUE_FALSE_GRID_SIZE_INVALID',
+        'True/false grid requires between three and eight rows',
+        'rows',
+      ),
+    );
+  }
+
+  if (
+    correctValues.length !== rowIds.length ||
+    hasDuplicates(correctedRowIds) ||
+    correctedRowIds.some((rowId) => !rowIds.includes(rowId))
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TRUE_FALSE_CORRECTION_INVALID',
+        'True/false grid correction must contain one boolean value per row',
+        'correctValues',
+      ),
+    );
+  }
+
+  validateOptionalInstruction(question.instruction, issues);
+  validateExplanation(question.explanation, issues);
+}
+
+function validateCauseConsequenceQuestion(
+  question: Record<string, unknown>,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  const causes = readCauseConsequenceItems(question.causes, issues, 'causes');
+  const consequences = readCauseConsequenceItems(
+    question.consequences,
+    issues,
+    'consequences',
+  );
+  const pairs = readCauseConsequencePairs(
+    question.correctPairs,
+    issues,
+    'correctPairs',
+  );
+  const causeIds = [...idSet(causes)];
+  const consequenceIds = [...idSet(consequences)];
+  const pairedCauseIds = pairs.map((pair) => pair.causeId);
+  const pairedConsequenceIds = pairs.map((pair) => pair.consequenceId);
+
+  if (
+    causes.length < MIN_STRUCTURED_ITEMS ||
+    consequences.length < MIN_STRUCTURED_ITEMS
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CAUSE_CONSEQUENCE_TOO_SMALL',
+        'Cause/consequence requires at least three causes and consequences',
+      ),
+    );
+  }
+
+  if (
+    pairs.length !== causeIds.length ||
+    hasDuplicates(pairedCauseIds) ||
+    hasDuplicates(pairedConsequenceIds) ||
+    pairs.some(
+      (pair) =>
+        !causeIds.includes(pair.causeId) ||
+        !consequenceIds.includes(pair.consequenceId),
+    )
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CAUSE_CONSEQUENCE_CORRECTION_INVALID',
+        'Cause/consequence correction must pair every cause with a unique existing consequence',
+        'correctPairs',
+      ),
+    );
+  }
+
+  validateOptionalInstruction(question.instruction, issues);
+  validateExplanation(question.explanation, issues);
+}
+
 function validateCaseQualificationQuestion(
   question: Record<string, unknown>,
   issues: RichClosedExerciseValidationIssue[],
@@ -672,6 +778,102 @@ function readTimelineEvents(
   return events;
 }
 
+function readTrueFalseRows(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+) {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TRUE_FALSE_ROWS_INVALID',
+        'True/false rows must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const rows = value.filter(isTrueFalseRow);
+  if (
+    rows.length !== value.length ||
+    hasDuplicates(rows.map((row) => row.id))
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TRUE_FALSE_ROWS_INVALID',
+        'True/false rows must have unique non-empty ids and statements',
+        path,
+      ),
+    );
+  }
+
+  return rows;
+}
+
+function readTrueFalseValues(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedTrueFalseValue[] {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TRUE_FALSE_CORRECTION_INVALID',
+        'True/false correction must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const values = value.filter(isTrueFalseValue);
+  if (values.length !== value.length) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_TRUE_FALSE_CORRECTION_INVALID',
+        'True/false correction values must be strict booleans',
+        path,
+      ),
+    );
+  }
+
+  return values;
+}
+
+function readCauseConsequenceItems(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+) {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CAUSE_CONSEQUENCE_ITEMS_INVALID',
+        'Cause/consequence items must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const items = value.filter(isDescribedLabelItem);
+  if (
+    items.length !== value.length ||
+    hasDuplicates(items.map((item) => item.id))
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CAUSE_CONSEQUENCE_ITEMS_INVALID',
+        'Cause/consequence items must have unique non-empty ids and labels',
+        path,
+      ),
+    );
+  }
+
+  return items;
+}
+
 function readPairs(value: unknown): RichClosedPair[] {
   if (!Array.isArray(value)) {
     return [];
@@ -681,6 +883,41 @@ function readPairs(value: unknown): RichClosedPair[] {
     (pair): pair is RichClosedPair =>
       isRecord(pair) && plainString(pair.leftId) && plainString(pair.rightId),
   );
+}
+
+function readCauseConsequencePairs(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedCauseConsequencePair[] {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CAUSE_CONSEQUENCE_CORRECTION_INVALID',
+        'Cause/consequence correction must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const pairs = value.filter(
+    (pair): pair is RichClosedCauseConsequencePair =>
+      isRecord(pair) &&
+      plainString(pair.causeId) &&
+      plainString(pair.consequenceId),
+  );
+  if (pairs.length !== value.length) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CAUSE_CONSEQUENCE_CORRECTION_INVALID',
+        'Cause/consequence correction pairs must have causeId and consequenceId',
+        path,
+      ),
+    );
+  }
+
+  return pairs;
 }
 
 function validateOptionalInstruction(
@@ -768,6 +1005,48 @@ function isTimelineEvent(value: unknown): value is {
         value.description,
         1,
         MAX_TIMELINE_EVENT_DESCRIPTION_LENGTH,
+      ))
+  );
+}
+
+function isTrueFalseRow(value: unknown): value is {
+  id: string;
+  statement: string;
+  context?: string | null;
+} {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    boundedString(value.statement, 1, MAX_STATEMENT_LENGTH) &&
+    (value.context === undefined ||
+      value.context === null ||
+      boundedString(value.context, 1, MAX_STATEMENT_LENGTH))
+  );
+}
+
+function isTrueFalseValue(value: unknown): value is RichClosedTrueFalseValue {
+  return (
+    isRecord(value) &&
+    plainString(value.rowId) &&
+    typeof value.value === 'boolean'
+  );
+}
+
+function isDescribedLabelItem(value: unknown): value is {
+  id: string;
+  label: string;
+  description?: string | null;
+} {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    boundedString(value.label, 1, 220) &&
+    (value.description === undefined ||
+      value.description === null ||
+      boundedString(
+        value.description,
+        1,
+        MAX_DESCRIBED_ITEM_DESCRIPTION_LENGTH,
       ))
   );
 }

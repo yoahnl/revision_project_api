@@ -45,6 +45,21 @@ export function richClosedV1BExerciseFixture(): RichClosedExercise {
   };
 }
 
+export function richClosedV1BFullExerciseFixture(): RichClosedExercise {
+  const v1bFixture = richClosedV1BExerciseFixture();
+
+  return {
+    ...v1bFixture,
+    id: 'rich-exercise-v1b-full-1',
+    title: 'Droit constitutionnel - exercice riche fermé V1-B complet',
+    questions: [
+      ...v1bFixture.questions,
+      richClosedQuestionFixture('true_false_grid'),
+      richClosedQuestionFixture('cause_consequence'),
+    ],
+  };
+}
+
 export function richClosedQuestionFixture(
   questionKind: RichClosedQuestionKind,
 ): RichClosedQuestion {
@@ -155,6 +170,91 @@ export function richClosedQuestionFixture(
         toleranceYears: 0,
         explanation: 'La Constitution de la Ve République est adoptée en 1958.',
       };
+    case 'true_false_grid':
+      return {
+        ...baseQuestion('true-false-grid-1', 'true_false_grid'),
+        prompt:
+          'Indique si chaque affirmation sur le régime parlementaire est vraie ou fausse.',
+        instruction:
+          'Choisis vrai ou faux pour chaque ligne sans laisser de ligne vide.',
+        rows: [
+          {
+            id: 'row-1',
+            statement:
+              'Le gouvernement peut être politiquement responsable devant le Parlement.',
+            context: 'Critère classique du régime parlementaire.',
+          },
+          {
+            id: 'row-2',
+            statement:
+              'La séparation des pouvoirs y interdit toute collaboration institutionnelle.',
+            context: 'Attention à la distinction avec la séparation stricte.',
+          },
+          {
+            id: 'row-3',
+            statement: 'La dissolution peut être un moyen d’action réciproque.',
+            context: 'Elle équilibre la responsabilité politique.',
+          },
+        ],
+        correctValues: [
+          { rowId: 'row-1', value: true },
+          { rowId: 'row-2', value: false },
+          { rowId: 'row-3', value: true },
+        ],
+        explanation:
+          'Le parlementarisme combine responsabilité politique et collaboration des pouvoirs, dont la dissolution peut faire partie.',
+      };
+    case 'cause_consequence':
+      return {
+        ...baseQuestion('cause-consequence-1', 'cause_consequence'),
+        prompt:
+          'Associe chaque mécanisme institutionnel à sa conséquence politique.',
+        instruction:
+          'Sélectionne une conséquence différente pour chaque cause proposée.',
+        causes: [
+          {
+            id: 'cause-1',
+            label: 'Motion de censure adoptée',
+            description: 'La chambre retire sa confiance au gouvernement.',
+          },
+          {
+            id: 'cause-2',
+            label: 'Dissolution de l’Assemblée',
+            description: 'Le mandat de la chambre prend fin avant terme.',
+          },
+          {
+            id: 'cause-3',
+            label: 'Question de confiance rejetée',
+            description: 'Le gouvernement engage sa responsabilité.',
+          },
+        ],
+        consequences: [
+          {
+            id: 'consequence-1',
+            label: 'Démission du gouvernement',
+            description:
+              'La responsabilité politique entraîne la sortie du gouvernement.',
+          },
+          {
+            id: 'consequence-2',
+            label: 'Nouvelles élections législatives',
+            description: 'Le corps électoral renouvelle la chambre.',
+          },
+          {
+            id: 'consequence-3',
+            label: 'Crise politique ou départ du gouvernement',
+            description:
+              'Le rejet manifeste une perte de confiance parlementaire.',
+          },
+        ],
+        correctPairs: [
+          { causeId: 'cause-1', consequenceId: 'consequence-1' },
+          { causeId: 'cause-2', consequenceId: 'consequence-2' },
+          { causeId: 'cause-3', consequenceId: 'consequence-3' },
+        ],
+        explanation:
+          'Chaque cause active une conséquence institutionnelle distincte dans la logique parlementaire.',
+      };
     case 'case_qualification':
       return {
         ...baseQuestion('case-1', 'case_qualification'),
@@ -200,6 +300,10 @@ function baseQuestion<K extends RichClosedQuestionKind>(
         return 'procedure';
       case 'date_slider':
         return 'comprehension';
+      case 'true_false_grid':
+        return 'classification';
+      case 'cause_consequence':
+        return 'causality';
       default:
         return 'case_application';
     }

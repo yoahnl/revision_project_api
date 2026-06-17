@@ -778,6 +778,10 @@ function demoSourcesForQuestion(
       return [demoSeedIds.chunkIds[3]];
     case 'date_slider':
       return [demoSeedIds.chunkIds[1]];
+    case 'true_false_grid':
+      return [demoSeedIds.chunkIds[1], demoSeedIds.chunkIds[3]];
+    case 'cause_consequence':
+      return [demoSeedIds.chunkIds[3]];
   }
 }
 

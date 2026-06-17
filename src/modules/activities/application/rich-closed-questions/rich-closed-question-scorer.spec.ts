@@ -2,6 +2,7 @@ import { RICH_CLOSED_SUBMIT_INVALID_INPUT } from './rich-closed-question-errors'
 import {
   richClosedExerciseFixture,
   richClosedV1BExerciseFixture,
+  richClosedV1BFullExerciseFixture,
 } from './rich-closed-question.fixtures';
 import { scoreRichClosedExerciseSubmission } from './rich-closed-question-scorer';
 import type { RichClosedAnswer } from './rich-closed-question.types';
@@ -330,6 +331,182 @@ describe('scoreRichClosedExerciseSubmission', () => {
     );
   });
 
+  it('scores true_false_grid and cause_consequence V1-B answers', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1BFullExerciseFixture(),
+      answers: correctAnswersV1BFull(),
+    });
+
+    expect(result).toMatchObject({
+      correctAnswers: 10,
+      totalQuestions: 10,
+      score: 1,
+    });
+    expect(
+      result.items.find((item) => item.questionId === 'true-false-grid-1'),
+    ).toMatchObject({
+      isCorrect: true,
+      correction: {
+        correctValues: [
+          { rowId: 'row-1', value: true },
+          { rowId: 'row-2', value: false },
+          { rowId: 'row-3', value: true },
+        ],
+      },
+    });
+    expect(
+      result.items.find((item) => item.questionId === 'cause-consequence-1'),
+    ).toMatchObject({
+      isCorrect: true,
+      correction: {
+        correctPairs: [
+          { causeId: 'cause-1', consequenceId: 'consequence-1' },
+          { causeId: 'cause-2', consequenceId: 'consequence-2' },
+          { causeId: 'cause-3', consequenceId: 'consequence-3' },
+        ],
+      },
+    });
+  });
+
+  it('marks one wrong true_false_grid value as incorrect without partial scoring', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1BFullExerciseFixture(),
+      answers: replaceV1BFullAnswer({
+        questionId: 'true-false-grid-1',
+        questionKind: 'true_false_grid',
+        values: [
+          { rowId: 'row-1', value: true },
+          { rowId: 'row-2', value: true },
+          { rowId: 'row-3', value: true },
+        ],
+      }),
+    });
+
+    expect(
+      result.items.find((item) => item.questionId === 'true-false-grid-1'),
+    ).toMatchObject({
+      isCorrect: false,
+      partialScore: 0,
+    });
+  });
+
+  it('rejects duplicate, unknown, incomplete and non-boolean true_false_grid answers', () => {
+    expectInvalidV1BFull(
+      replaceV1BFullAnswer({
+        questionId: 'true-false-grid-1',
+        questionKind: 'true_false_grid',
+        values: [
+          { rowId: 'row-1', value: true },
+          { rowId: 'row-1', value: false },
+          { rowId: 'row-3', value: true },
+        ],
+      }),
+    );
+    expectInvalidV1BFull(
+      replaceV1BFullAnswer({
+        questionId: 'true-false-grid-1',
+        questionKind: 'true_false_grid',
+        values: [
+          { rowId: 'row-1', value: true },
+          { rowId: 'row-2', value: false },
+          { rowId: 'unknown-row', value: true },
+        ],
+      }),
+    );
+    expectInvalidV1BFull(
+      replaceV1BFullAnswer({
+        questionId: 'true-false-grid-1',
+        questionKind: 'true_false_grid',
+        values: [
+          { rowId: 'row-1', value: true },
+          { rowId: 'row-2', value: false },
+        ],
+      }),
+    );
+    expectInvalidV1BFull(
+      replaceV1BFullAnswer({
+        questionId: 'true-false-grid-1',
+        questionKind: 'true_false_grid',
+        values: [
+          { rowId: 'row-1', value: true },
+          { rowId: 'row-2', value: false },
+          { rowId: 'row-3', value: 'true' },
+        ],
+      }),
+    );
+  });
+
+  it('marks a wrong cause_consequence pair as incorrect without partial scoring', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1BFullExerciseFixture(),
+      answers: replaceV1BFullAnswer({
+        questionId: 'cause-consequence-1',
+        questionKind: 'cause_consequence',
+        pairs: [
+          { causeId: 'cause-1', consequenceId: 'consequence-2' },
+          { causeId: 'cause-2', consequenceId: 'consequence-1' },
+          { causeId: 'cause-3', consequenceId: 'consequence-3' },
+        ],
+      }),
+    });
+
+    expect(
+      result.items.find((item) => item.questionId === 'cause-consequence-1'),
+    ).toMatchObject({
+      isCorrect: false,
+      partialScore: 0,
+    });
+  });
+
+  it('rejects duplicate, unknown and incomplete cause_consequence answers', () => {
+    expectInvalidV1BFull(
+      replaceV1BFullAnswer({
+        questionId: 'cause-consequence-1',
+        questionKind: 'cause_consequence',
+        pairs: [
+          { causeId: 'cause-1', consequenceId: 'consequence-1' },
+          { causeId: 'cause-1', consequenceId: 'consequence-2' },
+          { causeId: 'cause-3', consequenceId: 'consequence-3' },
+        ],
+      }),
+    );
+    expectInvalidV1BFull(
+      replaceV1BFullAnswer({
+        questionId: 'cause-consequence-1',
+        questionKind: 'cause_consequence',
+        pairs: [
+          { causeId: 'cause-1', consequenceId: 'consequence-1' },
+          { causeId: 'cause-2', consequenceId: 'unknown-consequence' },
+          { causeId: 'cause-3', consequenceId: 'consequence-3' },
+        ],
+      }),
+    );
+    expectInvalidV1BFull(
+      replaceV1BFullAnswer({
+        questionId: 'cause-consequence-1',
+        questionKind: 'cause_consequence',
+        pairs: [
+          { causeId: 'cause-1', consequenceId: 'consequence-1' },
+          { causeId: 'cause-2', consequenceId: 'consequence-2' },
+        ],
+      }),
+    );
+    expectInvalidV1BFull(
+      replaceV1BFullAnswer({
+        questionId: 'cause-consequence-1',
+        questionKind: 'cause_consequence',
+        pairs: [
+          { causeId: 'cause-1', consequenceId: 'consequence-1' },
+          { causeId: 'cause-2', consequenceId: 'consequence-1' },
+          { causeId: 'cause-3', consequenceId: 'consequence-3' },
+        ],
+      }),
+    );
+  });
+
   it('rejects incomplete ordering answers', () => {
     expect(() =>
       scoreRichClosedExerciseSubmission({
@@ -477,6 +654,16 @@ function expectInvalidV1B(answers: unknown[]) {
   ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
 }
 
+function expectInvalidV1BFull(answers: unknown[]) {
+  expect(() =>
+    scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1BFullExerciseFixture(),
+      answers,
+    }),
+  ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+}
+
 function replaceAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return correctAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
@@ -486,6 +673,17 @@ function replaceAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
 function replaceV1BAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return correctAnswersV1B().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceV1BFullAnswer(answer: unknown): unknown[] {
+  const record =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { questionId?: unknown })
+      : {};
+
+  return correctAnswersV1BFull().map((currentAnswer) =>
+    currentAnswer.questionId === record.questionId ? answer : currentAnswer,
   );
 }
 
@@ -540,6 +738,30 @@ function correctAnswersV1B(): RichClosedAnswer[] {
       questionId: 'date-slider-1',
       questionKind: 'date_slider',
       year: 1958,
+    },
+  ];
+}
+
+function correctAnswersV1BFull(): RichClosedAnswer[] {
+  return [
+    ...correctAnswersV1B(),
+    {
+      questionId: 'true-false-grid-1',
+      questionKind: 'true_false_grid',
+      values: [
+        { rowId: 'row-1', value: true },
+        { rowId: 'row-2', value: false },
+        { rowId: 'row-3', value: true },
+      ],
+    },
+    {
+      questionId: 'cause-consequence-1',
+      questionKind: 'cause_consequence',
+      pairs: [
+        { causeId: 'cause-1', consequenceId: 'consequence-1' },
+        { causeId: 'cause-2', consequenceId: 'consequence-2' },
+        { causeId: 'cause-3', consequenceId: 'consequence-3' },
+      ],
     },
   ];
 }

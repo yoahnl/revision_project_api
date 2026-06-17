@@ -922,6 +922,25 @@ function richClosedPublicExercise(): RichClosedPublicExerciseEnvelope {
             step: question.step,
             toleranceYears: question.toleranceYears,
           };
+        case 'true_false_grid':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            ...(question.instruction === undefined
+              ? {}
+              : { instruction: question.instruction }),
+            rows: question.rows,
+          };
+        case 'cause_consequence':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            ...(question.instruction === undefined
+              ? {}
+              : { instruction: question.instruction }),
+            causes: question.causes,
+            consequences: question.consequences,
+          };
         case 'case_qualification':
           return {
             ...base,

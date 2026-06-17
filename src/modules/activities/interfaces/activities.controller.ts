@@ -701,6 +701,18 @@ function validateRichClosedAnswer(input: unknown): RichClosedAnswer {
         questionKind,
         year: validateRichClosedYear(answer.year),
       };
+    case 'true_false_grid':
+      return {
+        questionId,
+        questionKind,
+        values: validateRichClosedTrueFalseValues(answer.values),
+      };
+    case 'cause_consequence':
+      return {
+        questionId,
+        questionKind,
+        pairs: validateRichClosedCauseConsequencePairs(answer.pairs),
+      };
     case 'error_detection':
       return {
         questionId,
@@ -728,6 +740,57 @@ function validateRichClosedPairs(input: unknown): Array<{
     return {
       leftId: validateRequiredId(record.leftId, 'Left id'),
       rightId: validateRequiredId(record.rightId, 'Right id'),
+    };
+  });
+}
+
+function validateRichClosedTrueFalseValues(input: unknown): Array<{
+  rowId: string;
+  value: boolean;
+}> {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new BadRequestException('Rich closed true/false values are required');
+  }
+
+  return input.map((value) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new BadRequestException('Rich closed true/false value is invalid');
+    }
+
+    const record = value as Record<string, unknown>;
+    if (typeof record.value !== 'boolean') {
+      throw new BadRequestException('Rich closed true/false value is invalid');
+    }
+
+    return {
+      rowId: validateRequiredId(record.rowId, 'Row id'),
+      value: record.value,
+    };
+  });
+}
+
+function validateRichClosedCauseConsequencePairs(input: unknown): Array<{
+  causeId: string;
+  consequenceId: string;
+}> {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new BadRequestException(
+      'Rich closed cause/consequence pairs are required',
+    );
+  }
+
+  return input.map((pair) => {
+    if (typeof pair !== 'object' || pair === null || Array.isArray(pair)) {
+      throw new BadRequestException(
+        'Rich closed cause/consequence pair is invalid',
+      );
+    }
+
+    const record = pair as Record<string, unknown>;
+
+    return {
+      causeId: validateRequiredId(record.causeId, 'Cause id'),
+      consequenceId: validateRequiredId(record.consequenceId, 'Consequence id'),
     };
   });
 }

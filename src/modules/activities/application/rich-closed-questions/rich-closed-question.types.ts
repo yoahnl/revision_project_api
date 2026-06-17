@@ -11,6 +11,8 @@ export const RICH_CLOSED_QUESTION_KINDS = [
   'error_detection',
   'timeline',
   'date_slider',
+  'true_false_grid',
+  'cause_consequence',
 ] as const;
 
 export type RichClosedQuestionKind =
@@ -57,6 +59,28 @@ export interface RichClosedTimelineEvent {
   id: string;
   label: string;
   description?: string | null;
+}
+
+export interface RichClosedTrueFalseRow {
+  id: string;
+  statement: string;
+  context?: string | null;
+}
+
+export interface RichClosedTrueFalseValue {
+  rowId: string;
+  value: boolean;
+}
+
+export interface RichClosedCauseConsequenceItem {
+  id: string;
+  label: string;
+  description?: string | null;
+}
+
+export interface RichClosedCauseConsequencePair {
+  causeId: string;
+  consequenceId: string;
 }
 
 export interface RichClosedQuestionBase {
@@ -118,6 +142,23 @@ export interface RichClosedDateSliderQuestion extends RichClosedQuestionBase {
   explanation: string;
 }
 
+export interface RichClosedTrueFalseGridQuestion extends RichClosedQuestionBase {
+  questionKind: 'true_false_grid';
+  instruction?: string | null;
+  rows: RichClosedTrueFalseRow[];
+  correctValues: RichClosedTrueFalseValue[];
+  explanation: string;
+}
+
+export interface RichClosedCauseConsequenceQuestion extends RichClosedQuestionBase {
+  questionKind: 'cause_consequence';
+  instruction?: string | null;
+  causes: RichClosedCauseConsequenceItem[];
+  consequences: RichClosedCauseConsequenceItem[];
+  correctPairs: RichClosedCauseConsequencePair[];
+  explanation: string;
+}
+
 export interface RichClosedCaseQualificationQuestion extends RichClosedQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -142,7 +183,9 @@ export type RichClosedQuestion =
   | RichClosedCaseQualificationQuestion
   | RichClosedErrorDetectionQuestion
   | RichClosedTimelineQuestion
-  | RichClosedDateSliderQuestion;
+  | RichClosedDateSliderQuestion
+  | RichClosedTrueFalseGridQuestion
+  | RichClosedCauseConsequenceQuestion;
 
 export interface RichClosedPublicQuestionBase {
   id: string;
@@ -191,6 +234,19 @@ export interface RichClosedPublicDateSliderQuestion extends RichClosedPublicQues
   toleranceYears: number;
 }
 
+export interface RichClosedPublicTrueFalseGridQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'true_false_grid';
+  instruction?: string | null;
+  rows: RichClosedTrueFalseRow[];
+}
+
+export interface RichClosedPublicCauseConsequenceQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'cause_consequence';
+  instruction?: string | null;
+  causes: RichClosedCauseConsequenceItem[];
+  consequences: RichClosedCauseConsequenceItem[];
+}
+
 export interface RichClosedPublicCaseQualificationQuestion extends RichClosedPublicQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -211,7 +267,9 @@ export type RichClosedPublicQuestion =
   | RichClosedPublicCaseQualificationQuestion
   | RichClosedPublicErrorDetectionQuestion
   | RichClosedPublicTimelineQuestion
-  | RichClosedPublicDateSliderQuestion;
+  | RichClosedPublicDateSliderQuestion
+  | RichClosedPublicTrueFalseGridQuestion
+  | RichClosedPublicCauseConsequenceQuestion;
 
 export type RichClosedAnswer =
   | {
@@ -251,6 +309,16 @@ export type RichClosedAnswer =
     }
   | {
       questionId: string;
+      questionKind: 'true_false_grid';
+      values: RichClosedTrueFalseValue[];
+    }
+  | {
+      questionId: string;
+      questionKind: 'cause_consequence';
+      pairs: RichClosedCauseConsequencePair[];
+    }
+  | {
+      questionId: string;
       questionKind: 'error_detection';
       errorId: string;
     };
@@ -267,6 +335,8 @@ export type RichClosedCorrectionPayload =
   | { correctChoiceId: string }
   | { correctChoiceIds: string[] }
   | { correctPairs: RichClosedPair[] }
+  | { correctValues: RichClosedTrueFalseValue[] }
+  | { correctPairs: RichClosedCauseConsequencePair[] }
   | { correctOrder: string[] }
   | { correctYear: number; minAcceptedYear: number; maxAcceptedYear: number }
   | { correctErrorId: string };

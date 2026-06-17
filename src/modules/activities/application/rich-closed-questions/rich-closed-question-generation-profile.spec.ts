@@ -18,6 +18,8 @@ describe('rich closed question generation profile', () => {
       error_detection: 1,
       timeline: 0,
       date_slider: 0,
+      true_false_grid: 0,
+      cause_consequence: 0,
     });
   });
 
@@ -26,24 +28,53 @@ describe('rich closed question generation profile', () => {
 
     expect(mix.timeline).toBe(0);
     expect(mix.date_slider).toBe(0);
+    expect(mix.true_false_grid).toBe(0);
+    expect(mix.cause_consequence).toBe(0);
     expect(sumMix(mix)).toBe(7);
   });
 
-  it('returns the expected exam-style mix for ten questions', () => {
+  it('preserves the V1-017 default mix for eight questions', () => {
+    expect(resolveRichClosedQuestionTypeMix({ questionCount: 8 })).toEqual({
+      single_choice: 1,
+      multiple_choice: 1,
+      matching: 1,
+      ordering: 1,
+      case_qualification: 1,
+      error_detection: 1,
+      timeline: 1,
+      date_slider: 1,
+      true_false_grid: 0,
+      cause_consequence: 0,
+    });
+  });
+
+  it('keeps V1-018 types out of the default nine-question mix', () => {
+    const mix = resolveRichClosedQuestionTypeMix({ questionCount: 9 });
+
+    expect(mix.timeline).toBeGreaterThan(0);
+    expect(mix.date_slider).toBeGreaterThan(0);
+    expect(mix.true_false_grid).toBe(0);
+    expect(mix.cause_consequence).toBe(0);
+    expect(sumMix(mix)).toBe(9);
+  });
+
+  it('returns the expected V1-B full mix for ten questions', () => {
     expect(
       resolveRichClosedQuestionTypeMix({
         questionCount: 10,
         complexityProfile: 'exam',
       }),
     ).toEqual({
-      case_qualification: 2,
-      error_detection: 2,
+      case_qualification: 1,
+      error_detection: 1,
       matching: 1,
       ordering: 1,
       multiple_choice: 1,
       single_choice: 1,
       timeline: 1,
       date_slider: 1,
+      true_false_grid: 1,
+      cause_consequence: 1,
     });
   });
 

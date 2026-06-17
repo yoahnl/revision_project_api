@@ -11,7 +11,8 @@ const MIN_QUESTION_COUNT = 1;
 const MAX_QUESTION_COUNT = 20;
 const MAX_SINGLE_CHOICE_RATIO = 0.4;
 const V1A_FULL_EXERCISE_COUNT = 6;
-const V1B_FULL_EXERCISE_COUNT = RICH_CLOSED_QUESTION_KINDS.length;
+const V1B_017_FULL_EXERCISE_COUNT = 8;
+const V1B_018_FULL_EXERCISE_COUNT = RICH_CLOSED_QUESTION_KINDS.length;
 
 const SMALL_EXERCISE_KIND_ORDER: RichClosedQuestionKind[] = [
   'case_qualification',
@@ -30,12 +31,20 @@ const FULL_EXERCISE_BASE_MIX: Record<RichClosedQuestionKind, number> = {
   error_detection: 1,
   timeline: 0,
   date_slider: 0,
+  true_false_grid: 0,
+  cause_consequence: 0,
 };
 
 const FULL_EXERCISE_V1B_BASE_MIX: Record<RichClosedQuestionKind, number> = {
   ...FULL_EXERCISE_BASE_MIX,
   timeline: 1,
   date_slider: 1,
+};
+
+const FULL_EXERCISE_V1B_FULL_MIX: Record<RichClosedQuestionKind, number> = {
+  ...FULL_EXERCISE_V1B_BASE_MIX,
+  true_false_grid: 1,
+  cause_consequence: 1,
 };
 
 const DISTRIBUTION_ORDER_BY_PROFILE: Record<
@@ -50,6 +59,8 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'ordering',
     'timeline',
     'date_slider',
+    'true_false_grid',
+    'cause_consequence',
     'single_choice',
   ],
   exam: [
@@ -60,6 +71,8 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'ordering',
     'timeline',
     'date_slider',
+    'true_false_grid',
+    'cause_consequence',
     'single_choice',
   ],
   advanced: [
@@ -69,6 +82,8 @@ const DISTRIBUTION_ORDER_BY_PROFILE: Record<
     'matching',
     'timeline',
     'date_slider',
+    'true_false_grid',
+    'cause_consequence',
     'multiple_choice',
     'single_choice',
   ],
@@ -94,14 +109,22 @@ export function resolveRichClosedQuestionTypeMix(
     return buildSmallExerciseMix(input.questionCount);
   }
 
-  const usesV1BBase = input.questionCount >= V1B_FULL_EXERCISE_COUNT;
-  const mix = usesV1BBase
-    ? { ...FULL_EXERCISE_V1B_BASE_MIX }
-    : { ...FULL_EXERCISE_BASE_MIX };
+  const usesV1B018Base = input.questionCount >= V1B_018_FULL_EXERCISE_COUNT;
+  const usesV1B017Base =
+    !usesV1B018Base && input.questionCount >= V1B_017_FULL_EXERCISE_COUNT;
+  const mix = usesV1B018Base
+    ? { ...FULL_EXERCISE_V1B_FULL_MIX }
+    : usesV1B017Base
+      ? { ...FULL_EXERCISE_V1B_BASE_MIX }
+      : { ...FULL_EXERCISE_BASE_MIX };
   const profile = input.complexityProfile ?? 'standard';
   let remaining =
     input.questionCount -
-    (usesV1BBase ? V1B_FULL_EXERCISE_COUNT : V1A_FULL_EXERCISE_COUNT);
+    (usesV1B018Base
+      ? V1B_018_FULL_EXERCISE_COUNT
+      : usesV1B017Base
+        ? V1B_017_FULL_EXERCISE_COUNT
+        : V1A_FULL_EXERCISE_COUNT);
   let cursor = 0;
 
   while (remaining > 0) {
@@ -141,5 +164,7 @@ function emptyMix(): Record<RichClosedQuestionKind, number> {
     error_detection: 0,
     timeline: 0,
     date_slider: 0,
+    true_false_grid: 0,
+    cause_consequence: 0,
   };
 }

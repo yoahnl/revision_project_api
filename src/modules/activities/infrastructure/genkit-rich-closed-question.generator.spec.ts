@@ -55,6 +55,7 @@ import {
   richClosedExerciseFixture,
   richClosedQuestionFixture,
   richClosedV1BExerciseFixture,
+  richClosedV1BFullExerciseFixture,
 } from '../application/rich-closed-questions/rich-closed-question.fixtures';
 import type {
   AiGenerationObservation,
@@ -206,10 +207,10 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     expect(generateInput?.prompt).toContain('timeline');
     expect(generateInput?.prompt).toContain('date_slider');
     expect(generateInput?.prompt).toContain(
-      'timeline et date_slider sont des types V1-B fermés',
+      'timeline, date_slider, true_false_grid et cause_consequence sont des types V1-B fermés',
     );
     expect(generateInput?.prompt).toContain(
-      'Tu ne dois jamais produire true_false, true_false_grid',
+      'Tu ne dois jamais produire true_false, image_choice, diagram_labeling, institution_matrix, calculation_mcq',
     );
     expect(generateInput?.prompt).toContain(
       'Tu ne dois jamais produire de widget libre.',
@@ -219,6 +220,51 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     );
     expect(generateInput?.prompt).toContain(
       'Clés exactes date_slider: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, minYear, maxYear, step, correctYear, toleranceYears, explanation.',
+    );
+    expect(getObservedObservation(observer).status).toBe('success');
+  });
+
+  it('generates a validated V1-B rich closed exercise when the mix requests true_false_grid and cause_consequence', async () => {
+    mockGenerate.mockResolvedValue({ output: generatedExerciseV1BFull() });
+    const observer = createObserver();
+
+    const exercise = await new GenkitRichClosedQuestionGenerator(
+      observer,
+    ).generate(generationInputV1BFull());
+    const [generateInput] = mockGenerate.mock.calls[0] ?? [];
+
+    expect(exercise.questions.map((question) => question.questionKind)).toEqual(
+      [
+        'single_choice',
+        'multiple_choice',
+        'matching',
+        'ordering',
+        'case_qualification',
+        'error_detection',
+        'timeline',
+        'date_slider',
+        'true_false_grid',
+        'cause_consequence',
+      ],
+    );
+    expect(generateInput?.prompt).toContain('true_false_grid');
+    expect(generateInput?.prompt).toContain('cause_consequence');
+    expect(generateInput?.prompt).toContain(
+      'Tu dois produire true_false_grid avec 3 à 8 rows',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Tu dois produire cause_consequence avec 3 à 6 causes/consequences',
+    );
+    expect(generateInput?.prompt).toContain('institution_matrix');
+    expect(generateInput?.prompt).toContain('aucun type V1-019 ou suivant');
+    expect(generateInput?.prompt).toContain(
+      'Tu ne dois jamais produire de widget libre.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Clés exactes true_false_grid: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, rows, correctValues, explanation.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Clés exactes cause_consequence: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, causes, consequences, correctPairs, explanation.',
     );
     expect(getObservedObservation(observer).status).toBe('success');
   });
@@ -322,7 +368,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
         questions: [
           {
             ...richClosedQuestionFixture('single_choice'),
-            questionKind: 'true_false_grid',
+            questionKind: 'institution_matrix',
           },
         ],
       },
@@ -752,6 +798,10 @@ function generatedExerciseV1B(): RichClosedExercise {
   return richClosedV1BExerciseFixture();
 }
 
+function generatedExerciseV1BFull(): RichClosedExercise {
+  return richClosedV1BFullExerciseFixture();
+}
+
 function generationInput() {
   return {
     studentId: 'student-1',
@@ -800,6 +850,25 @@ function generationInputV1B() {
       error_detection: 1,
       timeline: 1,
       date_slider: 1,
+    },
+  };
+}
+
+function generationInputV1BFull() {
+  return {
+    ...generationInput(),
+    questionCount: 10,
+    questionTypeMix: {
+      single_choice: 1,
+      multiple_choice: 1,
+      matching: 1,
+      ordering: 1,
+      case_qualification: 1,
+      error_detection: 1,
+      timeline: 1,
+      date_slider: 1,
+      true_false_grid: 1,
+      cause_consequence: 1,
     },
   };
 }

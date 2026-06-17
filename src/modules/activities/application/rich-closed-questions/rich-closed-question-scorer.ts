@@ -4,12 +4,14 @@ import {
 } from './rich-closed-question-errors';
 import {
   type RichClosedAnswer,
+  type RichClosedCauseConsequencePair,
   type RichClosedCorrectionItem,
   type RichClosedCorrectionPayload,
   type RichClosedExercise,
   type RichClosedExerciseResult,
   type RichClosedPair,
   type RichClosedQuestion,
+  type RichClosedTrueFalseValue,
 } from './rich-closed-question.types';
 
 export function scoreRichClosedExerciseSubmission(input: {
@@ -124,6 +126,18 @@ function normalizeAnswer(answer: unknown): RichClosedAnswer {
         questionId,
         questionKind,
         year: readRequiredInteger(answer.year),
+      };
+    case 'true_false_grid':
+      return {
+        questionId,
+        questionKind,
+        values: readTrueFalseValues(answer.values),
+      };
+    case 'cause_consequence':
+      return {
+        questionId,
+        questionKind,
+        pairs: readCauseConsequencePairs(answer.pairs),
       };
     case 'error_detection':
       return {
@@ -314,6 +328,44 @@ function scoreQuestion(
         },
       });
     }
+    case 'true_false_grid': {
+      const trueFalseAnswer = answer as Extract<
+        RichClosedAnswer,
+        { questionKind: 'true_false_grid' }
+      >;
+      assertKnownTrueFalseValues(trueFalseAnswer.values, question);
+
+      return buildCorrectionItem({
+        question,
+        answer: trueFalseAnswer,
+        isCorrect: areTrueFalseValuesEqual(
+          trueFalseAnswer.values,
+          question.correctValues,
+        ),
+        correction: {
+          correctValues: cloneTrueFalseValues(question.correctValues),
+        },
+      });
+    }
+    case 'cause_consequence': {
+      const causeConsequenceAnswer = answer as Extract<
+        RichClosedAnswer,
+        { questionKind: 'cause_consequence' }
+      >;
+      assertKnownCauseConsequencePairs(causeConsequenceAnswer.pairs, question);
+
+      return buildCorrectionItem({
+        question,
+        answer: causeConsequenceAnswer,
+        isCorrect: areCauseConsequencePairsEqual(
+          causeConsequenceAnswer.pairs,
+          question.correctPairs,
+        ),
+        correction: {
+          correctPairs: cloneCauseConsequencePairs(question.correctPairs),
+        },
+      });
+    }
   }
 }
 
@@ -388,6 +440,49 @@ function assertKnownPairs(
   }
 }
 
+function assertKnownTrueFalseValues(
+  values: RichClosedTrueFalseValue[],
+  question: Extract<RichClosedQuestion, { questionKind: 'true_false_grid' }>,
+) {
+  const rowIds = question.rows.map((row) => row.id);
+  const submittedRowIds = values.map((value) => value.rowId);
+
+  if (
+    values.length === 0 ||
+    values.length !== question.rows.length ||
+    hasDuplicates(submittedRowIds) ||
+    values.some((value) => !rowIds.includes(value.rowId))
+  ) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+}
+
+function assertKnownCauseConsequencePairs(
+  pairs: RichClosedCauseConsequencePair[],
+  question: Extract<RichClosedQuestion, { questionKind: 'cause_consequence' }>,
+) {
+  const causeIds = question.causes.map((cause) => cause.id);
+  const consequenceIds = question.consequences.map(
+    (consequence) => consequence.id,
+  );
+  const submittedCauseIds = pairs.map((pair) => pair.causeId);
+  const submittedConsequenceIds = pairs.map((pair) => pair.consequenceId);
+
+  if (
+    pairs.length === 0 ||
+    pairs.length !== question.causes.length ||
+    hasDuplicates(submittedCauseIds) ||
+    hasDuplicates(submittedConsequenceIds) ||
+    pairs.some(
+      (pair) =>
+        !causeIds.includes(pair.causeId) ||
+        !consequenceIds.includes(pair.consequenceId),
+    )
+  ) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+}
+
 function readRequiredString(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
@@ -425,6 +520,42 @@ function readPairs(value: unknown): RichClosedPair[] {
     return {
       leftId: readRequiredString(pair.leftId),
       rightId: readRequiredString(pair.rightId),
+    };
+  });
+}
+
+function readTrueFalseValues(value: unknown): RichClosedTrueFalseValue[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+
+  return value.map((item) => {
+    if (!isRecord(item) || typeof item.value !== 'boolean') {
+      throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+    }
+
+    return {
+      rowId: readRequiredString(item.rowId),
+      value: item.value,
+    };
+  });
+}
+
+function readCauseConsequencePairs(
+  value: unknown,
+): RichClosedCauseConsequencePair[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+
+  return value.map((pair) => {
+    if (!isRecord(pair)) {
+      throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+    }
+
+    return {
+      causeId: readRequiredString(pair.causeId),
+      consequenceId: readRequiredString(pair.consequenceId),
     };
   });
 }
@@ -479,12 +610,28 @@ function cloneAnswer(answer: RichClosedAnswer): RichClosedAnswer {
       return { ...answer, orderedEventIds: [...answer.orderedEventIds] };
     case 'date_slider':
       return { ...answer };
+    case 'true_false_grid':
+      return { ...answer, values: cloneTrueFalseValues(answer.values) };
+    case 'cause_consequence':
+      return { ...answer, pairs: cloneCauseConsequencePairs(answer.pairs) };
     case 'error_detection':
       return { ...answer };
   }
 }
 
 function clonePairs(pairs: RichClosedPair[]): RichClosedPair[] {
+  return pairs.map((pair) => ({ ...pair }));
+}
+
+function cloneTrueFalseValues(
+  values: RichClosedTrueFalseValue[],
+): RichClosedTrueFalseValue[] {
+  return values.map((value) => ({ ...value }));
+}
+
+function cloneCauseConsequencePairs(
+  pairs: RichClosedCauseConsequencePair[],
+): RichClosedCauseConsequencePair[] {
   return pairs.map((pair) => ({ ...pair }));
 }
 
@@ -500,6 +647,26 @@ function arePairsEqual(left: RichClosedPair[], right: RichClosedPair[]) {
   return areStringSetsEqual(pairKeys(left), pairKeys(right));
 }
 
+function areTrueFalseValuesEqual(
+  left: RichClosedTrueFalseValue[],
+  right: RichClosedTrueFalseValue[],
+) {
+  return areStringSetsEqual(
+    trueFalseValueKeys(left),
+    trueFalseValueKeys(right),
+  );
+}
+
+function areCauseConsequencePairsEqual(
+  left: RichClosedCauseConsequencePair[],
+  right: RichClosedCauseConsequencePair[],
+) {
+  return areStringSetsEqual(
+    causeConsequencePairKeys(left),
+    causeConsequencePairKeys(right),
+  );
+}
+
 function areStringArraysEqual(left: string[], right: string[]) {
   return (
     left.length === right.length &&
@@ -509,6 +676,16 @@ function areStringArraysEqual(left: string[], right: string[]) {
 
 function pairKeys(pairs: RichClosedPair[]): string[] {
   return pairs.map((pair) => `${pair.leftId}:${pair.rightId}`);
+}
+
+function trueFalseValueKeys(values: RichClosedTrueFalseValue[]): string[] {
+  return values.map((value) => `${value.rowId}:${value.value}`);
+}
+
+function causeConsequencePairKeys(
+  pairs: RichClosedCauseConsequencePair[],
+): string[] {
+  return pairs.map((pair) => `${pair.causeId}:${pair.consequenceId}`);
 }
 
 function hasDuplicates(values: string[]): boolean {

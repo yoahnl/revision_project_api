@@ -6,6 +6,7 @@ import {
   richClosedExerciseFixture,
   richClosedQuestionFixture,
   richClosedV1BExerciseFixture,
+  richClosedV1BFullExerciseFixture,
 } from './rich-closed-question.fixtures';
 
 describe('rich closed question public mapper', () => {
@@ -18,6 +19,8 @@ describe('rich closed question public mapper', () => {
     'error_detection',
     'timeline',
     'date_slider',
+    'true_false_grid',
+    'cause_consequence',
   ] as const)('maps %s without leaking correction fields', (questionKind) => {
     const publicQuestion = toRichClosedPublicQuestion(
       richClosedQuestionFixture(questionKind),
@@ -29,6 +32,7 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('correctChoiceIds');
     expect(serialized).not.toContain('correctPairs');
     expect(serialized).not.toContain('correctOrder');
+    expect(serialized).not.toContain('correctValues');
     expect(serialized).not.toContain('correctErrorId');
     expect(serialized).not.toContain('correctYear');
     expect(serialized).not.toContain('correctionPayload');
@@ -68,6 +72,36 @@ describe('rich closed question public mapper', () => {
       'timeline',
       'date_slider',
     ]);
+    expect(serialized).not.toContain('correctOrder');
+    expect(serialized).not.toContain('correctYear');
+    expect(serialized).not.toContain('explanation');
+    expect(serialized).not.toContain('correction');
+    expect(serialized).not.toContain('score');
+  });
+
+  it('maps a V1-B full exercise without leaking private correction data', () => {
+    const publicExercise = toRichClosedPublicExercise(
+      richClosedV1BFullExerciseFixture(),
+    );
+    const serialized = JSON.stringify(publicExercise);
+
+    expect(publicExercise.questions).toHaveLength(10);
+    expect(
+      publicExercise.questions.map((question) => question.questionKind),
+    ).toEqual([
+      'single_choice',
+      'multiple_choice',
+      'matching',
+      'ordering',
+      'case_qualification',
+      'error_detection',
+      'timeline',
+      'date_slider',
+      'true_false_grid',
+      'cause_consequence',
+    ]);
+    expect(serialized).not.toContain('correctValues');
+    expect(serialized).not.toContain('correctPairs');
     expect(serialized).not.toContain('correctOrder');
     expect(serialized).not.toContain('correctYear');
     expect(serialized).not.toContain('explanation');

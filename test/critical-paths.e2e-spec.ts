@@ -13,6 +13,7 @@ import { SubmitOpenAnswerUseCase } from '../src/modules/activities/application/s
 import {
   richClosedExerciseFixture,
   richClosedV1BExerciseFixture,
+  richClosedV1BFullExerciseFixture,
 } from '../src/modules/activities/application/rich-closed-questions/rich-closed-question.fixtures';
 import { GetRichClosedExerciseResultUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise-result.use-case';
 import { GetRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise.use-case';
@@ -634,6 +635,178 @@ describe('Critical demo paths (e2e)', () => {
         );
         await request(server)
           .post('/activities/rich-closed/rich-session-v1b/submit')
+          .send({ answers })
+          .expect(400);
+      }
+    });
+
+    it('routes rich closed V1-B true/false grid and cause/consequence without pre-submit leaks', async () => {
+      const server = app.getHttpServer();
+      const questionTypeMix = {
+        single_choice: 1,
+        multiple_choice: 1,
+        matching: 1,
+        ordering: 1,
+        case_qualification: 1,
+        error_detection: 1,
+        timeline: 1,
+        date_slider: 1,
+        true_false_grid: 1,
+        cause_consequence: 1,
+      };
+      mocks.startRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1BFullPublicExercise(),
+      );
+      mocks.getRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1BFullPublicExercise(),
+      );
+      mocks.submitRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1BFullResult(),
+      );
+      mocks.getRichClosedExerciseResult.execute.mockResolvedValueOnce(
+        richClosedV1BFullResult(),
+      );
+
+      const startResponse = await request(server)
+        .post('/activities/rich-closed/start')
+        .send({
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-1',
+          questionCount: 10,
+          questionTypeMix,
+        })
+        .expect(201);
+
+      const startBody = startResponse.body as {
+        questions: Array<{ questionKind: RichClosedQuestionKind }>;
+        [key: string]: unknown;
+      };
+      expect(mocks.startRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        subjectId: 'subject-1',
+        documentId: undefined,
+        knowledgeUnitId: 'unit-1',
+        questionCount: 10,
+        complexityProfile: 'exam',
+        questionTypeMix,
+      });
+      expect(
+        startBody.questions.map((question) => question.questionKind),
+      ).toEqual([
+        'single_choice',
+        'multiple_choice',
+        'matching',
+        'ordering',
+        'case_qualification',
+        'error_detection',
+        'timeline',
+        'date_slider',
+        'true_false_grid',
+        'cause_consequence',
+      ]);
+      assertNoSensitivePreSubmitFields(startBody);
+      expect(JSON.stringify(startBody)).not.toContain('correctValues');
+      expect(JSON.stringify(startBody)).not.toContain('correctPairs');
+
+      const getResponse = await request(server)
+        .get('/activities/rich-closed/rich-session-v1b-full')
+        .expect(200);
+      assertNoSensitivePreSubmitFields(getResponse.body);
+
+      const submitResponse = await request(server)
+        .post('/activities/rich-closed/rich-session-v1b-full/submit')
+        .send({ answers: richClosedV1BFullAnswers() })
+        .expect(201);
+
+      expect(mocks.submitRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'rich-session-v1b-full',
+        answers: richClosedV1BFullAnswers(),
+      });
+      expect(submitResponse.body).toMatchObject({
+        correctAnswers: 10,
+        totalQuestions: 10,
+        score: 1,
+      });
+      expect(JSON.stringify(submitResponse.body)).toContain('correctValues');
+      expect(JSON.stringify(submitResponse.body)).toContain('correctPairs');
+
+      const resultResponse = await request(server)
+        .get('/activities/rich-closed/rich-session-v1b-full/result')
+        .expect(200);
+      expect(resultResponse.body).toMatchObject({
+        status: 'completed',
+        correctAnswers: 10,
+        totalQuestions: 10,
+      });
+
+      await request(server)
+        .post('/activities/rich-closed/rich-session-v1b-full/submit')
+        .send({
+          answers: replaceRichClosedV1BFullAnswer({
+            questionId: 'true-false-grid-1',
+            questionKind: 'true_false_grid',
+            values: [
+              { rowId: 'row-1', value: true },
+              { rowId: 'row-2', value: false },
+              { rowId: 'row-3', value: 'true' },
+            ],
+          }),
+        })
+        .expect(400);
+
+      const semanticInvalidSubmissions = [
+        replaceRichClosedV1BFullAnswer({
+          questionId: 'true-false-grid-1',
+          questionKind: 'true_false_grid',
+          values: [
+            { rowId: 'row-1', value: true },
+            { rowId: 'row-1', value: false },
+            { rowId: 'row-3', value: true },
+          ],
+        }),
+        replaceRichClosedV1BFullAnswer({
+          questionId: 'true-false-grid-1',
+          questionKind: 'true_false_grid',
+          values: [
+            { rowId: 'row-1', value: true },
+            { rowId: 'row-2', value: false },
+          ],
+        }),
+        replaceRichClosedV1BFullAnswer({
+          questionId: 'cause-consequence-1',
+          questionKind: 'cause_consequence',
+          pairs: [
+            { causeId: 'cause-1', consequenceId: 'consequence-1' },
+            { causeId: 'cause-1', consequenceId: 'consequence-2' },
+            { causeId: 'cause-3', consequenceId: 'consequence-3' },
+          ],
+        }),
+        replaceRichClosedV1BFullAnswer({
+          questionId: 'cause-consequence-1',
+          questionKind: 'cause_consequence',
+          pairs: [
+            { causeId: 'cause-1', consequenceId: 'consequence-1' },
+            { causeId: 'cause-2', consequenceId: 'unknown-consequence' },
+            { causeId: 'cause-3', consequenceId: 'consequence-3' },
+          ],
+        }),
+        replaceRichClosedV1BFullAnswer({
+          questionId: 'cause-consequence-1',
+          questionKind: 'cause_consequence',
+          pairs: [
+            { causeId: 'cause-1', consequenceId: 'consequence-1' },
+            { causeId: 'cause-2', consequenceId: 'consequence-2' },
+          ],
+        }),
+      ];
+
+      for (const answers of semanticInvalidSubmissions) {
+        mocks.submitRichClosedExercise.execute.mockRejectedValueOnce(
+          new Error('RICH_CLOSED_SUBMIT_INVALID_INPUT'),
+        );
+        await request(server)
+          .post('/activities/rich-closed/rich-session-v1b-full/submit')
           .send({ answers })
           .expect(400);
       }
@@ -1276,6 +1449,13 @@ function richClosedV1BPublicExercise() {
   });
 }
 
+function richClosedV1BFullPublicExercise() {
+  return toRichClosedPublicExerciseEnvelope({
+    sessionId: 'rich-session-v1b-full',
+    exercise: richClosedV1BFullExerciseFixture(),
+  });
+}
+
 function richClosedResult() {
   return scoreRichClosedExerciseSubmission({
     sessionId: 'rich-session-1',
@@ -1289,6 +1469,14 @@ function richClosedV1BResult() {
     sessionId: 'rich-session-v1b',
     exercise: richClosedV1BExerciseFixture(),
     answers: richClosedV1BAnswers(),
+  });
+}
+
+function richClosedV1BFullResult() {
+  return scoreRichClosedExerciseSubmission({
+    sessionId: 'rich-session-v1b-full',
+    exercise: richClosedV1BFullExerciseFixture(),
+    answers: richClosedV1BFullAnswers(),
   });
 }
 
@@ -1347,6 +1535,30 @@ function richClosedV1BAnswers(): RichClosedAnswer[] {
   ];
 }
 
+function richClosedV1BFullAnswers(): RichClosedAnswer[] {
+  return [
+    ...richClosedV1BAnswers(),
+    {
+      questionId: 'true-false-grid-1',
+      questionKind: 'true_false_grid',
+      values: [
+        { rowId: 'row-1', value: true },
+        { rowId: 'row-2', value: false },
+        { rowId: 'row-3', value: true },
+      ],
+    },
+    {
+      questionId: 'cause-consequence-1',
+      questionKind: 'cause_consequence',
+      pairs: [
+        { causeId: 'cause-1', consequenceId: 'consequence-1' },
+        { causeId: 'cause-2', consequenceId: 'consequence-2' },
+        { causeId: 'cause-3', consequenceId: 'consequence-3' },
+      ],
+    },
+  ];
+}
+
 function replaceRichClosedAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return richClosedAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
@@ -1358,6 +1570,17 @@ function replaceRichClosedV1BAnswer(
 ): RichClosedAnswer[] {
   return richClosedV1BAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceRichClosedV1BFullAnswer(answer: unknown): unknown[] {
+  const record =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { questionId?: unknown })
+      : {};
+
+  return richClosedV1BFullAnswers().map((currentAnswer) =>
+    currentAnswer.questionId === record.questionId ? answer : currentAnswer,
   );
 }
 

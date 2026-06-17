@@ -33,7 +33,7 @@ import {
 } from '../application/rich-closed-questions/rich-closed-question-generation-profile';
 
 export const RICH_CLOSED_FLOW_NAME = 'richClosedQuestionGeneration';
-export const RICH_CLOSED_PROMPT_VERSION = 'rich-closed-v1b-001';
+export const RICH_CLOSED_PROMPT_VERSION = 'rich-closed-v1b-002';
 export const RICH_CLOSED_SCHEMA_VERSION = RICH_CLOSED_EXERCISE_VERSION;
 export const RICH_CLOSED_GENERATION_FAILED = 'RICH_CLOSED_GENERATION_FAILED';
 export const RICH_CLOSED_GENERATION_SCHEMA_INVALID =
@@ -72,6 +72,36 @@ const TimelineEventSchema = z
     id: NonEmptyStringSchema,
     label: NonEmptyStringSchema,
     description: NonEmptyStringSchema.nullable().optional(),
+  })
+  .strict();
+
+const TrueFalseRowSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    statement: NonEmptyStringSchema,
+    context: NonEmptyStringSchema.nullable().optional(),
+  })
+  .strict();
+
+const TrueFalseValueSchema = z
+  .object({
+    rowId: NonEmptyStringSchema,
+    value: z.boolean(),
+  })
+  .strict();
+
+const CauseConsequenceItemSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    label: NonEmptyStringSchema,
+    description: NonEmptyStringSchema.nullable().optional(),
+  })
+  .strict();
+
+const CauseConsequencePairSchema = z
+  .object({
+    causeId: NonEmptyStringSchema,
+    consequenceId: NonEmptyStringSchema,
   })
   .strict();
 
@@ -158,6 +188,29 @@ const DateSliderQuestionSchema = z
   })
   .strict();
 
+const TrueFalseGridQuestionSchema = z
+  .object({
+    ...QuestionBaseSchema,
+    questionKind: z.literal('true_false_grid'),
+    instruction: NonEmptyStringSchema.nullable().optional(),
+    rows: z.array(TrueFalseRowSchema).min(3).max(8),
+    correctValues: z.array(TrueFalseValueSchema).min(3).max(8),
+    explanation: z.string().trim().min(8),
+  })
+  .strict();
+
+const CauseConsequenceQuestionSchema = z
+  .object({
+    ...QuestionBaseSchema,
+    questionKind: z.literal('cause_consequence'),
+    instruction: NonEmptyStringSchema.nullable().optional(),
+    causes: z.array(CauseConsequenceItemSchema).min(3).max(6),
+    consequences: z.array(CauseConsequenceItemSchema).min(3).max(6),
+    correctPairs: z.array(CauseConsequencePairSchema).min(3).max(6),
+    explanation: z.string().trim().min(8),
+  })
+  .strict();
+
 const CaseQualificationQuestionSchema = z
   .object({
     ...QuestionBaseSchema,
@@ -189,6 +242,8 @@ const RichClosedQuestionSchema = z.discriminatedUnion('questionKind', [
   ErrorDetectionQuestionSchema,
   TimelineQuestionSchema,
   DateSliderQuestionSchema,
+  TrueFalseGridQuestionSchema,
+  CauseConsequenceQuestionSchema,
 ]);
 
 const GeneratedRichClosedExerciseSchema = z
@@ -608,8 +663,8 @@ function buildRichClosedPrompt(input: {
     'Tu dois respecter exactement les questionKind demandés.',
     'Tu dois respecter questionTypeMix.',
     `questionTypeMix: ${JSON.stringify(input.questionTypeMix)}`,
-    'Tu dois produire uniquement les types rich closed autorisés: single_choice, multiple_choice, matching, ordering, case_qualification, error_detection, timeline, date_slider.',
-    'timeline et date_slider sont des types V1-B fermés: ils ne doivent jamais demander une réponse libre.',
+    'Tu dois produire uniquement les types rich closed autorisés: single_choice, multiple_choice, matching, ordering, case_qualification, error_detection, timeline, date_slider, true_false_grid, cause_consequence.',
+    'timeline, date_slider, true_false_grid et cause_consequence sont des types V1-B fermés: ils ne doivent jamais demander une réponse libre.',
     'Tu dois produire des questions fermées.',
     'Tu dois interdire toute réponse libre.',
     'Tu dois utiliser les chunks fournis comme seule source de vérité.',
@@ -622,14 +677,16 @@ function buildRichClosedPrompt(input: {
     'Tu dois produire ordering avec au moins 3 items et un ordre complet.',
     'Tu dois produire timeline avec 3 à 6 events, des ids uniques, et un correctOrder complet.',
     'Tu dois produire date_slider avec des années entières, minYear < maxYear, step >= 1, correctYear dans les bornes et toleranceYears >= 0.',
+    'Tu dois produire true_false_grid avec 3 à 8 rows, des ids uniques, et un correctValues booléen complet.',
+    'Tu dois produire cause_consequence avec 3 à 6 causes/consequences, des ids uniques, et des correctPairs univoques.',
     'Tu dois produire multiple_choice avec au moins 2 bonnes réponses.',
     'Tu dois éviter les questions de pure restitution.',
     'Tu dois éviter les prompts commençant par “Qui”, “Quand”, “Quelle date”, “Quelle est la définition”, sauf nécessité exceptionnelle.',
     'Tu dois produire des explications privées de correction.',
-    'Les corrections privées correctChoiceId, correctChoiceIds, correctPairs, correctOrder, correctErrorId et correctYear ne doivent jamais être exposées dans un payload public pré-submit.',
+    'Les corrections privées correctChoiceId, correctChoiceIds, correctPairs, correctOrder, correctValues, correctErrorId et correctYear ne doivent jamais être exposées dans un payload public pré-submit.',
     'Tu ne dois jamais inclure de modelAnswer, answerText, freeTextAnswer, textAnswer, HTML, SVG, Mermaid, markdown rendu libre ou widget libre.',
     'Tu ne dois jamais produire de widget libre.',
-    'Tu ne dois jamais produire true_false, true_false_grid, image_choice, diagram_labeling, institution_matrix, cause_consequence, calculation_mcq ou fill_blank_dropdown.',
+    'Tu ne dois jamais produire true_false, image_choice, diagram_labeling, institution_matrix, calculation_mcq, fill_blank_dropdown, widget libre, ni aucun type V1-019 ou suivant.',
     'Tu dois retourner un JSON object only: un objet JSON brut, sans Markdown, sans code fences, sans texte avant ou après.',
     'Aucun champ additionnel n’est autorisé.',
     `cognitiveSkill autorisés: ${RICH_CLOSED_COGNITIVE_SKILLS.join(', ')}`,
@@ -640,6 +697,8 @@ function buildRichClosedPrompt(input: {
     'Clés exactes ordering: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, items, correctOrder, explanation.',
     'Clés exactes timeline: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, events, correctOrder, explanation.',
     'Clés exactes date_slider: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, minYear, maxYear, step, correctYear, toleranceYears, explanation.',
+    'Clés exactes true_false_grid: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, rows, correctValues, explanation.',
+    'Clés exactes cause_consequence: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, causes, consequences, correctPairs, explanation.',
     'Clés exactes case_qualification: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, caseText, choices, correctChoiceId, explanation.',
     'Clés exactes error_detection: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, statement, errorOptions, correctErrorId, explanation.',
     'Tu dois retourner uniquement du JSON strict conforme au schema demandé.',
@@ -671,6 +730,8 @@ function buildRichClosedRepairPrompt(input: {
     '- ordering: items, correctOrder, explanation.',
     '- timeline: events (3 à 6), correctOrder complet, explanation.',
     '- date_slider: minYear, maxYear, step, correctYear, toleranceYears, explanation.',
+    '- true_false_grid: rows (3 à 8), correctValues booléens complets, explanation.',
+    '- cause_consequence: causes, consequences, correctPairs univoques, explanation.',
     '- case_qualification: caseText, choices, correctChoiceId, explanation.',
     '- error_detection: statement, errorOptions, correctErrorId, explanation.',
     'Tu dois respecter le nombre exact de questions, le mix exact, et uniquement les sourceChunkIds autorisés.',

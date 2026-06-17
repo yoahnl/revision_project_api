@@ -99,6 +99,25 @@ export function toRichClosedPublicQuestion(
         step: question.step,
         toleranceYears: question.toleranceYears,
       };
+    case 'true_false_grid':
+      return {
+        ...base,
+        questionKind: question.questionKind,
+        ...(question.instruction === undefined
+          ? {}
+          : { instruction: question.instruction }),
+        rows: cloneTrueFalseRows(question.rows),
+      };
+    case 'cause_consequence':
+      return {
+        ...base,
+        questionKind: question.questionKind,
+        ...(question.instruction === undefined
+          ? {}
+          : { instruction: question.instruction }),
+        causes: cloneDescribedLabelItems(question.causes),
+        consequences: cloneDescribedLabelItems(question.consequences),
+      };
     case 'case_qualification':
       return {
         ...base,
@@ -141,5 +160,27 @@ function cloneTimelineEvents(
     ...(event.description === undefined
       ? {}
       : { description: event.description }),
+  }));
+}
+
+function cloneTrueFalseRows(
+  rows: Array<{ id: string; statement: string; context?: string | null }>,
+) {
+  return rows.map((row) => ({
+    id: row.id,
+    statement: row.statement,
+    ...(row.context === undefined ? {} : { context: row.context }),
+  }));
+}
+
+function cloneDescribedLabelItems(
+  items: Array<{ id: string; label: string; description?: string | null }>,
+) {
+  return items.map((item) => ({
+    id: item.id,
+    label: item.label,
+    ...(item.description === undefined
+      ? {}
+      : { description: item.description }),
   }));
 }

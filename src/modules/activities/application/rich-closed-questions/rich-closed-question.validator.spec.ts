@@ -6,6 +6,7 @@ import {
   richClosedExerciseFixture,
   richClosedQuestionFixture,
   richClosedV1BExerciseFixture,
+  richClosedV1BFullExerciseFixture,
 } from './rich-closed-question.fixtures';
 import type { RichClosedQuestion } from './rich-closed-question.types';
 
@@ -19,6 +20,8 @@ describe('rich closed question validator', () => {
     'error_detection',
     'timeline',
     'date_slider',
+    'true_false_grid',
+    'cause_consequence',
   ] as const)('accepts a valid rich closed %s question', (questionKind) => {
     const result = validateRichClosedQuestion(
       richClosedQuestionFixture(questionKind),
@@ -32,7 +35,7 @@ describe('rich closed question validator', () => {
   it('rejects a kind outside the rich closed allowlist', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
-      questionKind: 'true_false_grid',
+      questionKind: 'institution_matrix',
     } as unknown as RichClosedQuestion;
 
     const result = validateRichClosedQuestion(question);
@@ -304,6 +307,188 @@ describe('rich closed question validator', () => {
     );
   });
 
+  it('requires true_false_grid rows to be bounded and unique', () => {
+    const tooSmall = {
+      ...richClosedQuestionFixture('true_false_grid'),
+      rows: [
+        { id: 'row-1', statement: 'Le gouvernement est responsable.' },
+        { id: 'row-2', statement: 'La dissolution est impossible.' },
+      ],
+      correctValues: [
+        { rowId: 'row-1', value: true },
+        { rowId: 'row-2', value: false },
+      ],
+    };
+    const tooLarge = {
+      ...richClosedQuestionFixture('true_false_grid'),
+      rows: Array.from({ length: 9 }, (_, index) => ({
+        id: `row-${index + 1}`,
+        statement: `Affirmation ${index + 1}`,
+      })),
+      correctValues: Array.from({ length: 9 }, (_, index) => ({
+        rowId: `row-${index + 1}`,
+        value: index % 2 === 0,
+      })),
+    };
+    const duplicateRows = {
+      ...richClosedQuestionFixture('true_false_grid'),
+      rows: [
+        { id: 'row-1', statement: 'Affirmation A' },
+        { id: 'row-1', statement: 'Affirmation B' },
+        { id: 'row-3', statement: 'Affirmation C' },
+      ],
+    };
+
+    expect(validateRichClosedQuestion(tooSmall).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_TRUE_FALSE_GRID_SIZE_INVALID',
+      }),
+    );
+    expect(validateRichClosedQuestion(tooLarge).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_TRUE_FALSE_GRID_SIZE_INVALID',
+      }),
+    );
+    expect(validateRichClosedQuestion(duplicateRows).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_TRUE_FALSE_ROWS_INVALID',
+      }),
+    );
+  });
+
+  it('requires true_false_grid correction to cover rows with strict booleans', () => {
+    const incomplete = {
+      ...richClosedQuestionFixture('true_false_grid'),
+      correctValues: [
+        { rowId: 'row-1', value: true },
+        { rowId: 'row-2', value: false },
+      ],
+    };
+    const unknownRow = {
+      ...richClosedQuestionFixture('true_false_grid'),
+      correctValues: [
+        { rowId: 'row-1', value: true },
+        { rowId: 'row-2', value: false },
+        { rowId: 'unknown-row', value: true },
+      ],
+    };
+    const nonBoolean = {
+      ...richClosedQuestionFixture('true_false_grid'),
+      correctValues: [
+        { rowId: 'row-1', value: true },
+        { rowId: 'row-2', value: false },
+        { rowId: 'row-3', value: 'true' },
+      ],
+    };
+
+    expect(validateRichClosedQuestion(incomplete).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_TRUE_FALSE_CORRECTION_INVALID',
+      }),
+    );
+    expect(validateRichClosedQuestion(unknownRow).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_TRUE_FALSE_CORRECTION_INVALID',
+      }),
+    );
+    expect(validateRichClosedQuestion(nonBoolean).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_TRUE_FALSE_CORRECTION_INVALID',
+      }),
+    );
+  });
+
+  it('requires cause_consequence items and corrections to be complete and univocal', () => {
+    const tooFewCauses = {
+      ...richClosedQuestionFixture('cause_consequence'),
+      causes: [
+        { id: 'cause-1', label: 'Motion adoptée' },
+        { id: 'cause-2', label: 'Dissolution' },
+      ],
+    };
+    const tooFewConsequences = {
+      ...richClosedQuestionFixture('cause_consequence'),
+      consequences: [
+        { id: 'consequence-1', label: 'Démission' },
+        { id: 'consequence-2', label: 'Élections' },
+      ],
+    };
+    const duplicateIds = {
+      ...richClosedQuestionFixture('cause_consequence'),
+      causes: [
+        { id: 'cause-1', label: 'Motion adoptée' },
+        { id: 'cause-1', label: 'Question rejetée' },
+        { id: 'cause-3', label: 'Dissolution' },
+      ],
+    };
+    const incomplete = {
+      ...richClosedQuestionFixture('cause_consequence'),
+      correctPairs: [
+        { causeId: 'cause-1', consequenceId: 'consequence-1' },
+        { causeId: 'cause-2', consequenceId: 'consequence-2' },
+      ],
+    };
+    const unknownId = {
+      ...richClosedQuestionFixture('cause_consequence'),
+      correctPairs: [
+        { causeId: 'cause-1', consequenceId: 'consequence-1' },
+        { causeId: 'cause-2', consequenceId: 'consequence-2' },
+        { causeId: 'cause-3', consequenceId: 'unknown-consequence' },
+      ],
+    };
+    const duplicateCause = {
+      ...richClosedQuestionFixture('cause_consequence'),
+      correctPairs: [
+        { causeId: 'cause-1', consequenceId: 'consequence-1' },
+        { causeId: 'cause-1', consequenceId: 'consequence-2' },
+        { causeId: 'cause-3', consequenceId: 'consequence-3' },
+      ],
+    };
+    const duplicateConsequence = {
+      ...richClosedQuestionFixture('cause_consequence'),
+      correctPairs: [
+        { causeId: 'cause-1', consequenceId: 'consequence-1' },
+        { causeId: 'cause-2', consequenceId: 'consequence-1' },
+        { causeId: 'cause-3', consequenceId: 'consequence-3' },
+      ],
+    };
+    const malformedExtraPair = {
+      ...richClosedQuestionFixture('cause_consequence'),
+      correctPairs: [
+        { causeId: 'cause-1', consequenceId: 'consequence-1' },
+        { causeId: 'cause-2', consequenceId: 'consequence-2' },
+        { causeId: 'cause-3', consequenceId: 'consequence-3' },
+        { causeId: 'cause-2' },
+      ],
+    };
+
+    for (const question of [tooFewCauses, tooFewConsequences]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_CAUSE_CONSEQUENCE_TOO_SMALL',
+        }),
+      );
+    }
+    expect(validateRichClosedQuestion(duplicateIds).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_CAUSE_CONSEQUENCE_ITEMS_INVALID',
+      }),
+    );
+    for (const question of [
+      incomplete,
+      unknownId,
+      duplicateCause,
+      duplicateConsequence,
+      malformedExtraPair,
+    ]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_CAUSE_CONSEQUENCE_CORRECTION_INVALID',
+        }),
+      );
+    }
+  });
+
   it('requires case_qualification to have a short case and a unique correction', () => {
     const question = {
       ...richClosedQuestionFixture('case_qualification'),
@@ -361,6 +546,18 @@ describe('rich closed question validator', () => {
     const result = validateRichClosedExercise(richClosedV1BExerciseFixture(), {
       knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
     });
+
+    expect(result.accepted).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('validates a complete V1-B full exercise fixture', () => {
+    const result = validateRichClosedExercise(
+      richClosedV1BFullExerciseFixture(),
+      {
+        knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
+      },
+    );
 
     expect(result.accepted).toBe(true);
     expect(result.issues).toEqual([]);
