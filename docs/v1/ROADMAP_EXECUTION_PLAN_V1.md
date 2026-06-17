@@ -14,6 +14,7 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 | V1-018  | True/false grid + cause/consequence V1-B   | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_018_TRUE_FALSE_GRID_CAUSE_CONSEQUENCE.md           |
 | V1-019  | Institution matrix V1-C                    | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_019_INSTITUTION_MATRIX.md                          |
 | V1-020  | Diagram labeling V1-C                      | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_020_DIAGRAM_LABELING.md                            |
+| V1-021  | Calculation MCQ modes de scrutin V1-C      | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_021_CALCULATION_MCQ.md                             |
 
 ## Lots détaillés
 
@@ -96,3 +97,11 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 - Périmètre inclus : contrat backend diagram/nodes/edges/slots/options, validation stricte, mapper public anti-fuite, parsing submit, scoring full-correct, correction post-submit, Genkit mockable, fixture V1-C full dédiée, smoke E2E.
 - Non-objectifs : V1-021, `calculation_mcq`, `image_choice`, `fill_blank_dropdown`, HTML/SVG/Mermaid/Canvas/image URL/widget libre, provider IA réel, migration Prisma.
 - Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_020_DIAGRAM_LABELING.md`.
+
+### V1-021 — Calculation MCQ modes de scrutin V1-C
+
+- Objectif : ajouter le type rich closed fermé `calculation_mcq` pour calculs bornés de modes de scrutin.
+- Pourquoi maintenant : V1-020 a stabilisé le dernier type V1-C non calculatoire; on peut ajouter un QCM calculé sans ouvrir de formule libre.
+- Périmètre inclus : contrat backend, validation stricte des deux modes autorisés, recalcul déterministe backend, mapper public anti-fuite, parsing submit, scoring full-correct, correction post-submit, Genkit mockable, fixture V1-C calculation dédiée, smoke E2E.
+- Non-objectifs : V1-022, `image_choice`, `fill_blank_dropdown`, formule libre, eval/Function/parser d'expression, D'Hondt, Sainte-Laguë, seuils électoraux, votes blancs/nuls, provider IA réel, migration Prisma.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_021_CALCULATION_MCQ.md`.

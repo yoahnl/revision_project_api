@@ -968,6 +968,21 @@ function richClosedPublicExercise(): RichClosedPublicExerciseEnvelope {
               options: slot.options.map(({ id, label }) => ({ id, label })),
             })),
           };
+        case 'calculation_mcq':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            ...(question.instruction === undefined
+              ? {}
+              : { instruction: question.instruction }),
+            scenario: question.scenario,
+            calculation: question.calculation,
+            choices: question.choices.map(({ id, label, value }) => ({
+              id,
+              label,
+              value,
+            })),
+          };
         case 'case_qualification':
           return {
             ...base,

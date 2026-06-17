@@ -15,6 +15,7 @@ export const RICH_CLOSED_QUESTION_KINDS = [
   'cause_consequence',
   'institution_matrix',
   'diagram_labeling',
+  'calculation_mcq',
 ] as const;
 
 export type RichClosedQuestionKind =
@@ -166,6 +167,41 @@ export interface RichClosedDiagramLabelingValue {
   optionId: string;
 }
 
+export interface RichClosedCalculationChoice {
+  id: string;
+  label: string;
+  value: number;
+}
+
+export interface RichClosedCalculationParty {
+  id: string;
+  label: string;
+  votes: number;
+}
+
+export interface RichClosedCalculationWorkedStep {
+  id: string;
+  label: string;
+  detail: string;
+  value?: number;
+}
+
+export interface RichClosedAbsoluteMajorityThresholdCalculation {
+  mode: 'absolute_majority_threshold';
+  validVotes: number;
+}
+
+export interface RichClosedLargestRemainderTargetPartySeatsCalculation {
+  mode: 'largest_remainder_target_party_seats';
+  totalSeats: number;
+  targetPartyId: string;
+  parties: RichClosedCalculationParty[];
+}
+
+export type RichClosedCalculationData =
+  | RichClosedAbsoluteMajorityThresholdCalculation
+  | RichClosedLargestRemainderTargetPartySeatsCalculation;
+
 export interface RichClosedQuestionBase {
   id: string;
   questionKind: RichClosedQuestionKind;
@@ -261,6 +297,16 @@ export interface RichClosedDiagramLabelingQuestion extends RichClosedQuestionBas
   explanation: string;
 }
 
+export interface RichClosedCalculationMcqQuestion extends RichClosedQuestionBase {
+  questionKind: 'calculation_mcq';
+  instruction?: string | null;
+  scenario: string;
+  calculation: RichClosedCalculationData;
+  choices: RichClosedCalculationChoice[];
+  correctChoiceId: string;
+  explanation: string;
+}
+
 export interface RichClosedCaseQualificationQuestion extends RichClosedQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -289,7 +335,8 @@ export type RichClosedQuestion =
   | RichClosedTrueFalseGridQuestion
   | RichClosedCauseConsequenceQuestion
   | RichClosedInstitutionMatrixQuestion
-  | RichClosedDiagramLabelingQuestion;
+  | RichClosedDiagramLabelingQuestion
+  | RichClosedCalculationMcqQuestion;
 
 export interface RichClosedPublicQuestionBase {
   id: string;
@@ -366,6 +413,14 @@ export interface RichClosedPublicDiagramLabelingQuestion extends RichClosedPubli
   slots: RichClosedDiagramLabelingSlot[];
 }
 
+export interface RichClosedPublicCalculationMcqQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'calculation_mcq';
+  instruction?: string | null;
+  scenario: string;
+  calculation: RichClosedCalculationData;
+  choices: RichClosedCalculationChoice[];
+}
+
 export interface RichClosedPublicCaseQualificationQuestion extends RichClosedPublicQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -390,7 +445,8 @@ export type RichClosedPublicQuestion =
   | RichClosedPublicTrueFalseGridQuestion
   | RichClosedPublicCauseConsequenceQuestion
   | RichClosedPublicInstitutionMatrixQuestion
-  | RichClosedPublicDiagramLabelingQuestion;
+  | RichClosedPublicDiagramLabelingQuestion
+  | RichClosedPublicCalculationMcqQuestion;
 
 export type RichClosedAnswer =
   | {
@@ -450,6 +506,11 @@ export type RichClosedAnswer =
     }
   | {
       questionId: string;
+      questionKind: 'calculation_mcq';
+      choiceId: string;
+    }
+  | {
+      questionId: string;
       questionKind: 'error_detection';
       errorId: string;
     };
@@ -470,6 +531,11 @@ export type RichClosedCorrectionPayload =
   | { correctPairs: RichClosedCauseConsequencePair[] }
   | { correctValues: RichClosedInstitutionMatrixValue[] }
   | { correctValues: RichClosedDiagramLabelingValue[] }
+  | {
+      correctChoiceId: string;
+      expectedValue: number;
+      workedSteps: RichClosedCalculationWorkedStep[];
+    }
   | { correctOrder: string[] }
   | { correctYear: number; minAcceptedYear: number; maxAcceptedYear: number }
   | { correctErrorId: string };

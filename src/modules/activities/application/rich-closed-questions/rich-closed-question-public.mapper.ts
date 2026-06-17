@@ -1,5 +1,7 @@
 import type {
   RichClosedExercise,
+  RichClosedCalculationData,
+  RichClosedCalculationChoice,
   RichClosedDiagram,
   RichClosedDiagramLabelingSlot,
   RichClosedPublicChoice,
@@ -141,6 +143,17 @@ export function toRichClosedPublicQuestion(
         diagram: cloneDiagram(question.diagram),
         slots: cloneDiagramLabelingSlots(question.slots),
       };
+    case 'calculation_mcq':
+      return {
+        ...base,
+        questionKind: question.questionKind,
+        ...(question.instruction === undefined
+          ? {}
+          : { instruction: question.instruction }),
+        scenario: question.scenario,
+        calculation: cloneCalculation(question.calculation),
+        choices: cloneCalculationChoices(question.choices),
+      };
     case 'case_qualification':
       return {
         ...base,
@@ -265,5 +278,38 @@ function cloneDiagramLabelingSlots(
     anchorId: slot.anchorId,
     prompt: slot.prompt,
     options: publicChoices(slot.options),
+  }));
+}
+
+function cloneCalculation(
+  calculation: RichClosedCalculationData,
+): RichClosedCalculationData {
+  switch (calculation.mode) {
+    case 'absolute_majority_threshold':
+      return {
+        mode: calculation.mode,
+        validVotes: calculation.validVotes,
+      };
+    case 'largest_remainder_target_party_seats':
+      return {
+        mode: calculation.mode,
+        totalSeats: calculation.totalSeats,
+        targetPartyId: calculation.targetPartyId,
+        parties: calculation.parties.map((party) => ({
+          id: party.id,
+          label: party.label,
+          votes: party.votes,
+        })),
+      };
+  }
+}
+
+function cloneCalculationChoices(
+  choices: RichClosedCalculationChoice[],
+): RichClosedCalculationChoice[] {
+  return choices.map((choice) => ({
+    id: choice.id,
+    label: choice.label,
+    value: choice.value,
   }));
 }

@@ -3,11 +3,15 @@ import {
   richClosedExerciseFixture,
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
+  richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
 } from './rich-closed-question.fixtures';
 import { scoreRichClosedExerciseSubmission } from './rich-closed-question-scorer';
-import type { RichClosedAnswer } from './rich-closed-question.types';
+import type {
+  RichClosedAnswer,
+  RichClosedExercise,
+} from './rich-closed-question.types';
 
 describe('scoreRichClosedExerciseSubmission', () => {
   it('scores a fully correct rich closed exercise', () => {
@@ -836,6 +840,122 @@ describe('scoreRichClosedExerciseSubmission', () => {
     );
   });
 
+  it('scores calculation_mcq V1-C answers with deterministic correction steps', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CCalculationExerciseFixture(),
+      answers: correctAnswersV1CCalculation(),
+    });
+
+    expect(result).toMatchObject({
+      correctAnswers: 13,
+      totalQuestions: 13,
+      score: 1,
+    });
+    const item = result.items.find(
+      (item) => item.questionId === 'calculation-mcq-majority-1',
+    );
+    const correction = item?.correction as
+      | {
+          correctChoiceId: string;
+          expectedValue: number;
+          workedSteps: unknown[];
+        }
+      | undefined;
+
+    expect(item).toMatchObject({
+      isCorrect: true,
+    });
+    expect(correction?.correctChoiceId).toBe('choice-289');
+    expect(correction?.expectedValue).toBe(289);
+    expect(correction?.workedSteps).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: 'threshold', value: 289 }),
+      ]),
+    );
+  });
+
+  it('derives calculation_mcq correctness from the recalculated expected value', () => {
+    const exercise = richClosedV1CCalculationExerciseFixture();
+    const tamperedExercise: RichClosedExercise = {
+      ...exercise,
+      questions: exercise.questions.map((question) =>
+        question.questionKind === 'calculation_mcq'
+          ? { ...question, correctChoiceId: 'choice-288' }
+          : question,
+      ),
+    };
+
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: tamperedExercise,
+      answers: correctAnswersV1CCalculation(),
+    });
+
+    expect(
+      result.items.find(
+        (item) => item.questionId === 'calculation-mcq-majority-1',
+      ),
+    ).toMatchObject({
+      isCorrect: true,
+      correction: {
+        correctChoiceId: 'choice-289',
+        expectedValue: 289,
+      },
+    });
+  });
+
+  it('marks a wrong calculation_mcq choice as incorrect without recalculating from the answer value', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CCalculationExerciseFixture(),
+      answers: replaceV1CCalculationAnswer({
+        questionId: 'calculation-mcq-majority-1',
+        questionKind: 'calculation_mcq',
+        choiceId: 'choice-288',
+      }),
+    });
+
+    expect(
+      result.items.find(
+        (item) => item.questionId === 'calculation-mcq-majority-1',
+      ),
+    ).toMatchObject({
+      isCorrect: false,
+      partialScore: 0,
+      correction: {
+        correctChoiceId: 'choice-289',
+        expectedValue: 289,
+      },
+    });
+  });
+
+  it('rejects unknown and private-field calculation_mcq answers', () => {
+    expectInvalidV1CCalculation(
+      replaceV1CCalculationAnswer({
+        questionId: 'calculation-mcq-majority-1',
+        questionKind: 'calculation_mcq',
+        choiceId: 'unknown-choice',
+      }),
+    );
+    expectInvalidV1CCalculation(
+      replaceV1CCalculationAnswer({
+        questionId: 'calculation-mcq-majority-1',
+        questionKind: 'calculation_mcq',
+        choiceId: 'choice-289',
+        expectedValue: 289,
+      }),
+    );
+    expectInvalidV1CCalculation(
+      replaceV1CCalculationAnswer({
+        questionId: 'calculation-mcq-majority-1',
+        questionKind: 'calculation_mcq',
+        choiceId: 'choice-289',
+        formula: 'floor(validVotes / 2) + 1',
+      }),
+    );
+  });
+
   it('rejects incomplete ordering answers', () => {
     expect(() =>
       scoreRichClosedExerciseSubmission({
@@ -1013,6 +1133,16 @@ function expectInvalidV1CFull(answers: unknown[]) {
   ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
 }
 
+function expectInvalidV1CCalculation(answers: unknown[]) {
+  expect(() =>
+    scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CCalculationExerciseFixture(),
+      answers,
+    }),
+  ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+}
+
 function replaceAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return correctAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
@@ -1054,6 +1184,17 @@ function replaceV1CFullAnswer(answer: unknown): unknown[] {
       : {};
 
   return correctAnswersV1CFull().map((currentAnswer) =>
+    currentAnswer.questionId === record.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceV1CCalculationAnswer(answer: unknown): unknown[] {
+  const record =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { questionId?: unknown })
+      : {};
+
+  return correctAnswersV1CCalculation().map((currentAnswer) =>
     currentAnswer.questionId === record.questionId ? answer : currentAnswer,
   );
 }
@@ -1181,6 +1322,17 @@ function correctAnswersV1CFull(): RichClosedAnswer[] {
           optionId: 'option-nomination',
         },
       ],
+    },
+  ];
+}
+
+function correctAnswersV1CCalculation(): RichClosedAnswer[] {
+  return [
+    ...correctAnswersV1CFull(),
+    {
+      questionId: 'calculation-mcq-majority-1',
+      questionKind: 'calculation_mcq',
+      choiceId: 'choice-289',
     },
   ];
 }

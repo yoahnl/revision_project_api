@@ -2,8 +2,10 @@ import {
   RICH_CLOSED_SUBMIT_INVALID_INPUT,
   RICH_CLOSED_SESSION_NOT_FOUND,
 } from './rich-closed-question-errors';
+import { evaluateRichClosedCalculationMcq } from './rich-closed-question-calculation';
 import {
   type RichClosedAnswer,
+  type RichClosedCalculationMcqQuestion,
   type RichClosedCauseConsequencePair,
   type RichClosedCorrectionItem,
   type RichClosedCorrectionPayload,
@@ -152,6 +154,12 @@ function normalizeAnswer(answer: unknown): RichClosedAnswer {
         questionId,
         questionKind,
         values: readDiagramLabelingValues(answer.values),
+      };
+    case 'calculation_mcq':
+      return {
+        questionId,
+        questionKind,
+        choiceId: readRequiredString(answer.choiceId),
       };
     case 'error_detection':
       return {
@@ -421,6 +429,32 @@ function scoreQuestion(
         },
       });
     }
+    case 'calculation_mcq': {
+      const calculationAnswer = answer as Extract<
+        RichClosedAnswer,
+        { questionKind: 'calculation_mcq' }
+      >;
+      assertKnownId(
+        calculationAnswer.choiceId,
+        question.choices.map((choice) => choice.id),
+      );
+      const evaluation = evaluateRichClosedCalculationMcq(question.calculation);
+      const derivedCorrectChoiceId = deriveCalculationCorrectChoiceId(
+        question,
+        evaluation.expectedValue,
+      );
+
+      return buildCorrectionItem({
+        question,
+        answer: calculationAnswer,
+        isCorrect: calculationAnswer.choiceId === derivedCorrectChoiceId,
+        correction: {
+          correctChoiceId: derivedCorrectChoiceId,
+          expectedValue: evaluation.expectedValue,
+          workedSteps: evaluation.workedSteps.map((step) => ({ ...step })),
+        },
+      });
+    }
   }
 }
 
@@ -428,6 +462,21 @@ function assertKnownId(submittedId: string, knownIds: string[]) {
   if (!knownIds.includes(submittedId)) {
     throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
   }
+}
+
+function deriveCalculationCorrectChoiceId(
+  question: RichClosedCalculationMcqQuestion,
+  expectedValue: number,
+): string {
+  const matchingChoices = question.choices.filter(
+    (choice) => choice.value === expectedValue,
+  );
+
+  if (matchingChoices.length !== 1) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+
+  return matchingChoices[0].id;
 }
 
 function buildCorrectionItem(input: {
@@ -734,6 +783,7 @@ function hasForbiddenSubmitField(value: unknown): boolean {
       key === 'textAnswer' ||
       key === 'score' ||
       key === 'partialScore' ||
+      key === 'expectedValue' ||
       key === 'workedSteps' ||
       key === 'answersPayload' ||
       key === 'expectedAnswer' ||
@@ -770,6 +820,8 @@ function cloneAnswer(answer: RichClosedAnswer): RichClosedAnswer {
       return { ...answer, values: cloneInstitutionMatrixValues(answer.values) };
     case 'diagram_labeling':
       return { ...answer, values: cloneDiagramLabelingValues(answer.values) };
+    case 'calculation_mcq':
+      return { ...answer };
     case 'error_detection':
       return { ...answer };
   }
@@ -905,6 +957,12 @@ function isForbiddenRenderKey(key: string): boolean {
     'style',
     'css',
     'script',
+    'formula',
+    'expression',
+    'rawFormula',
+    'calculationCode',
+    'javascript',
+    'python',
     'imageUrl',
     'assetUrl',
     'canvas',

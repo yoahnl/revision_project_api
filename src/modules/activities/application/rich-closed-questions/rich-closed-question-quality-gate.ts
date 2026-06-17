@@ -310,6 +310,7 @@ function isPrivatePublicPayloadKey(key: string): boolean {
     key === 'textAnswer' ||
     key === 'score' ||
     key === 'partialScore' ||
+    key === 'expectedValue' ||
     key === 'workedSteps' ||
     key === 'answersPayload' ||
     key === 'expectedAnswer' ||
@@ -331,6 +332,12 @@ function isForbiddenRenderPublicPayloadKey(key: string): boolean {
     'style',
     'css',
     'script',
+    'formula',
+    'expression',
+    'rawFormula',
+    'calculationCode',
+    'javascript',
+    'python',
     'imageUrl',
     'assetUrl',
     'canvas',

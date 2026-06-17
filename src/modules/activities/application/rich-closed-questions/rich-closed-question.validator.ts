@@ -1,7 +1,14 @@
 import {
+  RICH_CLOSED_CALCULATION_INVALID,
+  evaluateRichClosedCalculationMcq,
+} from './rich-closed-question-calculation';
+import {
   RICH_CLOSED_EXERCISE_VERSION,
   RICH_CLOSED_COGNITIVE_SKILLS,
   RICH_CLOSED_QUESTION_KINDS,
+  type RichClosedCalculationChoice,
+  type RichClosedCalculationData,
+  type RichClosedCalculationParty,
   type RichClosedChoice,
   type RichClosedCauseConsequencePair,
   type RichClosedDiagram,
@@ -43,6 +50,10 @@ const MAX_DIAGRAM_GROUPS = 4;
 const MIN_DIAGRAM_SLOTS = 2;
 const MAX_DIAGRAM_SLOTS = 8;
 const MAX_DIAGRAM_SLOT_OPTIONS = 6;
+const MAX_CALCULATION_VOTES = 1_000_000;
+const MAX_CALCULATION_TOTAL_SEATS = 200;
+const MIN_CALCULATION_PARTIES = 2;
+const MAX_CALCULATION_PARTIES = 8;
 const DIAGRAM_LAYOUTS = [
   'vertical_flow',
   'two_column',
@@ -60,9 +71,17 @@ const FORBIDDEN_RICH_CLOSED_RENDER_KEYS = new Set([
   'widget',
   'component',
   'renderPayload',
+  'expectedValue',
+  'workedSteps',
   'style',
   'css',
   'script',
+  'formula',
+  'expression',
+  'rawFormula',
+  'calculationCode',
+  'javascript',
+  'python',
   'imageUrl',
   'assetUrl',
   'canvas',
@@ -213,6 +232,9 @@ export function validateRichClosedQuestion(
       break;
     case 'diagram_labeling':
       validateDiagramLabelingQuestion(question, issues);
+      break;
+    case 'calculation_mcq':
+      validateCalculationMcqQuestion(question, issues);
       break;
     case 'case_qualification':
       validateCaseQualificationQuestion(question, issues);
@@ -839,6 +861,90 @@ function validateDiagramLabelingQuestion(
   validateExplanation(question.explanation, issues);
 }
 
+function validateCalculationMcqQuestion(
+  question: Record<string, unknown>,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  if (!boundedString(question.scenario, 1, MAX_CASE_TEXT_LENGTH)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CALCULATION_SCENARIO_INVALID',
+        'Calculation MCQ requires a bounded scenario',
+        'scenario',
+      ),
+    );
+  }
+
+  const calculation = readCalculationData(
+    question.calculation,
+    issues,
+    'calculation',
+  );
+  const choices = readCalculationChoices(question.choices, issues, 'choices');
+  const correctChoiceId = readString(question.correctChoiceId);
+  const correctChoice = choices.find((choice) => choice.id === correctChoiceId);
+
+  if (!correctChoice) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CALCULATION_CORRECTION_INVALID',
+        'Calculation MCQ correction must target one existing choice',
+        'correctChoiceId',
+      ),
+    );
+  }
+
+  if (hasDuplicates(choices.map((choice) => String(choice.value)))) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CALCULATION_CHOICES_INVALID',
+        'Calculation MCQ choices must have unique integer values',
+        'choices',
+      ),
+    );
+  }
+
+  if (calculation !== null) {
+    try {
+      const evaluation = evaluateRichClosedCalculationMcq(calculation);
+      const expectedChoices = choices.filter(
+        (choice) => choice.value === evaluation.expectedValue,
+      );
+
+      if (
+        expectedChoices.length !== 1 ||
+        correctChoice?.value !== evaluation.expectedValue
+      ) {
+        issues.push(
+          issue(
+            'RICH_CLOSED_CALCULATION_CORRECTION_INVALID',
+            'Calculation MCQ correct choice must match the deterministic expected value',
+            'correctChoiceId',
+          ),
+        );
+      }
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === RICH_CLOSED_CALCULATION_INVALID
+      ) {
+        issues.push(
+          issue(
+            'RICH_CLOSED_CALCULATION_INVALID',
+            'Calculation MCQ data cannot be evaluated deterministically',
+            'calculation',
+          ),
+        );
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  validateOptionalInstruction(question.instruction, issues);
+  validateExplanation(question.explanation, issues);
+}
+
 function validateCaseQualificationQuestion(
   question: Record<string, unknown>,
   issues: RichClosedExerciseValidationIssue[],
@@ -1368,6 +1474,217 @@ function readDiagramLabelingValues(
   return values;
 }
 
+function readCalculationChoices(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedCalculationChoice[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < MIN_CHOICES ||
+    value.length > MAX_CHOICES
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CALCULATION_CHOICES_INVALID',
+        'Calculation MCQ choices must contain between two and six items',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const choices = value.filter(isCalculationChoice);
+  if (
+    choices.length !== value.length ||
+    hasDuplicates(choices.map((choice) => choice.id))
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CALCULATION_CHOICES_INVALID',
+        'Calculation MCQ choices must have unique non-empty ids, labels and integer values',
+        path,
+      ),
+    );
+  }
+
+  return choices;
+}
+
+function readCalculationData(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedCalculationData | null {
+  if (!isRecord(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CALCULATION_INVALID',
+        'Calculation MCQ calculation must be an object',
+        path,
+      ),
+    );
+    return null;
+  }
+
+  switch (value.mode) {
+    case 'absolute_majority_threshold': {
+      const validVotes = value.validVotes;
+      if (
+        typeof validVotes !== 'number' ||
+        !Number.isInteger(validVotes) ||
+        validVotes < 1 ||
+        validVotes > MAX_CALCULATION_VOTES
+      ) {
+        issues.push(
+          issue(
+            'RICH_CLOSED_CALCULATION_ABSOLUTE_MAJORITY_INVALID',
+            'Absolute majority calculation requires bounded positive integer valid votes',
+            `${path}.validVotes`,
+          ),
+        );
+        return null;
+      }
+
+      return {
+        mode: 'absolute_majority_threshold',
+        validVotes,
+      };
+    }
+    case 'largest_remainder_target_party_seats': {
+      const parties = readCalculationParties(
+        value.parties,
+        issues,
+        `${path}.parties`,
+      );
+      const totalSeats = value.totalSeats;
+      const targetPartyId = value.targetPartyId;
+      const totalVotes = parties.reduce((sum, party) => sum + party.votes, 0);
+      const validTotalSeats =
+        typeof totalSeats === 'number' &&
+        Number.isInteger(totalSeats) &&
+        totalSeats >= 1 &&
+        totalSeats <= MAX_CALCULATION_TOTAL_SEATS;
+      const validTargetPartyId = plainString(targetPartyId);
+      const validPartySet =
+        parties.length >= MIN_CALCULATION_PARTIES &&
+        parties.length <= MAX_CALCULATION_PARTIES &&
+        !hasDuplicates(parties.map((party) => party.id)) &&
+        parties.length ===
+          (Array.isArray(value.parties) ? value.parties.length : -1);
+
+      if (!validTotalSeats) {
+        issues.push(
+          issue(
+            'RICH_CLOSED_CALCULATION_LARGEST_REMAINDER_SEATS_INVALID',
+            'Largest remainder calculation requires bounded positive integer total seats',
+            `${path}.totalSeats`,
+          ),
+        );
+      }
+
+      if (!validTargetPartyId) {
+        issues.push(
+          issue(
+            'RICH_CLOSED_CALCULATION_TARGET_PARTY_INVALID',
+            'Largest remainder calculation requires a target party id',
+            `${path}.targetPartyId`,
+          ),
+        );
+      }
+
+      if (!validPartySet) {
+        issues.push(
+          issue(
+            'RICH_CLOSED_CALCULATION_PARTIES_INVALID',
+            'Largest remainder calculation requires two to eight parties with unique ids',
+            `${path}.parties`,
+          ),
+        );
+      }
+
+      if (totalVotes <= 0) {
+        issues.push(
+          issue(
+            'RICH_CLOSED_CALCULATION_TOTAL_VOTES_INVALID',
+            'Largest remainder calculation requires at least one vote',
+            `${path}.parties`,
+          ),
+        );
+      }
+
+      if (
+        validTargetPartyId &&
+        !parties.some((party) => party.id === targetPartyId)
+      ) {
+        issues.push(
+          issue(
+            'RICH_CLOSED_CALCULATION_TARGET_PARTY_INVALID',
+            'Largest remainder target party must exist',
+            `${path}.targetPartyId`,
+          ),
+        );
+      }
+
+      if (
+        !validTotalSeats ||
+        !validTargetPartyId ||
+        !validPartySet ||
+        totalVotes <= 0 ||
+        !parties.some((party) => party.id === targetPartyId)
+      ) {
+        return null;
+      }
+
+      return {
+        mode: 'largest_remainder_target_party_seats',
+        totalSeats,
+        targetPartyId,
+        parties,
+      };
+    }
+    default:
+      issues.push(
+        issue(
+          'RICH_CLOSED_CALCULATION_MODE_INVALID',
+          'Calculation MCQ mode is not supported',
+          `${path}.mode`,
+        ),
+      );
+      return null;
+  }
+}
+
+function readCalculationParties(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedCalculationParty[] {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CALCULATION_PARTIES_INVALID',
+        'Largest remainder parties must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const parties = value.filter(isCalculationParty);
+  if (parties.length !== value.length) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_CALCULATION_PARTIES_INVALID',
+        'Largest remainder parties must have ids, labels and bounded integer votes',
+        path,
+      ),
+    );
+  }
+
+  return parties;
+}
+
 function validateOptionalInstruction(
   instruction: unknown,
   issues: RichClosedExerciseValidationIssue[],
@@ -1637,6 +1954,36 @@ function isDiagramLabelingValue(
 ): value is RichClosedDiagramLabelingValue {
   return (
     isRecord(value) && plainString(value.slotId) && plainString(value.optionId)
+  );
+}
+
+function isCalculationChoice(
+  value: unknown,
+): value is RichClosedCalculationChoice {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    boundedString(value.label, 1, 220) &&
+    Number.isInteger(value.value)
+  );
+}
+
+function isCalculationParty(
+  value: unknown,
+): value is RichClosedCalculationParty {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  const votes = value.votes;
+
+  return (
+    plainString(value.id) &&
+    boundedString(value.label, 1, 220) &&
+    typeof votes === 'number' &&
+    Number.isInteger(votes) &&
+    votes >= 0 &&
+    votes <= MAX_CALCULATION_VOTES
   );
 }
 

@@ -4,9 +4,11 @@ import {
 } from './rich-closed-question.validator';
 import {
   richClosedExerciseFixture,
+  richClosedCalculationMcqLargestRemainderFixture,
   richClosedQuestionFixture,
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
+  richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
 } from './rich-closed-question.fixtures';
@@ -26,6 +28,7 @@ describe('rich closed question validator', () => {
     'cause_consequence',
     'institution_matrix',
     'diagram_labeling',
+    'calculation_mcq',
   ] as const)('accepts a valid rich closed %s question', (questionKind) => {
     const result = validateRichClosedQuestion(
       richClosedQuestionFixture(questionKind),
@@ -39,7 +42,7 @@ describe('rich closed question validator', () => {
   it('rejects a kind outside the rich closed allowlist', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
-      questionKind: 'calculation_mcq',
+      questionKind: 'image_choice',
     } as unknown as RichClosedQuestion;
 
     const result = validateRichClosedQuestion(question);
@@ -62,6 +65,18 @@ describe('rich closed question validator', () => {
   it('accepts a valid V1-C diagram labeling exercise fixture', () => {
     const result = validateRichClosedExercise(
       richClosedV1CFullExerciseFixture(),
+      {
+        knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
+      },
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('accepts a valid V1-C calculation exercise fixture', () => {
+    const result = validateRichClosedExercise(
+      richClosedV1CCalculationExerciseFixture(),
       {
         knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
       },
@@ -880,6 +895,228 @@ describe('rich closed question validator', () => {
       );
     },
   );
+
+  it('requires calculation_mcq absolute majority data and correction to match the deterministic result', () => {
+    const base = richClosedQuestionFixture('calculation_mcq') as Extract<
+      RichClosedQuestion,
+      { questionKind: 'calculation_mcq' }
+    >;
+
+    expect(validateRichClosedQuestion(base).accepted).toBe(true);
+
+    const cases = [
+      {
+        question: {
+          ...base,
+          calculation: { mode: 'absolute_majority_threshold', validVotes: 0 },
+        },
+        code: 'RICH_CLOSED_CALCULATION_ABSOLUTE_MAJORITY_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: { mode: 'absolute_majority_threshold', validVotes: 1.5 },
+        },
+        code: 'RICH_CLOSED_CALCULATION_ABSOLUTE_MAJORITY_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: {
+            mode: 'absolute_majority_threshold',
+            validVotes: 1_000_001,
+          },
+        },
+        code: 'RICH_CLOSED_CALCULATION_ABSOLUTE_MAJORITY_INVALID',
+      },
+      {
+        question: { ...base, correctChoiceId: 'choice-288' },
+        code: 'RICH_CLOSED_CALCULATION_CORRECTION_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          choices: base.choices.filter((choice) => choice.value !== 289),
+        },
+        code: 'RICH_CLOSED_CALCULATION_CORRECTION_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          choices: [
+            ...base.choices,
+            { id: 'choice-289-bis', label: '289 aussi', value: 289 },
+          ],
+        },
+        code: 'RICH_CLOSED_CALCULATION_CORRECTION_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          choices: [
+            { id: 'choice-a', label: 'A', value: 288 },
+            { id: 'choice-b', label: 'B', value: 288 },
+          ],
+        },
+        code: 'RICH_CLOSED_CALCULATION_CHOICES_INVALID',
+      },
+    ];
+
+    for (const { question, code } of cases) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({ code }),
+      );
+    }
+  });
+
+  it('requires calculation_mcq largest remainder data to be bounded and unambiguous', () => {
+    const base = richClosedCalculationMcqLargestRemainderFixture();
+    const baseCalculation = base.calculation;
+    if (baseCalculation.mode !== 'largest_remainder_target_party_seats') {
+      throw new Error('Expected largest remainder calculation fixture');
+    }
+    const cases = [
+      {
+        question: {
+          ...base,
+          calculation: { ...baseCalculation, totalSeats: 0 },
+        },
+        code: 'RICH_CLOSED_CALCULATION_LARGEST_REMAINDER_SEATS_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: { ...baseCalculation, totalSeats: 1.5 },
+        },
+        code: 'RICH_CLOSED_CALCULATION_LARGEST_REMAINDER_SEATS_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: { ...baseCalculation, totalSeats: 201 },
+        },
+        code: 'RICH_CLOSED_CALCULATION_LARGEST_REMAINDER_SEATS_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: {
+            ...baseCalculation,
+            parties: baseCalculation.parties.slice(0, 1),
+          },
+        },
+        code: 'RICH_CLOSED_CALCULATION_PARTIES_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: {
+            ...baseCalculation,
+            parties: Array.from({ length: 9 }, (_, index) => ({
+              id: `party-${index}`,
+              label: `Liste ${index}`,
+              votes: index + 1,
+            })),
+          },
+        },
+        code: 'RICH_CLOSED_CALCULATION_PARTIES_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: {
+            ...baseCalculation,
+            parties: [
+              { id: 'party-a', label: 'Liste A', votes: 4300 },
+              { id: 'party-a', label: 'Liste B', votes: 3100 },
+            ],
+          },
+        },
+        code: 'RICH_CLOSED_CALCULATION_PARTIES_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: { ...baseCalculation, targetPartyId: 'unknown-party' },
+        },
+        code: 'RICH_CLOSED_CALCULATION_TARGET_PARTY_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: {
+            ...baseCalculation,
+            parties: [
+              { id: 'party-a', label: 'Liste A', votes: -1 },
+              { id: 'party-b', label: 'Liste B', votes: 1 },
+            ],
+          },
+        },
+        code: 'RICH_CLOSED_CALCULATION_PARTIES_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: {
+            ...baseCalculation,
+            parties: [
+              { id: 'party-a', label: 'Liste A', votes: 0 },
+              { id: 'party-b', label: 'Liste B', votes: 0 },
+            ],
+          },
+        },
+        code: 'RICH_CLOSED_CALCULATION_TOTAL_VOTES_INVALID',
+      },
+      {
+        question: {
+          ...base,
+          calculation: {
+            mode: 'largest_remainder_target_party_seats',
+            totalSeats: 2,
+            targetPartyId: 'party-a',
+            parties: [
+              { id: 'party-a', label: 'Liste A', votes: 100 },
+              { id: 'party-b', label: 'Liste B', votes: 100 },
+              { id: 'party-c', label: 'Liste C', votes: 100 },
+            ],
+          },
+        },
+        code: 'RICH_CLOSED_CALCULATION_INVALID',
+      },
+      {
+        question: { ...base, correctChoiceId: 'choice-3' },
+        code: 'RICH_CLOSED_CALCULATION_CORRECTION_INVALID',
+      },
+    ];
+
+    expect(validateRichClosedQuestion(base).accepted).toBe(true);
+    for (const { question, code } of cases) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({ code }),
+      );
+    }
+  });
+
+  it.each([
+    'formula',
+    'expression',
+    'rawFormula',
+    'calculationCode',
+    'script',
+    'code',
+    'renderPayload',
+  ] as const)('rejects calculation free-form field %s', (field) => {
+    const question = {
+      ...richClosedQuestionFixture('calculation_mcq'),
+      [field]: 'unsafe',
+    };
+
+    expect(validateRichClosedQuestion(question).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_RENDER_PAYLOAD_FORBIDDEN',
+      }),
+    );
+  });
 
   it('requires case_qualification to have a short case and a unique correction', () => {
     const question = {

@@ -22,6 +22,7 @@ describe('rich closed question generation profile', () => {
       cause_consequence: 0,
       institution_matrix: 0,
       diagram_labeling: 0,
+      calculation_mcq: 0,
     });
   });
 
@@ -34,6 +35,7 @@ describe('rich closed question generation profile', () => {
     expect(mix.cause_consequence).toBe(0);
     expect(mix.institution_matrix).toBe(0);
     expect(mix.diagram_labeling).toBe(0);
+    expect(mix.calculation_mcq).toBe(0);
     expect(sumMix(mix)).toBe(7);
   });
 
@@ -51,6 +53,7 @@ describe('rich closed question generation profile', () => {
       cause_consequence: 0,
       institution_matrix: 0,
       diagram_labeling: 0,
+      calculation_mcq: 0,
     });
   });
 
@@ -63,6 +66,7 @@ describe('rich closed question generation profile', () => {
     expect(mix.cause_consequence).toBe(0);
     expect(mix.institution_matrix).toBe(0);
     expect(mix.diagram_labeling).toBe(0);
+    expect(mix.calculation_mcq).toBe(0);
     expect(sumMix(mix)).toBe(9);
   });
 
@@ -85,6 +89,7 @@ describe('rich closed question generation profile', () => {
       cause_consequence: 1,
       institution_matrix: 0,
       diagram_labeling: 0,
+      calculation_mcq: 0,
     });
   });
 
@@ -102,6 +107,7 @@ describe('rich closed question generation profile', () => {
       cause_consequence: 1,
       institution_matrix: 1,
       diagram_labeling: 0,
+      calculation_mcq: 0,
     });
   });
 
@@ -119,6 +125,25 @@ describe('rich closed question generation profile', () => {
       cause_consequence: 1,
       institution_matrix: 1,
       diagram_labeling: 1,
+      calculation_mcq: 0,
+    });
+  });
+
+  it('adds calculation_mcq only from the thirteen-question default mix', () => {
+    expect(resolveRichClosedQuestionTypeMix({ questionCount: 13 })).toEqual({
+      case_qualification: 1,
+      error_detection: 1,
+      matching: 1,
+      ordering: 1,
+      multiple_choice: 1,
+      single_choice: 1,
+      timeline: 1,
+      date_slider: 1,
+      true_false_grid: 1,
+      cause_consequence: 1,
+      institution_matrix: 1,
+      diagram_labeling: 1,
+      calculation_mcq: 1,
     });
   });
 
@@ -131,16 +156,16 @@ describe('rich closed question generation profile', () => {
   });
 
   it('never returns a type outside the rich closed allowlist', () => {
-    const mix = resolveRichClosedQuestionTypeMix({ questionCount: 12 });
+    const mix = resolveRichClosedQuestionTypeMix({ questionCount: 13 });
     const allowedKinds = new Set<string>(RICH_CLOSED_QUESTION_KINDS);
 
     expect(Object.keys(mix).every((kind) => allowedKinds.has(kind))).toBe(true);
   });
 
   it('does not let single_choice dominate generated exercises', () => {
-    const mix = resolveRichClosedQuestionTypeMix({ questionCount: 12 });
+    const mix = resolveRichClosedQuestionTypeMix({ questionCount: 13 });
 
-    expect((mix.single_choice ?? 0) / 12).toBeLessThanOrEqual(0.4);
+    expect((mix.single_choice ?? 0) / 13).toBeLessThanOrEqual(0.4);
   });
 
   it('treats small question counts as rich closed exercises without defaulting to single_choice', () => {

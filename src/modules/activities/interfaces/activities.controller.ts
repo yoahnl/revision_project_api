@@ -725,6 +725,12 @@ function validateRichClosedAnswer(input: unknown): RichClosedAnswer {
         questionKind,
         values: validateRichClosedDiagramLabelingValues(answer.values),
       };
+    case 'calculation_mcq':
+      return {
+        questionId,
+        questionKind,
+        choiceId: validateRequiredId(answer.choiceId, 'Choice id'),
+      };
     case 'error_detection':
       return {
         questionId,
@@ -890,6 +896,7 @@ function containsForbiddenRichClosedSubmitField(value: unknown): boolean {
       key === 'textAnswer' ||
       key === 'score' ||
       key === 'partialScore' ||
+      key === 'expectedValue' ||
       key === 'workedSteps' ||
       key === 'answersPayload' ||
       key === 'expectedAnswer' ||
@@ -916,6 +923,12 @@ function isForbiddenRichClosedRenderKey(key: string): boolean {
     'style',
     'css',
     'script',
+    'formula',
+    'expression',
+    'rawFormula',
+    'calculationCode',
+    'javascript',
+    'python',
     'imageUrl',
     'assetUrl',
     'canvas',

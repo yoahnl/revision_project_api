@@ -7,9 +7,11 @@ import {
   richClosedQuestionFixture,
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
+  richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
 } from './rich-closed-question.fixtures';
+import type { RichClosedCalculationMcqQuestion } from './rich-closed-question.types';
 
 describe('rich closed question public mapper', () => {
   it.each([
@@ -25,6 +27,7 @@ describe('rich closed question public mapper', () => {
     'cause_consequence',
     'institution_matrix',
     'diagram_labeling',
+    'calculation_mcq',
   ] as const)('maps %s without leaking correction fields', (questionKind) => {
     const publicQuestion = toRichClosedPublicQuestion(
       richClosedQuestionFixture(questionKind),
@@ -38,6 +41,8 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('correctOrder');
     expect(serialized).not.toContain('correctValues');
     expect(serialized).not.toContain('correctErrorId');
+    expect(serialized).not.toContain('expectedValue');
+    expect(serialized).not.toContain('workedSteps');
     expect(serialized).not.toContain('correctYear');
     expect(serialized).not.toContain('correctionPayload');
     expect(serialized).not.toContain('explanation');
@@ -181,6 +186,71 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('mermaid');
     expect(serialized).not.toContain('widget');
     expect(serialized).not.toContain('renderPayload');
+  });
+
+  it('maps a V1-C calculation exercise without leaking private calculations or formulas', () => {
+    const publicExercise = toRichClosedPublicExercise(
+      richClosedV1CCalculationExerciseFixture(),
+    );
+    const serialized = JSON.stringify(publicExercise);
+
+    expect(publicExercise.questions).toHaveLength(13);
+    expect(
+      publicExercise.questions.map((question) => question.questionKind),
+    ).toContain('calculation_mcq');
+    expect(serialized).toContain('scenario');
+    expect(serialized).toContain('calculation');
+    expect(serialized).toContain('choices');
+    expect(serialized).toContain('value');
+    expect(serialized).not.toContain('correctChoiceId');
+    expect(serialized).not.toContain('expectedValue');
+    expect(serialized).not.toContain('workedSteps');
+    expect(serialized).not.toContain('explanation');
+    expect(serialized).not.toContain('formula');
+    expect(serialized).not.toContain('expression');
+    expect(serialized).not.toContain('calculationCode');
+    expect(serialized).not.toContain('renderPayload');
+    expect(serialized).not.toContain('score');
+  });
+
+  it('allowlists nested calculation fields before submit', () => {
+    const fixture = richClosedQuestionFixture(
+      'calculation_mcq',
+    ) as RichClosedCalculationMcqQuestion;
+    const calculation = {
+      ...fixture.calculation,
+      correctChoiceId: 'nested-correct-choice-leak',
+      expectedValue: 999,
+      formula: 'Math.floor(validVotes / 2) + 1',
+      renderPayload: { widget: 'free' },
+    } as RichClosedCalculationMcqQuestion['calculation'];
+    const choices = fixture.choices.map((choice) => ({
+      ...choice,
+      correctChoiceId: 'choice-correction-leak',
+      workedSteps: [{ id: 'private-step', label: 'Private step' }],
+      expression: 'validVotes / 2',
+    })) as RichClosedCalculationMcqQuestion['choices'];
+    const question: RichClosedCalculationMcqQuestion = {
+      ...fixture,
+      calculation,
+      choices,
+    };
+
+    const publicQuestion = toRichClosedPublicQuestion(question);
+    const serialized = JSON.stringify(publicQuestion);
+
+    expect(serialized).toContain('calculation');
+    expect(serialized).toContain('choices');
+    expect(serialized).toContain('value');
+    expect(serialized).not.toContain('nested-correct-choice-leak');
+    expect(serialized).not.toContain('choice-correction-leak');
+    expect(serialized).not.toContain('correctChoiceId');
+    expect(serialized).not.toContain('expectedValue');
+    expect(serialized).not.toContain('workedSteps');
+    expect(serialized).not.toContain('formula');
+    expect(serialized).not.toContain('expression');
+    expect(serialized).not.toContain('renderPayload');
+    expect(serialized).not.toContain('widget');
   });
 
   it('removes internal choice feedback from public choice payloads', () => {

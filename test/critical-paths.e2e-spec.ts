@@ -14,6 +14,7 @@ import {
   richClosedExerciseFixture,
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
+  richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
 } from '../src/modules/activities/application/rich-closed-questions/rich-closed-question.fixtures';
@@ -1214,6 +1215,144 @@ describe('Critical demo paths (e2e)', () => {
       }
     });
 
+    it('routes rich closed V1-C calculation MCQ without formula leaks', async () => {
+      const server = app.getHttpServer();
+      const questionTypeMix = {
+        single_choice: 1,
+        multiple_choice: 1,
+        matching: 1,
+        ordering: 1,
+        case_qualification: 1,
+        error_detection: 1,
+        timeline: 1,
+        date_slider: 1,
+        true_false_grid: 1,
+        cause_consequence: 1,
+        institution_matrix: 1,
+        diagram_labeling: 1,
+        calculation_mcq: 1,
+      };
+      mocks.startRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1CCalculationPublicExercise(),
+      );
+      mocks.getRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1CCalculationPublicExercise(),
+      );
+      mocks.submitRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1CCalculationResult(),
+      );
+      mocks.getRichClosedExerciseResult.execute.mockResolvedValueOnce(
+        richClosedV1CCalculationResult(),
+      );
+
+      const startResponse = await request(server)
+        .post('/activities/rich-closed/start')
+        .send({
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-1',
+          questionCount: 13,
+          questionTypeMix,
+        })
+        .expect(201);
+      const startBody = startResponse.body as {
+        questions: Array<{ questionKind: RichClosedQuestionKind }>;
+        [key: string]: unknown;
+      };
+
+      expect(mocks.startRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        subjectId: 'subject-1',
+        documentId: undefined,
+        knowledgeUnitId: 'unit-1',
+        questionCount: 13,
+        complexityProfile: 'exam',
+        questionTypeMix,
+      });
+      expect(
+        startBody.questions.map((question) => question.questionKind),
+      ).toContain('calculation_mcq');
+      assertNoSensitivePreSubmitFields(startBody);
+      expect(JSON.stringify(startBody)).toContain('scenario');
+      expect(JSON.stringify(startBody)).toContain('calculation');
+      expect(JSON.stringify(startBody)).toContain('value');
+      expect(JSON.stringify(startBody)).not.toContain('correctChoiceId');
+      expect(JSON.stringify(startBody)).not.toContain('expectedValue');
+      expect(JSON.stringify(startBody)).not.toContain('workedSteps');
+      expect(JSON.stringify(startBody)).not.toContain('formula');
+      expect(JSON.stringify(startBody)).not.toContain('renderPayload');
+
+      const getResponse = await request(server)
+        .get('/activities/rich-closed/rich-session-v1c-calculation')
+        .expect(200);
+      assertNoSensitivePreSubmitFields(getResponse.body);
+
+      const submitResponse = await request(server)
+        .post('/activities/rich-closed/rich-session-v1c-calculation/submit')
+        .send({ answers: richClosedV1CCalculationAnswers() })
+        .expect(201);
+
+      expect(mocks.submitRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'rich-session-v1c-calculation',
+        answers: richClosedV1CCalculationAnswers(),
+      });
+      expect(submitResponse.body).toMatchObject({
+        correctAnswers: 13,
+        totalQuestions: 13,
+        score: 1,
+      });
+      expect(JSON.stringify(submitResponse.body)).toContain('correctChoiceId');
+      expect(JSON.stringify(submitResponse.body)).toContain('expectedValue');
+      expect(JSON.stringify(submitResponse.body)).toContain('workedSteps');
+      expect(JSON.stringify(submitResponse.body)).not.toContain('formula');
+
+      const resultResponse = await request(server)
+        .get('/activities/rich-closed/rich-session-v1c-calculation/result')
+        .expect(200);
+      expect(resultResponse.body).toMatchObject({
+        status: 'completed',
+        correctAnswers: 13,
+        totalQuestions: 13,
+      });
+
+      await request(server)
+        .post('/activities/rich-closed/rich-session-v1c-calculation/submit')
+        .send({
+          answers: replaceRichClosedV1CCalculationAnswer({
+            questionId: 'calculation-mcq-majority-1',
+            questionKind: 'calculation_mcq',
+            choiceId: 289,
+          }),
+        })
+        .expect(400);
+
+      await request(server)
+        .post('/activities/rich-closed/rich-session-v1c-calculation/submit')
+        .send({
+          answers: replaceRichClosedV1CCalculationAnswer({
+            questionId: 'calculation-mcq-majority-1',
+            questionKind: 'calculation_mcq',
+            choiceId: 'choice-289',
+            formula: 'floor(validVotes / 2) + 1',
+          }),
+        })
+        .expect(400);
+
+      mocks.submitRichClosedExercise.execute.mockRejectedValueOnce(
+        new Error('RICH_CLOSED_SUBMIT_INVALID_INPUT'),
+      );
+      await request(server)
+        .post('/activities/rich-closed/rich-session-v1c-calculation/submit')
+        .send({
+          answers: replaceRichClosedV1CCalculationAnswer({
+            questionId: 'calculation-mcq-majority-1',
+            questionKind: 'calculation_mcq',
+            choiceId: 'unknown-choice',
+          }),
+        })
+        .expect(400);
+    });
+
     it('validates and maps rich closed errors', async () => {
       const server = app.getHttpServer();
 
@@ -1872,6 +2011,13 @@ function richClosedV1CFullPublicExercise() {
   });
 }
 
+function richClosedV1CCalculationPublicExercise() {
+  return toRichClosedPublicExerciseEnvelope({
+    sessionId: 'rich-session-v1c-calculation',
+    exercise: richClosedV1CCalculationExerciseFixture(),
+  });
+}
+
 function richClosedResult() {
   return scoreRichClosedExerciseSubmission({
     sessionId: 'rich-session-1',
@@ -1909,6 +2055,14 @@ function richClosedV1CFullResult() {
     sessionId: 'rich-session-v1c-full',
     exercise: richClosedV1CFullExerciseFixture(),
     answers: richClosedV1CFullAnswers(),
+  });
+}
+
+function richClosedV1CCalculationResult() {
+  return scoreRichClosedExerciseSubmission({
+    sessionId: 'rich-session-v1c-calculation',
+    exercise: richClosedV1CCalculationExerciseFixture(),
+    answers: richClosedV1CCalculationAnswers(),
   });
 }
 
@@ -2039,6 +2193,17 @@ function richClosedV1CFullAnswers(): RichClosedAnswer[] {
   ];
 }
 
+function richClosedV1CCalculationAnswers(): RichClosedAnswer[] {
+  return [
+    ...richClosedV1CFullAnswers(),
+    {
+      questionId: 'calculation-mcq-majority-1',
+      questionKind: 'calculation_mcq',
+      choiceId: 'choice-289',
+    },
+  ];
+}
+
 function replaceRichClosedAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return richClosedAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
@@ -2082,6 +2247,17 @@ function replaceRichClosedV1CFullAnswer(answer: unknown): unknown[] {
       : {};
 
   return richClosedV1CFullAnswers().map((currentAnswer) =>
+    currentAnswer.questionId === record.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceRichClosedV1CCalculationAnswer(answer: unknown): unknown[] {
+  const record =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { questionId?: unknown })
+      : {};
+
+  return richClosedV1CCalculationAnswers().map((currentAnswer) =>
     currentAnswer.questionId === record.questionId ? answer : currentAnswer,
   );
 }
@@ -2180,6 +2356,8 @@ const forbiddenPreSubmitFields = new Set([
   'textAnswer',
   'score',
   'partialScore',
+  'expectedValue',
+  'workedSteps',
   'answersPayload',
   'storagePath',
   'promptVersion',
@@ -2195,6 +2373,12 @@ const forbiddenPreSubmitFields = new Set([
   'style',
   'css',
   'script',
+  'formula',
+  'expression',
+  'rawFormula',
+  'calculationCode',
+  'javascript',
+  'python',
   'imageUrl',
   'assetUrl',
   'canvas',

@@ -33,7 +33,7 @@ import {
 } from '../application/rich-closed-questions/rich-closed-question-generation-profile';
 
 export const RICH_CLOSED_FLOW_NAME = 'richClosedQuestionGeneration';
-export const RICH_CLOSED_PROMPT_VERSION = 'rich-closed-v1c-002';
+export const RICH_CLOSED_PROMPT_VERSION = 'rich-closed-v1c-003';
 export const RICH_CLOSED_SCHEMA_VERSION = RICH_CLOSED_EXERCISE_VERSION;
 export const RICH_CLOSED_GENERATION_FAILED = 'RICH_CLOSED_GENERATION_FAILED';
 export const RICH_CLOSED_GENERATION_SCHEMA_INVALID =
@@ -207,6 +207,43 @@ const DiagramLabelingValueSchema = z
   })
   .strict();
 
+const CalculationChoiceSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    label: NonEmptyStringSchema,
+    value: z.number().int(),
+  })
+  .strict();
+
+const AbsoluteMajorityThresholdCalculationSchema = z
+  .object({
+    mode: z.literal('absolute_majority_threshold'),
+    validVotes: z.number().int().min(1).max(1_000_000),
+  })
+  .strict();
+
+const CalculationPartySchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    label: NonEmptyStringSchema,
+    votes: z.number().int().min(0).max(1_000_000),
+  })
+  .strict();
+
+const LargestRemainderTargetPartySeatsCalculationSchema = z
+  .object({
+    mode: z.literal('largest_remainder_target_party_seats'),
+    totalSeats: z.number().int().min(1).max(200),
+    targetPartyId: NonEmptyStringSchema,
+    parties: z.array(CalculationPartySchema).min(2).max(8),
+  })
+  .strict();
+
+const CalculationDataSchema = z.discriminatedUnion('mode', [
+  AbsoluteMajorityThresholdCalculationSchema,
+  LargestRemainderTargetPartySeatsCalculationSchema,
+]);
+
 const PairSchema = z
   .object({
     leftId: NonEmptyStringSchema,
@@ -338,6 +375,19 @@ const DiagramLabelingQuestionSchema = z
   })
   .strict();
 
+const CalculationMcqQuestionSchema = z
+  .object({
+    ...QuestionBaseSchema,
+    questionKind: z.literal('calculation_mcq'),
+    instruction: NonEmptyStringSchema.nullable().optional(),
+    scenario: z.string().trim().min(8).max(900),
+    calculation: CalculationDataSchema,
+    choices: z.array(CalculationChoiceSchema).min(2).max(6),
+    correctChoiceId: NonEmptyStringSchema,
+    explanation: z.string().trim().min(8),
+  })
+  .strict();
+
 const CaseQualificationQuestionSchema = z
   .object({
     ...QuestionBaseSchema,
@@ -373,6 +423,7 @@ const RichClosedQuestionSchema = z.discriminatedUnion('questionKind', [
   CauseConsequenceQuestionSchema,
   InstitutionMatrixQuestionSchema,
   DiagramLabelingQuestionSchema,
+  CalculationMcqQuestionSchema,
 ]);
 
 const GeneratedRichClosedExerciseSchema = z
@@ -792,9 +843,9 @@ function buildRichClosedPrompt(input: {
     'Tu dois respecter exactement les questionKind demandés.',
     'Tu dois respecter questionTypeMix.',
     `questionTypeMix: ${JSON.stringify(input.questionTypeMix)}`,
-    'Tu dois produire uniquement les types rich closed autorisés: single_choice, multiple_choice, matching, ordering, case_qualification, error_detection, timeline, date_slider, true_false_grid, cause_consequence, institution_matrix, diagram_labeling.',
+    'Tu dois produire uniquement les types rich closed autorisés: single_choice, multiple_choice, matching, ordering, case_qualification, error_detection, timeline, date_slider, true_false_grid, cause_consequence, institution_matrix, diagram_labeling, calculation_mcq.',
     'timeline, date_slider, true_false_grid et cause_consequence sont des types V1-B fermés: ils ne doivent jamais demander une réponse libre.',
-    'institution_matrix et diagram_labeling sont des types V1-C fermés: ils ne doivent jamais demander une réponse libre.',
+    'institution_matrix, diagram_labeling et calculation_mcq sont des types V1-C fermés: ils ne doivent jamais demander une réponse libre.',
     'Tu dois produire des questions fermées.',
     'Tu dois interdire toute réponse libre.',
     'Tu dois utiliser les chunks fournis comme seule source de vérité.',
@@ -811,16 +862,19 @@ function buildRichClosedPrompt(input: {
     'Tu dois produire cause_consequence avec 3 à 6 causes/consequences, des ids uniques, et des correctPairs univoques.',
     'Tu dois produire institution_matrix avec 2 à 5 rows, 2 à 5 columns, 3 à 12 cells idéalement, des options fermées par cellule, et sans matrice encyclopédique.',
     'Tu dois produire diagram_labeling avec un diagramme sémantique simple: 2 à 8 nodes, 0 à 12 edges, 2 à 8 slots, 2 à 6 options fermées par slot, et des slots ancrés à des nodes ou edges existants.',
+    'Tu dois produire calculation_mcq uniquement avec les modes absolute_majority_threshold ou largest_remainder_target_party_seats, des petits nombres lisibles, des choices à value uniques, une seule choice dont value correspond au calcul, et sans égalité de reste ambiguë.',
+    'Pour calculation_mcq, le backend recalculera expectedValue: correctChoiceId doit pointer vers la choice dont value correspond au résultat déterministe.',
+    'Tu ne dois jamais produire de formule libre, expression, rawFormula, calculationCode, eval, Function, JavaScript, Python, D’Hondt, Sainte-Laguë, plus forte moyenne, seuil électoral, votes blancs ou votes nuls.',
     'Tu dois produire multiple_choice avec au moins 2 bonnes réponses.',
     'Tu dois éviter les questions de pure restitution.',
     'Tu dois éviter les prompts commençant par “Qui”, “Quand”, “Quelle date”, “Quelle est la définition”, sauf nécessité exceptionnelle.',
     'Tu dois produire des explications privées de correction.',
     'Les corrections privées correctChoiceId, correctChoiceIds, correctPairs, correctOrder, correctValues, correctErrorId et correctYear ne doivent jamais être exposées dans un payload public pré-submit.',
-    'Tu ne dois jamais inclure de modelAnswer, answerText, freeTextAnswer, textAnswer, HTML, SVG, Mermaid, markdown rendu libre, widget libre, renderPayload, imageUrl, assetUrl, canvas, code ou markup.',
+    'Tu ne dois jamais inclure de modelAnswer, answerText, freeTextAnswer, textAnswer, HTML, SVG, Mermaid, markdown rendu libre, widget libre, renderPayload, imageUrl, assetUrl, canvas, code, formula, expression, rawFormula, calculationCode, script ou markup.',
     'Tu ne dois jamais produire de widget libre.',
     'Tu ne dois jamais produire un diagramme sous forme de code, balisage, HTML, SVG, Mermaid, Canvas, image URL ou widget libre.',
-    'Tu ne dois jamais produire true_false, image_choice, calculation_mcq, fill_blank_dropdown, widget libre, ni aucun type V1-021 ou suivant.',
-    'Types V1-021+ interdits: calculation_mcq, image_choice, fill_blank_dropdown.',
+    'Tu ne dois jamais produire true_false, image_choice, fill_blank_dropdown, widget libre, ni aucun type V1-022 ou suivant.',
+    'Types V1-022+ interdits: image_choice, fill_blank_dropdown.',
     'Tu dois retourner un JSON object only: un objet JSON brut, sans Markdown, sans code fences, sans texte avant ou après.',
     'Aucun champ additionnel n’est autorisé.',
     `cognitiveSkill autorisés: ${RICH_CLOSED_COGNITIVE_SKILLS.join(', ')}`,
@@ -835,6 +889,9 @@ function buildRichClosedPrompt(input: {
     'Clés exactes cause_consequence: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, causes, consequences, correctPairs, explanation.',
     'Clés exactes institution_matrix: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, rows, columns, cells, correctValues, explanation.',
     'Clés exactes diagram_labeling: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, diagram, slots, correctValues, explanation.',
+    'Clés exactes calculation_mcq: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, scenario, calculation, choices, correctChoiceId, explanation.',
+    'Clés exactes calculation absolute_majority_threshold: mode, validVotes.',
+    'Clés exactes calculation largest_remainder_target_party_seats: mode, totalSeats, targetPartyId, parties; chaque party a id, label, votes.',
     'Clés exactes case_qualification: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, caseText, choices, correctChoiceId, explanation.',
     'Clés exactes error_detection: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, statement, errorOptions, correctErrorId, explanation.',
     'Tu dois retourner uniquement du JSON strict conforme au schema demandé.',
@@ -870,6 +927,7 @@ function buildRichClosedRepairPrompt(input: {
     '- cause_consequence: causes, consequences, correctPairs univoques, explanation.',
     '- institution_matrix: rows (2 à 5), columns (2 à 5), cells (3 à 12 idéalement), options fermées par cellule, correctValues complets, explanation.',
     '- diagram_labeling: diagram sémantique (2 à 8 nodes, 0 à 12 edges), slots (2 à 8) ancrés à des nodes/edges existants, options fermées par slot, correctValues complets, explanation, sans HTML/SVG/Mermaid/widget.',
+    '- calculation_mcq: scenario, calculation en mode absolute_majority_threshold ou largest_remainder_target_party_seats, choices avec value uniques, correctChoiceId, explanation, sans formule libre, sans D’Hondt, sans code.',
     '- case_qualification: caseText, choices, correctChoiceId, explanation.',
     '- error_detection: statement, errorOptions, correctErrorId, explanation.',
     'Tu dois respecter le nombre exact de questions, le mix exact, et uniquement les sourceChunkIds autorisés.',

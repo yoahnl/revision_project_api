@@ -786,6 +786,8 @@ function demoSourcesForQuestion(
       return [demoSeedIds.chunkIds[1], demoSeedIds.chunkIds[3]];
     case 'diagram_labeling':
       return [demoSeedIds.chunkIds[1], demoSeedIds.chunkIds[3]];
+    case 'calculation_mcq':
+      return [demoSeedIds.chunkIds[1], demoSeedIds.chunkIds[3]];
   }
 }
 

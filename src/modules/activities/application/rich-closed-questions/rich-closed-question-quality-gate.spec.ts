@@ -220,6 +220,7 @@ describe('rich closed question quality gate', () => {
     ['choiceFeedback', 'Feedback de choix interdit'],
     ['modelAnswer', 'Réponse modèle interdite'],
     ['answerText', 'Réponse libre interdite'],
+    ['expectedValue', 289],
     ['workedSteps', ['Étape révélatrice interdite']],
   ])('rejects public pre-submit payloads containing %s', (key, value) => {
     const exercise = richClosedExerciseFixture();
@@ -249,7 +250,19 @@ describe('rich closed question quality gate', () => {
     );
   });
 
-  it.each(['html', 'svg', 'mermaid', 'widget', 'renderPayload', 'imageUrl'])(
+  it.each([
+    'html',
+    'svg',
+    'mermaid',
+    'widget',
+    'renderPayload',
+    'imageUrl',
+    'formula',
+    'expression',
+    'calculationCode',
+    'script',
+    'code',
+  ])(
     'rejects public pre-submit payloads containing arbitrary render key %s',
     (key) => {
       const exercise = richClosedExerciseFixture();

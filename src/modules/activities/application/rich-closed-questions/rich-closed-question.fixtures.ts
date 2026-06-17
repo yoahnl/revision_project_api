@@ -88,6 +88,20 @@ export function richClosedV1CFullExerciseFixture(): RichClosedExercise {
   };
 }
 
+export function richClosedV1CCalculationExerciseFixture(): RichClosedExercise {
+  const v1cFullFixture = richClosedV1CFullExerciseFixture();
+
+  return {
+    ...v1cFullFixture,
+    id: 'rich-exercise-v1c-calculation-1',
+    title: 'Droit constitutionnel - exercice riche fermé V1-C calcul',
+    questions: [
+      ...v1cFullFixture.questions,
+      richClosedQuestionFixture('calculation_mcq'),
+    ],
+  };
+}
+
 export function richClosedQuestionFixture(
   questionKind: RichClosedQuestionKind,
 ): RichClosedQuestion {
@@ -522,6 +536,8 @@ export function richClosedQuestionFixture(
         explanation:
           'Le schéma relie le rôle du Gouvernement, sa responsabilité devant l’Assemblée nationale et le pouvoir de nomination présidentielle.',
       };
+    case 'calculation_mcq':
+      return richClosedCalculationMcqAbsoluteMajorityFixture();
     case 'case_qualification':
       return {
         ...baseQuestion('case-1', 'case_qualification'),
@@ -553,6 +569,67 @@ export function richClosedQuestionFixture(
           'La responsabilité politique du gouvernement devant le Parlement est le critère du parlementarisme.',
       };
   }
+}
+
+export function richClosedCalculationMcqAbsoluteMajorityFixture(): Extract<
+  RichClosedQuestion,
+  { questionKind: 'calculation_mcq' }
+> {
+  return {
+    ...baseQuestion('calculation-mcq-majority-1', 'calculation_mcq'),
+    prompt:
+      'Calcule le seuil de majorité absolue à partir des suffrages exprimés.',
+    instruction:
+      'Sélectionne uniquement la valeur correspondant au calcul demandé.',
+    scenario:
+      'Lors d’un vote avec 577 suffrages exprimés, combien de voix faut-il pour obtenir la majorité absolue ?',
+    calculation: {
+      mode: 'absolute_majority_threshold',
+      validVotes: 577,
+    },
+    choices: [
+      { id: 'choice-288', label: '288 voix', value: 288 },
+      { id: 'choice-289', label: '289 voix', value: 289 },
+      { id: 'choice-290', label: '290 voix', value: 290 },
+    ],
+    correctChoiceId: 'choice-289',
+    explanation:
+      'La majorité absolue correspond à floor(577 / 2) + 1, soit 289 voix.',
+  };
+}
+
+export function richClosedCalculationMcqLargestRemainderFixture(): Extract<
+  RichClosedQuestion,
+  { questionKind: 'calculation_mcq' }
+> {
+  return {
+    ...baseQuestion('calculation-mcq-remainder-1', 'calculation_mcq'),
+    prompt:
+      'Calcule le nombre de sièges obtenu par la liste cible au plus fort reste.',
+    instruction:
+      'Utilise les données fournies et choisis le résultat fermé correspondant.',
+    scenario:
+      'Dix sièges sont répartis au quota de Hare entre quatre listes. Combien de sièges obtient la Liste A ?',
+    calculation: {
+      mode: 'largest_remainder_target_party_seats',
+      totalSeats: 10,
+      targetPartyId: 'party-a',
+      parties: [
+        { id: 'party-a', label: 'Liste A', votes: 4300 },
+        { id: 'party-b', label: 'Liste B', votes: 3100 },
+        { id: 'party-c', label: 'Liste C', votes: 1600 },
+        { id: 'party-d', label: 'Liste D', votes: 1000 },
+      ],
+    },
+    choices: [
+      { id: 'choice-3', label: '3 sièges', value: 3 },
+      { id: 'choice-4', label: '4 sièges', value: 4 },
+      { id: 'choice-5', label: '5 sièges', value: 5 },
+    ],
+    correctChoiceId: 'choice-4',
+    explanation:
+      'La Liste A obtient quatre sièges après attribution initiale; le siège restant revient à la Liste C.',
+  };
 }
 
 function baseQuestion<K extends RichClosedQuestionKind>(
