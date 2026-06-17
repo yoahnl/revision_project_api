@@ -20,6 +20,7 @@ describe('rich closed question generation profile', () => {
       date_slider: 0,
       true_false_grid: 0,
       cause_consequence: 0,
+      institution_matrix: 0,
     });
   });
 
@@ -30,6 +31,7 @@ describe('rich closed question generation profile', () => {
     expect(mix.date_slider).toBe(0);
     expect(mix.true_false_grid).toBe(0);
     expect(mix.cause_consequence).toBe(0);
+    expect(mix.institution_matrix).toBe(0);
     expect(sumMix(mix)).toBe(7);
   });
 
@@ -45,6 +47,7 @@ describe('rich closed question generation profile', () => {
       date_slider: 1,
       true_false_grid: 0,
       cause_consequence: 0,
+      institution_matrix: 0,
     });
   });
 
@@ -55,10 +58,11 @@ describe('rich closed question generation profile', () => {
     expect(mix.date_slider).toBeGreaterThan(0);
     expect(mix.true_false_grid).toBe(0);
     expect(mix.cause_consequence).toBe(0);
+    expect(mix.institution_matrix).toBe(0);
     expect(sumMix(mix)).toBe(9);
   });
 
-  it('returns the expected V1-B full mix for ten questions', () => {
+  it('preserves the expected V1-B full mix for ten questions', () => {
     expect(
       resolveRichClosedQuestionTypeMix({
         questionCount: 10,
@@ -75,6 +79,23 @@ describe('rich closed question generation profile', () => {
       date_slider: 1,
       true_false_grid: 1,
       cause_consequence: 1,
+      institution_matrix: 0,
+    });
+  });
+
+  it('adds institution_matrix only from the eleven-question default mix', () => {
+    expect(resolveRichClosedQuestionTypeMix({ questionCount: 11 })).toEqual({
+      case_qualification: 1,
+      error_detection: 1,
+      matching: 1,
+      ordering: 1,
+      multiple_choice: 1,
+      single_choice: 1,
+      timeline: 1,
+      date_slider: 1,
+      true_false_grid: 1,
+      cause_consequence: 1,
+      institution_matrix: 1,
     });
   });
 

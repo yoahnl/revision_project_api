@@ -6,6 +6,8 @@ import {
   type RichClosedCauseConsequencePair,
   type RichClosedExerciseValidationIssue,
   type RichClosedExerciseValidationResult,
+  type RichClosedInstitutionMatrixCell,
+  type RichClosedInstitutionMatrixValue,
   type RichClosedPair,
   type RichClosedQuestionKind,
   type RichClosedTrueFalseValue,
@@ -22,6 +24,10 @@ const MIN_CHOICES = 2;
 const MAX_CHOICES = 6;
 const MIN_STRUCTURED_ITEMS = 3;
 const MAX_TRUE_FALSE_ROWS = 8;
+const MIN_MATRIX_AXIS_ITEMS = 2;
+const MAX_MATRIX_AXIS_ITEMS = 5;
+const MIN_MATRIX_CELLS = 3;
+const MAX_MATRIX_CELL_OPTIONS = 6;
 
 export interface RichClosedQuestionValidationOptions {
   knownSourceChunkIds?: readonly string[] | ReadonlySet<string>;
@@ -151,6 +157,9 @@ export function validateRichClosedQuestion(
       break;
     case 'cause_consequence':
       validateCauseConsequenceQuestion(question, issues);
+      break;
+    case 'institution_matrix':
+      validateInstitutionMatrixQuestion(question, issues);
       break;
     case 'case_qualification':
       validateCaseQualificationQuestion(question, issues);
@@ -567,6 +576,117 @@ function validateCauseConsequenceQuestion(
   validateExplanation(question.explanation, issues);
 }
 
+function validateInstitutionMatrixQuestion(
+  question: Record<string, unknown>,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  const rows = readInstitutionMatrixAxisItems(question.rows, issues, 'rows');
+  const columns = readInstitutionMatrixAxisItems(
+    question.columns,
+    issues,
+    'columns',
+  );
+  const rowIds = [...idSet(rows)];
+  const columnIds = [...idSet(columns)];
+  const cells = readInstitutionMatrixCells(question.cells, issues, 'cells');
+  const correctValues = readInstitutionMatrixValues(
+    question.correctValues,
+    issues,
+    'correctValues',
+  );
+  const cellIds = [...idSet(cells)];
+  const correctedCellIds = correctValues.map((value) => value.cellId);
+
+  if (
+    rows.length < MIN_MATRIX_AXIS_ITEMS ||
+    rows.length > MAX_MATRIX_AXIS_ITEMS
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTITUTION_MATRIX_ROWS_INVALID',
+        'Institution matrix requires between two and five rows',
+        'rows',
+      ),
+    );
+  }
+
+  if (
+    columns.length < MIN_MATRIX_AXIS_ITEMS ||
+    columns.length > MAX_MATRIX_AXIS_ITEMS
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTITUTION_MATRIX_COLUMNS_INVALID',
+        'Institution matrix requires between two and five columns',
+        'columns',
+      ),
+    );
+  }
+
+  if (
+    cells.length < MIN_MATRIX_CELLS ||
+    cells.length > rows.length * columns.length ||
+    hasDuplicates(cells.map((cell) => cell.id)) ||
+    hasDuplicateInstitutionMatrixCoordinates(cells) ||
+    cells.some(
+      (cell) =>
+        !rowIds.includes(cell.rowId) ||
+        !columnIds.includes(cell.columnId) ||
+        cell.options.length < MIN_CHOICES ||
+        cell.options.length > MAX_MATRIX_CELL_OPTIONS ||
+        hasDuplicates(cell.options.map((option) => option.id)),
+    )
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTITUTION_MATRIX_CELLS_INVALID',
+        'Institution matrix cells must reference existing rows/columns and carry bounded unique options',
+        'cells',
+      ),
+    );
+  }
+
+  if (
+    correctValues.length !== cellIds.length ||
+    hasDuplicates(correctedCellIds) ||
+    correctValues.some((value) => {
+      const cell = cells.find((candidate) => candidate.id === value.cellId);
+
+      return (
+        cell === undefined ||
+        !cell.options.some((option) => option.id === value.optionId)
+      );
+    })
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTITUTION_MATRIX_CORRECTION_INVALID',
+        'Institution matrix correction must contain one existing option per cell',
+        'correctValues',
+      ),
+    );
+  }
+
+  validateOptionalInstruction(question.instruction, issues);
+  validateExplanation(question.explanation, issues);
+}
+
+function hasDuplicateInstitutionMatrixCoordinates(
+  cells: readonly RichClosedInstitutionMatrixCell[],
+): boolean {
+  const coordinates = new Set<string>();
+
+  for (const cell of cells) {
+    const coordinate = `${cell.rowId}\u0000${cell.columnId}`;
+    if (coordinates.has(coordinate)) {
+      return true;
+    }
+    coordinates.add(coordinate);
+  }
+
+  return false;
+}
+
 function validateCaseQualificationQuestion(
   question: Record<string, unknown>,
   issues: RichClosedExerciseValidationIssue[],
@@ -920,6 +1040,103 @@ function readCauseConsequencePairs(
   return pairs;
 }
 
+function readInstitutionMatrixAxisItems(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: 'rows' | 'columns',
+) {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        path === 'rows'
+          ? 'RICH_CLOSED_INSTITUTION_MATRIX_ROWS_INVALID'
+          : 'RICH_CLOSED_INSTITUTION_MATRIX_COLUMNS_INVALID',
+        'Institution matrix axis items must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const items = value.filter(isDescribedLabelItem);
+  if (
+    items.length !== value.length ||
+    hasDuplicates(items.map((item) => item.id))
+  ) {
+    issues.push(
+      issue(
+        path === 'rows'
+          ? 'RICH_CLOSED_INSTITUTION_MATRIX_ROWS_INVALID'
+          : 'RICH_CLOSED_INSTITUTION_MATRIX_COLUMNS_INVALID',
+        'Institution matrix axis items must have unique non-empty ids and labels',
+        path,
+      ),
+    );
+  }
+
+  return items;
+}
+
+function readInstitutionMatrixCells(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedInstitutionMatrixCell[] {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTITUTION_MATRIX_CELLS_INVALID',
+        'Institution matrix cells must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const cells = value.filter(isInstitutionMatrixCell);
+  if (cells.length !== value.length) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTITUTION_MATRIX_CELLS_INVALID',
+        'Institution matrix cells must have ids, rowId, columnId and bounded options',
+        path,
+      ),
+    );
+  }
+
+  return cells;
+}
+
+function readInstitutionMatrixValues(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedInstitutionMatrixValue[] {
+  if (!Array.isArray(value)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTITUTION_MATRIX_CORRECTION_INVALID',
+        'Institution matrix correction must be an array',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const values = value.filter(isInstitutionMatrixValue);
+  if (values.length !== value.length) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_INSTITUTION_MATRIX_CORRECTION_INVALID',
+        'Institution matrix correction values must have cellId and optionId',
+        path,
+      ),
+    );
+  }
+
+  return values;
+}
+
 function validateOptionalInstruction(
   instruction: unknown,
   issues: RichClosedExerciseValidationIssue[],
@@ -1048,6 +1265,41 @@ function isDescribedLabelItem(value: unknown): value is {
         1,
         MAX_DESCRIBED_ITEM_DESCRIPTION_LENGTH,
       ))
+  );
+}
+
+function isInstitutionMatrixOption(value: unknown): value is {
+  id: string;
+  label: string;
+} {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    boundedString(value.label, 1, 220)
+  );
+}
+
+function isInstitutionMatrixCell(
+  value: unknown,
+): value is RichClosedInstitutionMatrixCell {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    plainString(value.rowId) &&
+    plainString(value.columnId) &&
+    (value.prompt === undefined ||
+      value.prompt === null ||
+      boundedString(value.prompt, 1, MAX_INSTRUCTION_LENGTH)) &&
+    Array.isArray(value.options) &&
+    value.options.every(isInstitutionMatrixOption)
+  );
+}
+
+function isInstitutionMatrixValue(
+  value: unknown,
+): value is RichClosedInstitutionMatrixValue {
+  return (
+    isRecord(value) && plainString(value.cellId) && plainString(value.optionId)
   );
 }
 

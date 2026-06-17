@@ -118,6 +118,17 @@ export function toRichClosedPublicQuestion(
         causes: cloneDescribedLabelItems(question.causes),
         consequences: cloneDescribedLabelItems(question.consequences),
       };
+    case 'institution_matrix':
+      return {
+        ...base,
+        questionKind: question.questionKind,
+        ...(question.instruction === undefined
+          ? {}
+          : { instruction: question.instruction }),
+        rows: cloneDescribedLabelItems(question.rows),
+        columns: cloneDescribedLabelItems(question.columns),
+        cells: cloneInstitutionMatrixCells(question.cells),
+      };
     case 'case_qualification':
       return {
         ...base,
@@ -182,5 +193,23 @@ function cloneDescribedLabelItems(
     ...(item.description === undefined
       ? {}
       : { description: item.description }),
+  }));
+}
+
+function cloneInstitutionMatrixCells(
+  cells: Array<{
+    id: string;
+    rowId: string;
+    columnId: string;
+    prompt?: string | null;
+    options: Array<{ id: string; label: string }>;
+  }>,
+) {
+  return cells.map((cell) => ({
+    id: cell.id,
+    rowId: cell.rowId,
+    columnId: cell.columnId,
+    ...(cell.prompt === undefined ? {} : { prompt: cell.prompt }),
+    options: publicChoices(cell.options),
   }));
 }

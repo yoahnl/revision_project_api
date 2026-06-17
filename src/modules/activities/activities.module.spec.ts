@@ -941,6 +941,20 @@ function richClosedPublicExercise(): RichClosedPublicExerciseEnvelope {
             causes: question.causes,
             consequences: question.consequences,
           };
+        case 'institution_matrix':
+          return {
+            ...base,
+            questionKind: question.questionKind,
+            ...(question.instruction === undefined
+              ? {}
+              : { instruction: question.instruction }),
+            rows: question.rows,
+            columns: question.columns,
+            cells: question.cells.map((cell) => ({
+              ...cell,
+              options: cell.options.map(({ id, label }) => ({ id, label })),
+            })),
+          };
         case 'case_qualification':
           return {
             ...base,

@@ -13,6 +13,7 @@ export const RICH_CLOSED_QUESTION_KINDS = [
   'date_slider',
   'true_false_grid',
   'cause_consequence',
+  'institution_matrix',
 ] as const;
 
 export type RichClosedQuestionKind =
@@ -81,6 +82,30 @@ export interface RichClosedCauseConsequenceItem {
 export interface RichClosedCauseConsequencePair {
   causeId: string;
   consequenceId: string;
+}
+
+export interface RichClosedInstitutionMatrixAxisItem {
+  id: string;
+  label: string;
+  description?: string | null;
+}
+
+export interface RichClosedInstitutionMatrixOption {
+  id: string;
+  label: string;
+}
+
+export interface RichClosedInstitutionMatrixCell {
+  id: string;
+  rowId: string;
+  columnId: string;
+  prompt?: string | null;
+  options: RichClosedInstitutionMatrixOption[];
+}
+
+export interface RichClosedInstitutionMatrixValue {
+  cellId: string;
+  optionId: string;
 }
 
 export interface RichClosedQuestionBase {
@@ -159,6 +184,16 @@ export interface RichClosedCauseConsequenceQuestion extends RichClosedQuestionBa
   explanation: string;
 }
 
+export interface RichClosedInstitutionMatrixQuestion extends RichClosedQuestionBase {
+  questionKind: 'institution_matrix';
+  instruction?: string | null;
+  rows: RichClosedInstitutionMatrixAxisItem[];
+  columns: RichClosedInstitutionMatrixAxisItem[];
+  cells: RichClosedInstitutionMatrixCell[];
+  correctValues: RichClosedInstitutionMatrixValue[];
+  explanation: string;
+}
+
 export interface RichClosedCaseQualificationQuestion extends RichClosedQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -185,7 +220,8 @@ export type RichClosedQuestion =
   | RichClosedTimelineQuestion
   | RichClosedDateSliderQuestion
   | RichClosedTrueFalseGridQuestion
-  | RichClosedCauseConsequenceQuestion;
+  | RichClosedCauseConsequenceQuestion
+  | RichClosedInstitutionMatrixQuestion;
 
 export interface RichClosedPublicQuestionBase {
   id: string;
@@ -247,6 +283,14 @@ export interface RichClosedPublicCauseConsequenceQuestion extends RichClosedPubl
   consequences: RichClosedCauseConsequenceItem[];
 }
 
+export interface RichClosedPublicInstitutionMatrixQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'institution_matrix';
+  instruction?: string | null;
+  rows: RichClosedInstitutionMatrixAxisItem[];
+  columns: RichClosedInstitutionMatrixAxisItem[];
+  cells: RichClosedInstitutionMatrixCell[];
+}
+
 export interface RichClosedPublicCaseQualificationQuestion extends RichClosedPublicQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -269,7 +313,8 @@ export type RichClosedPublicQuestion =
   | RichClosedPublicTimelineQuestion
   | RichClosedPublicDateSliderQuestion
   | RichClosedPublicTrueFalseGridQuestion
-  | RichClosedPublicCauseConsequenceQuestion;
+  | RichClosedPublicCauseConsequenceQuestion
+  | RichClosedPublicInstitutionMatrixQuestion;
 
 export type RichClosedAnswer =
   | {
@@ -319,6 +364,11 @@ export type RichClosedAnswer =
     }
   | {
       questionId: string;
+      questionKind: 'institution_matrix';
+      values: RichClosedInstitutionMatrixValue[];
+    }
+  | {
+      questionId: string;
       questionKind: 'error_detection';
       errorId: string;
     };
@@ -337,6 +387,7 @@ export type RichClosedCorrectionPayload =
   | { correctPairs: RichClosedPair[] }
   | { correctValues: RichClosedTrueFalseValue[] }
   | { correctPairs: RichClosedCauseConsequencePair[] }
+  | { correctValues: RichClosedInstitutionMatrixValue[] }
   | { correctOrder: string[] }
   | { correctYear: number; minAcceptedYear: number; maxAcceptedYear: number }
   | { correctErrorId: string };

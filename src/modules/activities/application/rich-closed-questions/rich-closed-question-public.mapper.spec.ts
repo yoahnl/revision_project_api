@@ -7,6 +7,7 @@ import {
   richClosedQuestionFixture,
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
+  richClosedV1CExerciseFixture,
 } from './rich-closed-question.fixtures';
 
 describe('rich closed question public mapper', () => {
@@ -21,6 +22,7 @@ describe('rich closed question public mapper', () => {
     'date_slider',
     'true_false_grid',
     'cause_consequence',
+    'institution_matrix',
   ] as const)('maps %s without leaking correction fields', (questionKind) => {
     const publicQuestion = toRichClosedPublicQuestion(
       richClosedQuestionFixture(questionKind),
@@ -100,6 +102,38 @@ describe('rich closed question public mapper', () => {
       'true_false_grid',
       'cause_consequence',
     ]);
+    expect(serialized).not.toContain('correctValues');
+    expect(serialized).not.toContain('correctPairs');
+    expect(serialized).not.toContain('correctOrder');
+    expect(serialized).not.toContain('correctYear');
+    expect(serialized).not.toContain('explanation');
+    expect(serialized).not.toContain('correction');
+    expect(serialized).not.toContain('score');
+  });
+
+  it('maps a V1-C exercise without leaking private correction data', () => {
+    const publicExercise = toRichClosedPublicExercise(
+      richClosedV1CExerciseFixture(),
+    );
+    const serialized = JSON.stringify(publicExercise);
+
+    expect(publicExercise.questions).toHaveLength(11);
+    expect(
+      publicExercise.questions.map((question) => question.questionKind),
+    ).toEqual([
+      'single_choice',
+      'multiple_choice',
+      'matching',
+      'ordering',
+      'case_qualification',
+      'error_detection',
+      'timeline',
+      'date_slider',
+      'true_false_grid',
+      'cause_consequence',
+      'institution_matrix',
+    ]);
+    expect(serialized).toContain('cells');
     expect(serialized).not.toContain('correctValues');
     expect(serialized).not.toContain('correctPairs');
     expect(serialized).not.toContain('correctOrder');

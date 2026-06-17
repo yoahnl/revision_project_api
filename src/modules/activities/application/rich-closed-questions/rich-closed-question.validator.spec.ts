@@ -7,6 +7,7 @@ import {
   richClosedQuestionFixture,
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
+  richClosedV1CExerciseFixture,
 } from './rich-closed-question.fixtures';
 import type { RichClosedQuestion } from './rich-closed-question.types';
 
@@ -22,6 +23,7 @@ describe('rich closed question validator', () => {
     'date_slider',
     'true_false_grid',
     'cause_consequence',
+    'institution_matrix',
   ] as const)('accepts a valid rich closed %s question', (questionKind) => {
     const result = validateRichClosedQuestion(
       richClosedQuestionFixture(questionKind),
@@ -35,7 +37,7 @@ describe('rich closed question validator', () => {
   it('rejects a kind outside the rich closed allowlist', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
-      questionKind: 'institution_matrix',
+      questionKind: 'diagram_labeling',
     } as unknown as RichClosedQuestion;
 
     const result = validateRichClosedQuestion(question);
@@ -44,6 +46,15 @@ describe('rich closed question validator', () => {
     expect(result.issues).toContainEqual(
       expect.objectContaining({ code: 'RICH_CLOSED_KIND_UNSUPPORTED' }),
     );
+  });
+
+  it('accepts a valid V1-C institution matrix exercise fixture', () => {
+    const result = validateRichClosedExercise(richClosedV1CExerciseFixture(), {
+      knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
+    });
+
+    expect(result.accepted).toBe(true);
+    expect(result.issues).toEqual([]);
   });
 
   it('rejects free answer shaped payloads', () => {
@@ -484,6 +495,165 @@ describe('rich closed question validator', () => {
       expect(validateRichClosedQuestion(question).issues).toContainEqual(
         expect.objectContaining({
           code: 'RICH_CLOSED_CAUSE_CONSEQUENCE_CORRECTION_INVALID',
+        }),
+      );
+    }
+  });
+
+  it('requires institution_matrix rows, columns, cells and corrections to be bounded and coherent', () => {
+    const base = richClosedQuestionFixture('institution_matrix') as Extract<
+      RichClosedQuestion,
+      { questionKind: 'institution_matrix' }
+    >;
+    const tooFewRows = {
+      ...base,
+      rows: [{ id: 'row-1', label: 'Président' }],
+    };
+    const tooManyRows = {
+      ...base,
+      rows: Array.from({ length: 6 }, (_, index) => ({
+        id: `row-${index + 1}`,
+        label: `Institution ${index + 1}`,
+      })),
+    };
+    const tooFewColumns = {
+      ...base,
+      columns: [{ id: 'column-1', label: 'Légitimité' }],
+    };
+    const tooManyColumns = {
+      ...base,
+      columns: Array.from({ length: 6 }, (_, index) => ({
+        id: `column-${index + 1}`,
+        label: `Propriété ${index + 1}`,
+      })),
+    };
+    const unknownRow = {
+      ...base,
+      cells: [
+        {
+          ...base.cells[0],
+          rowId: 'unknown-row',
+        },
+        ...base.cells.slice(1),
+      ],
+    };
+    const unknownColumn = {
+      ...base,
+      cells: [
+        {
+          ...base.cells[0],
+          columnId: 'unknown-column',
+        },
+        ...base.cells.slice(1),
+      ],
+    };
+    const tooFewOptions = {
+      ...base,
+      cells: [
+        { ...base.cells[0], options: [{ id: 'option-1', label: 'Oui' }] },
+      ],
+    };
+    const tooManyOptions = {
+      ...base,
+      cells: [
+        {
+          ...base.cells[0],
+          options: Array.from({ length: 7 }, (_, index) => ({
+            id: `option-${index + 1}`,
+            label: `Option ${index + 1}`,
+          })),
+        },
+      ],
+    };
+    const duplicateCells = {
+      ...base,
+      cells: [
+        { ...base.cells[0] },
+        { ...base.cells[0] },
+        ...base.cells.slice(2),
+      ],
+    };
+    const duplicateCellCoordinates = {
+      ...base,
+      cells: [
+        { ...base.cells[0] },
+        {
+          ...base.cells[1],
+          rowId: base.cells[0].rowId,
+          columnId: base.cells[0].columnId,
+        },
+        ...base.cells.slice(2),
+      ],
+    };
+    const duplicateOptions = {
+      ...base,
+      cells: [
+        {
+          ...base.cells[0],
+          options: [
+            { id: 'option-a', label: 'Option A' },
+            { id: 'option-a', label: 'Option B' },
+          ],
+        },
+        ...base.cells.slice(1),
+      ],
+    };
+    const incompleteCorrection = {
+      ...base,
+      correctValues: base.correctValues.slice(0, -1),
+    };
+    const unknownCellCorrection = {
+      ...base,
+      correctValues: [
+        ...base.correctValues.slice(0, -1),
+        { cellId: 'unknown-cell', optionId: 'option-legitimacy-election' },
+      ],
+    };
+    const unknownOptionCorrection = {
+      ...base,
+      correctValues: [
+        { cellId: base.cells[0].id, optionId: 'unknown-option' },
+        ...base.correctValues.slice(1),
+      ],
+    };
+
+    for (const question of [tooFewRows, tooManyRows]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_INSTITUTION_MATRIX_ROWS_INVALID',
+        }),
+      );
+    }
+    for (const question of [tooFewColumns, tooManyColumns]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_INSTITUTION_MATRIX_COLUMNS_INVALID',
+        }),
+      );
+    }
+    for (const question of [
+      unknownRow,
+      unknownColumn,
+      tooFewOptions,
+      tooManyOptions,
+      duplicateCells,
+      duplicateCellCoordinates,
+      duplicateOptions,
+    ]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_INSTITUTION_MATRIX_CELLS_INVALID',
+        }),
+      );
+    }
+    for (const question of [
+      incompleteCorrection,
+      unknownCellCorrection,
+      unknownOptionCorrection,
+    ]) {
+      expect(validateRichClosedQuestion(question).issues).toContainEqual(
+        expect.objectContaining({
+          code: 'RICH_CLOSED_INSTITUTION_MATRIX_CORRECTION_INVALID',
         }),
       );
     }

@@ -3,6 +3,7 @@ import {
   richClosedExerciseFixture,
   richClosedV1BExerciseFixture,
   richClosedV1BFullExerciseFixture,
+  richClosedV1CExerciseFixture,
 } from './rich-closed-question.fixtures';
 import { scoreRichClosedExerciseSubmission } from './rich-closed-question-scorer';
 import type { RichClosedAnswer } from './rich-closed-question.types';
@@ -507,6 +508,149 @@ describe('scoreRichClosedExerciseSubmission', () => {
     );
   });
 
+  it('scores institution_matrix V1-C answers', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CExerciseFixture(),
+      answers: correctAnswersV1C(),
+    });
+
+    expect(result).toMatchObject({
+      correctAnswers: 11,
+      totalQuestions: 11,
+      score: 1,
+    });
+    expect(
+      result.items.find((item) => item.questionId === 'institution-matrix-1'),
+    ).toMatchObject({
+      isCorrect: true,
+      correction: {
+        correctValues: [
+          {
+            cellId: 'cell-president-legitimacy',
+            optionId: 'option-legitimacy-election',
+          },
+          {
+            cellId: 'cell-government-responsibility',
+            optionId: 'option-responsibility-assembly',
+          },
+          {
+            cellId: 'cell-assembly-action',
+            optionId: 'option-action-censure',
+          },
+        ],
+      },
+    });
+  });
+
+  it('marks one wrong institution_matrix value as incorrect without partial scoring', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CExerciseFixture(),
+      answers: replaceV1CAnswer({
+        questionId: 'institution-matrix-1',
+        questionKind: 'institution_matrix',
+        values: [
+          {
+            cellId: 'cell-president-legitimacy',
+            optionId: 'option-legitimacy-confidence',
+          },
+          {
+            cellId: 'cell-government-responsibility',
+            optionId: 'option-responsibility-assembly',
+          },
+          {
+            cellId: 'cell-assembly-action',
+            optionId: 'option-action-censure',
+          },
+        ],
+      }),
+    });
+
+    expect(
+      result.items.find((item) => item.questionId === 'institution-matrix-1'),
+    ).toMatchObject({
+      isCorrect: false,
+      partialScore: 0,
+    });
+  });
+
+  it('rejects duplicate, unknown, incomplete and invalid institution_matrix answers', () => {
+    expectInvalidV1C(
+      replaceV1CAnswer({
+        questionId: 'institution-matrix-1',
+        questionKind: 'institution_matrix',
+        values: [
+          {
+            cellId: 'cell-president-legitimacy',
+            optionId: 'option-legitimacy-election',
+          },
+          {
+            cellId: 'cell-president-legitimacy',
+            optionId: 'option-legitimacy-confidence',
+          },
+          {
+            cellId: 'cell-assembly-action',
+            optionId: 'option-action-censure',
+          },
+        ],
+      }),
+    );
+    expectInvalidV1C(
+      replaceV1CAnswer({
+        questionId: 'institution-matrix-1',
+        questionKind: 'institution_matrix',
+        values: [
+          { cellId: 'unknown-cell', optionId: 'option-legitimacy-election' },
+          {
+            cellId: 'cell-government-responsibility',
+            optionId: 'option-responsibility-assembly',
+          },
+          {
+            cellId: 'cell-assembly-action',
+            optionId: 'option-action-censure',
+          },
+        ],
+      }),
+    );
+    expectInvalidV1C(
+      replaceV1CAnswer({
+        questionId: 'institution-matrix-1',
+        questionKind: 'institution_matrix',
+        values: [
+          {
+            cellId: 'cell-president-legitimacy',
+            optionId: 'option-action-censure',
+          },
+          {
+            cellId: 'cell-government-responsibility',
+            optionId: 'option-responsibility-assembly',
+          },
+          {
+            cellId: 'cell-assembly-action',
+            optionId: 'option-action-censure',
+          },
+        ],
+      }),
+    );
+    expectInvalidV1C(
+      replaceV1CAnswer({
+        questionId: 'institution-matrix-1',
+        questionKind: 'institution_matrix',
+        values: [
+          {
+            cellId: 'cell-president-legitimacy',
+            optionId: 'option-legitimacy-election',
+          },
+          {
+            cellId: 'cell-government-responsibility',
+            optionId: 'option-responsibility-assembly',
+          },
+        ],
+      }),
+    );
+  });
+
   it('rejects incomplete ordering answers', () => {
     expect(() =>
       scoreRichClosedExerciseSubmission({
@@ -664,6 +808,16 @@ function expectInvalidV1BFull(answers: unknown[]) {
   ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
 }
 
+function expectInvalidV1C(answers: unknown[]) {
+  expect(() =>
+    scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1CExerciseFixture(),
+      answers,
+    }),
+  ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+}
+
 function replaceAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return correctAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
@@ -683,6 +837,17 @@ function replaceV1BFullAnswer(answer: unknown): unknown[] {
       : {};
 
   return correctAnswersV1BFull().map((currentAnswer) =>
+    currentAnswer.questionId === record.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceV1CAnswer(answer: unknown): unknown[] {
+  const record =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { questionId?: unknown })
+      : {};
+
+  return correctAnswersV1C().map((currentAnswer) =>
     currentAnswer.questionId === record.questionId ? answer : currentAnswer,
   );
 }
@@ -761,6 +926,30 @@ function correctAnswersV1BFull(): RichClosedAnswer[] {
         { causeId: 'cause-1', consequenceId: 'consequence-1' },
         { causeId: 'cause-2', consequenceId: 'consequence-2' },
         { causeId: 'cause-3', consequenceId: 'consequence-3' },
+      ],
+    },
+  ];
+}
+
+function correctAnswersV1C(): RichClosedAnswer[] {
+  return [
+    ...correctAnswersV1BFull(),
+    {
+      questionId: 'institution-matrix-1',
+      questionKind: 'institution_matrix',
+      values: [
+        {
+          cellId: 'cell-president-legitimacy',
+          optionId: 'option-legitimacy-election',
+        },
+        {
+          cellId: 'cell-government-responsibility',
+          optionId: 'option-responsibility-assembly',
+        },
+        {
+          cellId: 'cell-assembly-action',
+          optionId: 'option-action-censure',
+        },
       ],
     },
   ];

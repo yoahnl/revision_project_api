@@ -713,6 +713,12 @@ function validateRichClosedAnswer(input: unknown): RichClosedAnswer {
         questionKind,
         pairs: validateRichClosedCauseConsequencePairs(answer.pairs),
       };
+    case 'institution_matrix':
+      return {
+        questionId,
+        questionKind,
+        values: validateRichClosedInstitutionMatrixValues(answer.values),
+      };
     case 'error_detection':
       return {
         questionId,
@@ -791,6 +797,32 @@ function validateRichClosedCauseConsequencePairs(input: unknown): Array<{
     return {
       causeId: validateRequiredId(record.causeId, 'Cause id'),
       consequenceId: validateRequiredId(record.consequenceId, 'Consequence id'),
+    };
+  });
+}
+
+function validateRichClosedInstitutionMatrixValues(input: unknown): Array<{
+  cellId: string;
+  optionId: string;
+}> {
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new BadRequestException(
+      'Rich closed institution matrix values are required',
+    );
+  }
+
+  return input.map((value) => {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+      throw new BadRequestException(
+        'Rich closed institution matrix value is invalid',
+      );
+    }
+
+    const record = value as Record<string, unknown>;
+
+    return {
+      cellId: validateRequiredId(record.cellId, 'Cell id'),
+      optionId: validateRequiredId(record.optionId, 'Option id'),
     };
   });
 }

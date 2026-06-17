@@ -9,6 +9,7 @@ import {
   type RichClosedCorrectionPayload,
   type RichClosedExercise,
   type RichClosedExerciseResult,
+  type RichClosedInstitutionMatrixValue,
   type RichClosedPair,
   type RichClosedQuestion,
   type RichClosedTrueFalseValue,
@@ -138,6 +139,12 @@ function normalizeAnswer(answer: unknown): RichClosedAnswer {
         questionId,
         questionKind,
         pairs: readCauseConsequencePairs(answer.pairs),
+      };
+    case 'institution_matrix':
+      return {
+        questionId,
+        questionKind,
+        values: readInstitutionMatrixValues(answer.values),
       };
     case 'error_detection':
       return {
@@ -366,6 +373,28 @@ function scoreQuestion(
         },
       });
     }
+    case 'institution_matrix': {
+      const institutionMatrixAnswer = answer as Extract<
+        RichClosedAnswer,
+        { questionKind: 'institution_matrix' }
+      >;
+      assertKnownInstitutionMatrixValues(
+        institutionMatrixAnswer.values,
+        question,
+      );
+
+      return buildCorrectionItem({
+        question,
+        answer: institutionMatrixAnswer,
+        isCorrect: areInstitutionMatrixValuesEqual(
+          institutionMatrixAnswer.values,
+          question.correctValues,
+        ),
+        correction: {
+          correctValues: cloneInstitutionMatrixValues(question.correctValues),
+        },
+      });
+    }
   }
 }
 
@@ -483,6 +512,35 @@ function assertKnownCauseConsequencePairs(
   }
 }
 
+function assertKnownInstitutionMatrixValues(
+  values: RichClosedInstitutionMatrixValue[],
+  question: Extract<RichClosedQuestion, { questionKind: 'institution_matrix' }>,
+) {
+  const cellIds = question.cells.map((cell) => cell.id);
+  const cellsById = new Map(question.cells.map((cell) => [cell.id, cell]));
+  const submittedCellIds = values.map((value) => value.cellId);
+
+  if (
+    values.length === 0 ||
+    values.length !== question.cells.length ||
+    hasDuplicates(submittedCellIds)
+  ) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+
+  for (const value of values) {
+    const cell = cellsById.get(value.cellId);
+
+    if (
+      !cellIds.includes(value.cellId) ||
+      !cell ||
+      !cell.options.some((option) => option.id === value.optionId)
+    ) {
+      throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+    }
+  }
+}
+
 function readRequiredString(value: unknown): string {
   if (typeof value !== 'string' || value.trim().length === 0) {
     throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
@@ -560,6 +618,25 @@ function readCauseConsequencePairs(
   });
 }
 
+function readInstitutionMatrixValues(
+  value: unknown,
+): RichClosedInstitutionMatrixValue[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+  }
+
+  return value.map((item) => {
+    if (!isRecord(item)) {
+      throw new Error(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+    }
+
+    return {
+      cellId: readRequiredString(item.cellId),
+      optionId: readRequiredString(item.optionId),
+    };
+  });
+}
+
 function hasForbiddenSubmitField(value: unknown): boolean {
   if (Array.isArray(value)) {
     return value.some(hasForbiddenSubmitField);
@@ -614,6 +691,8 @@ function cloneAnswer(answer: RichClosedAnswer): RichClosedAnswer {
       return { ...answer, values: cloneTrueFalseValues(answer.values) };
     case 'cause_consequence':
       return { ...answer, pairs: cloneCauseConsequencePairs(answer.pairs) };
+    case 'institution_matrix':
+      return { ...answer, values: cloneInstitutionMatrixValues(answer.values) };
     case 'error_detection':
       return { ...answer };
   }
@@ -633,6 +712,12 @@ function cloneCauseConsequencePairs(
   pairs: RichClosedCauseConsequencePair[],
 ): RichClosedCauseConsequencePair[] {
   return pairs.map((pair) => ({ ...pair }));
+}
+
+function cloneInstitutionMatrixValues(
+  values: RichClosedInstitutionMatrixValue[],
+): RichClosedInstitutionMatrixValue[] {
+  return values.map((value) => ({ ...value }));
 }
 
 function areStringSetsEqual(left: string[], right: string[]): boolean {
@@ -667,6 +752,16 @@ function areCauseConsequencePairsEqual(
   );
 }
 
+function areInstitutionMatrixValuesEqual(
+  left: RichClosedInstitutionMatrixValue[],
+  right: RichClosedInstitutionMatrixValue[],
+) {
+  return areStringSetsEqual(
+    institutionMatrixValueKeys(left),
+    institutionMatrixValueKeys(right),
+  );
+}
+
 function areStringArraysEqual(left: string[], right: string[]) {
   return (
     left.length === right.length &&
@@ -686,6 +781,12 @@ function causeConsequencePairKeys(
   pairs: RichClosedCauseConsequencePair[],
 ): string[] {
   return pairs.map((pair) => `${pair.causeId}:${pair.consequenceId}`);
+}
+
+function institutionMatrixValueKeys(
+  values: RichClosedInstitutionMatrixValue[],
+): string[] {
+  return values.map((value) => `${value.cellId}:${value.optionId}`);
 }
 
 function hasDuplicates(values: string[]): boolean {

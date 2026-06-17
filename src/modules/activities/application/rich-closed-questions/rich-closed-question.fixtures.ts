@@ -60,6 +60,20 @@ export function richClosedV1BFullExerciseFixture(): RichClosedExercise {
   };
 }
 
+export function richClosedV1CExerciseFixture(): RichClosedExercise {
+  const v1bFullFixture = richClosedV1BFullExerciseFixture();
+
+  return {
+    ...v1bFullFixture,
+    id: 'rich-exercise-v1c-1',
+    title: 'Droit constitutionnel - exercice riche fermé V1-C',
+    questions: [
+      ...v1bFullFixture.questions,
+      richClosedQuestionFixture('institution_matrix'),
+    ],
+  };
+}
+
 export function richClosedQuestionFixture(
   questionKind: RichClosedQuestionKind,
 ): RichClosedQuestion {
@@ -255,6 +269,123 @@ export function richClosedQuestionFixture(
         explanation:
           'Chaque cause active une conséquence institutionnelle distincte dans la logique parlementaire.',
       };
+    case 'institution_matrix':
+      return {
+        ...baseQuestion('institution-matrix-1', 'institution_matrix'),
+        prompt:
+          'Complète la matrice comparant trois institutions de la Ve République.',
+        instruction:
+          'Choisis une option fermée pour chaque cellule demandée, sans réponse libre.',
+        rows: [
+          {
+            id: 'row-president',
+            label: 'Président de la République',
+            description: 'Chef de l’État sous la Ve République.',
+          },
+          {
+            id: 'row-government',
+            label: 'Gouvernement',
+            description: 'Organe qui conduit la politique de la Nation.',
+          },
+          {
+            id: 'row-assembly',
+            label: 'Assemblée nationale',
+            description: 'Chambre élue au suffrage universel direct.',
+          },
+        ],
+        columns: [
+          {
+            id: 'column-legitimacy',
+            label: 'Mode de légitimité',
+          },
+          {
+            id: 'column-action',
+            label: 'Moyen d’action',
+          },
+          {
+            id: 'column-responsibility',
+            label: 'Responsabilité politique',
+          },
+        ],
+        cells: [
+          {
+            id: 'cell-president-legitimacy',
+            rowId: 'row-president',
+            columnId: 'column-legitimacy',
+            prompt: 'Quelle légitimité caractérise le Président ?',
+            options: [
+              {
+                id: 'option-legitimacy-election',
+                label: 'Élection au suffrage universel',
+              },
+              {
+                id: 'option-legitimacy-confidence',
+                label: 'Confiance parlementaire',
+              },
+              {
+                id: 'option-legitimacy-nomination',
+                label: 'Nomination par le Gouvernement',
+              },
+            ],
+          },
+          {
+            id: 'cell-government-responsibility',
+            rowId: 'row-government',
+            columnId: 'column-responsibility',
+            prompt: 'Devant qui le Gouvernement est-il responsable ?',
+            options: [
+              {
+                id: 'option-responsibility-assembly',
+                label: 'Assemblée nationale',
+              },
+              {
+                id: 'option-responsibility-senate',
+                label: 'Sénat seul',
+              },
+              {
+                id: 'option-responsibility-none',
+                label: 'Aucune responsabilité politique',
+              },
+            ],
+          },
+          {
+            id: 'cell-assembly-action',
+            rowId: 'row-assembly',
+            columnId: 'column-action',
+            prompt: 'Quel moyen d’action appartient à l’Assemblée nationale ?',
+            options: [
+              {
+                id: 'option-action-censure',
+                label: 'Motion de censure',
+              },
+              {
+                id: 'option-action-dissolution',
+                label: 'Dissolution de sa propre chambre',
+              },
+              {
+                id: 'option-action-promulgation',
+                label: 'Promulgation des lois',
+              },
+            ],
+          },
+        ],
+        correctValues: [
+          {
+            cellId: 'cell-president-legitimacy',
+            optionId: 'option-legitimacy-election',
+          },
+          {
+            cellId: 'cell-government-responsibility',
+            optionId: 'option-responsibility-assembly',
+          },
+          {
+            cellId: 'cell-assembly-action',
+            optionId: 'option-action-censure',
+          },
+        ],
+        explanation:
+          'La matrice distingue la légitimité présidentielle, la responsabilité du Gouvernement devant l’Assemblée nationale et le moyen de contrôle parlementaire.',
+      };
     case 'case_qualification':
       return {
         ...baseQuestion('case-1', 'case_qualification'),
@@ -304,6 +435,8 @@ function baseQuestion<K extends RichClosedQuestionKind>(
         return 'classification';
       case 'cause_consequence':
         return 'causality';
+      case 'institution_matrix':
+        return 'comparison';
       default:
         return 'case_application';
     }
