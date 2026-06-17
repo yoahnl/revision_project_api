@@ -4,12 +4,14 @@ import type {
   RichClosedCalculationChoice,
   RichClosedDiagram,
   RichClosedDiagramLabelingSlot,
+  RichClosedImageChoiceOption,
   RichClosedPublicChoice,
   RichClosedPublicExercise,
   RichClosedPublicExerciseEnvelope,
   RichClosedPublicQuestion,
   RichClosedQuestion,
 } from './rich-closed-question.types';
+import { getRichClosedImageAsset } from './rich-closed-image-assets';
 
 export function toRichClosedPublicExercise(
   exercise: RichClosedExercise,
@@ -153,6 +155,15 @@ export function toRichClosedPublicQuestion(
         scenario: question.scenario,
         calculation: cloneCalculation(question.calculation),
         choices: cloneCalculationChoices(question.choices),
+      };
+    case 'image_choice':
+      return {
+        ...base,
+        questionKind: question.questionKind,
+        ...(question.instruction === undefined
+          ? {}
+          : { instruction: question.instruction }),
+        choices: cloneImageChoiceOptions(question.choices),
       };
     case 'case_qualification':
       return {
@@ -312,4 +323,24 @@ function cloneCalculationChoices(
     label: choice.label,
     value: choice.value,
   }));
+}
+
+function cloneImageChoiceOptions(
+  choices: RichClosedImageChoiceOption[],
+): RichClosedImageChoiceOption[] {
+  return choices.map((choice) => {
+    const asset = getRichClosedImageAsset(choice.imageAssetId);
+
+    return {
+      id: choice.id,
+      label: choice.label,
+      imageAssetId: choice.imageAssetId,
+      altText: asset?.publicAltText ?? choice.altText,
+      ...(choice.caption === undefined ? {} : { caption: choice.caption }),
+      ...(asset?.creditLabel === undefined
+        ? {}
+        : { creditLabel: asset.creditLabel }),
+      ...(asset === null ? {} : { license: asset.license }),
+    };
+  });
 }

@@ -1,3 +1,5 @@
+import type { RichClosedImageAssetLicense } from './rich-closed-image-assets';
+
 export const RICH_CLOSED_EXERCISE_VERSION = 'rich-closed-question-v1';
 
 export type RichClosedExerciseVersion = typeof RICH_CLOSED_EXERCISE_VERSION;
@@ -16,6 +18,7 @@ export const RICH_CLOSED_QUESTION_KINDS = [
   'institution_matrix',
   'diagram_labeling',
   'calculation_mcq',
+  'image_choice',
 ] as const;
 
 export type RichClosedQuestionKind =
@@ -173,6 +176,16 @@ export interface RichClosedCalculationChoice {
   value: number;
 }
 
+export interface RichClosedImageChoiceOption {
+  id: string;
+  label: string;
+  imageAssetId: string;
+  altText: string;
+  caption?: string | null;
+  creditLabel?: string | null;
+  license?: RichClosedImageAssetLicense;
+}
+
 export interface RichClosedCalculationParty {
   id: string;
   label: string;
@@ -307,6 +320,14 @@ export interface RichClosedCalculationMcqQuestion extends RichClosedQuestionBase
   explanation: string;
 }
 
+export interface RichClosedImageChoiceQuestion extends RichClosedQuestionBase {
+  questionKind: 'image_choice';
+  instruction?: string | null;
+  choices: RichClosedImageChoiceOption[];
+  correctChoiceId: string;
+  explanation: string;
+}
+
 export interface RichClosedCaseQualificationQuestion extends RichClosedQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -336,7 +357,8 @@ export type RichClosedQuestion =
   | RichClosedCauseConsequenceQuestion
   | RichClosedInstitutionMatrixQuestion
   | RichClosedDiagramLabelingQuestion
-  | RichClosedCalculationMcqQuestion;
+  | RichClosedCalculationMcqQuestion
+  | RichClosedImageChoiceQuestion;
 
 export interface RichClosedPublicQuestionBase {
   id: string;
@@ -421,6 +443,12 @@ export interface RichClosedPublicCalculationMcqQuestion extends RichClosedPublic
   choices: RichClosedCalculationChoice[];
 }
 
+export interface RichClosedPublicImageChoiceQuestion extends RichClosedPublicQuestionBase {
+  questionKind: 'image_choice';
+  instruction?: string | null;
+  choices: RichClosedImageChoiceOption[];
+}
+
 export interface RichClosedPublicCaseQualificationQuestion extends RichClosedPublicQuestionBase {
   questionKind: 'case_qualification';
   caseText: string;
@@ -446,7 +474,8 @@ export type RichClosedPublicQuestion =
   | RichClosedPublicCauseConsequenceQuestion
   | RichClosedPublicInstitutionMatrixQuestion
   | RichClosedPublicDiagramLabelingQuestion
-  | RichClosedPublicCalculationMcqQuestion;
+  | RichClosedPublicCalculationMcqQuestion
+  | RichClosedPublicImageChoiceQuestion;
 
 export type RichClosedAnswer =
   | {
@@ -507,6 +536,11 @@ export type RichClosedAnswer =
   | {
       questionId: string;
       questionKind: 'calculation_mcq';
+      choiceId: string;
+    }
+  | {
+      questionId: string;
+      questionKind: 'image_choice';
       choiceId: string;
     }
   | {

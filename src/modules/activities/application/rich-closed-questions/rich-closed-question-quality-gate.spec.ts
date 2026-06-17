@@ -257,6 +257,7 @@ describe('rich closed question quality gate', () => {
     'widget',
     'renderPayload',
     'imageUrl',
+    'blob',
     'formula',
     'expression',
     'calculationCode',

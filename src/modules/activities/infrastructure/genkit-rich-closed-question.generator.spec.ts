@@ -59,6 +59,7 @@ import {
   richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
+  richClosedV1DImageChoiceExerciseFixture,
 } from '../application/rich-closed-questions/rich-closed-question.fixtures';
 import type {
   AiGenerationObservation,
@@ -213,7 +214,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
       'timeline, date_slider, true_false_grid et cause_consequence sont des types V1-B fermés',
     );
     expect(generateInput?.prompt).toContain(
-      'Tu ne dois jamais produire true_false, image_choice',
+      'Tu ne dois jamais produire true_false, fill_blank_dropdown',
     );
     expect(generateInput?.prompt).toContain(
       'Tu ne dois jamais produire de widget libre.',
@@ -262,7 +263,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     expect(generateInput?.prompt).toContain(
       'institution_matrix, diagram_labeling et calculation_mcq sont des types V1-C fermés',
     );
-    expect(generateInput?.prompt).toContain('aucun type V1-022 ou suivant');
+    expect(generateInput?.prompt).toContain('aucun type V1-023 ou suivant');
     expect(generateInput?.prompt).toContain(
       'Tu ne dois jamais produire de widget libre.',
     );
@@ -307,9 +308,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     expect(generateInput?.prompt).toContain(
       'Tu ne dois jamais produire de widget libre.',
     );
-    expect(generateInput?.prompt).toContain(
-      'image_choice, fill_blank_dropdown',
-    );
+    expect(generateInput?.prompt).toContain('Types V1-023+ interdits');
     expect(generateInput?.prompt).toContain(
       'Clés exactes institution_matrix: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, rows, columns, cells, correctValues, explanation.',
     );
@@ -349,7 +348,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
       'Tu ne dois jamais produire un diagramme sous forme de code',
     );
     expect(generateInput?.prompt).toContain(
-      'Types V1-022+ interdits: image_choice, fill_blank_dropdown.',
+      'Types V1-023+ interdits: fill_blank_dropdown.',
     );
     expect(generateInput?.prompt).toContain(
       'Clés exactes diagram_labeling: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, diagram, slots, correctValues, explanation.',
@@ -392,10 +391,61 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     expect(generateInput?.prompt).toContain('formule libre');
     expect(generateInput?.prompt).toContain('D’Hondt');
     expect(generateInput?.prompt).toContain(
-      'Types V1-022+ interdits: image_choice, fill_blank_dropdown.',
+      'Types V1-023+ interdits: fill_blank_dropdown.',
     );
     expect(generateInput?.prompt).toContain(
       'Clés exactes calculation_mcq: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, scenario, calculation, choices, correctChoiceId, explanation.',
+    );
+    expect(getObservedObservation(observer).status).toBe('success');
+  });
+
+  it('generates a validated V1-D rich closed exercise when the mix requests image_choice', async () => {
+    mockGenerate.mockResolvedValue({
+      output: generatedExerciseV1DImageChoice(),
+    });
+    const observer = createObserver();
+
+    const exercise = await new GenkitRichClosedQuestionGenerator(
+      observer,
+    ).generate(generationInputV1DImageChoice());
+    const [generateInput] = mockGenerate.mock.calls[0] ?? [];
+
+    expect(exercise.questions.map((question) => question.questionKind)).toEqual(
+      [
+        'single_choice',
+        'multiple_choice',
+        'matching',
+        'ordering',
+        'case_qualification',
+        'error_detection',
+        'timeline',
+        'date_slider',
+        'true_false_grid',
+        'cause_consequence',
+        'institution_matrix',
+        'diagram_labeling',
+        'calculation_mcq',
+        'image_choice',
+      ],
+    );
+    expect(generateInput?.prompt).toContain('image_choice');
+    expect(generateInput?.prompt).toContain(
+      'image_choice est un type V1-D fermé',
+    );
+    expect(generateInput?.prompt).toContain('Catalogue image contrôlé V1-D');
+    expect(generateInput?.prompt).toContain(
+      'image-choice-historical-figure-001-v1',
+    );
+    expect(generateInput?.prompt).toContain('sans URL, image générée');
+    expect(generateInput?.prompt).toContain('base64, blob, storagePath');
+    expect(generateInput?.prompt).toContain(
+      'label et caption sont publics et ne doivent jamais contenir ni recopier le semanticLabel',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Clés exactes image_choice: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, choices, correctChoiceId, explanation.',
+    );
+    expect(generateInput?.prompt).toContain(
+      'Types V1-023+ interdits: fill_blank_dropdown.',
     );
     expect(getObservedObservation(observer).status).toBe('success');
   });
@@ -499,7 +549,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
         questions: [
           {
             ...richClosedQuestionFixture('single_choice'),
-            questionKind: 'image_choice',
+            questionKind: 'fill_blank_dropdown',
           },
         ],
       },
@@ -580,6 +630,38 @@ describe('GenkitRichClosedQuestionGenerator', () => {
       await expect(
         new GenkitRichClosedQuestionGenerator().generate(
           generationInputV1CCalculation(),
+        ),
+      ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_SCHEMA_INVALID });
+    },
+  );
+
+  it.each([
+    'imageUrl',
+    'url',
+    'storagePath',
+    'base64',
+    'blob',
+    'semanticLabel',
+    'answerHint',
+    'renderPayload',
+  ] as const)(
+    'rejects image_choice output carrying arbitrary/private image field %s',
+    async (field) => {
+      mockGenerate.mockResolvedValue({
+        output: {
+          ...generatedExerciseV1DImageChoice(),
+          questions: generatedExerciseV1DImageChoice().questions.map(
+            (question) =>
+              question.questionKind === 'image_choice'
+                ? { ...question, [field]: 'unsafe' }
+                : question,
+          ),
+        },
+      });
+
+      await expect(
+        new GenkitRichClosedQuestionGenerator().generate(
+          generationInputV1DImageChoice(),
         ),
       ).rejects.toMatchObject({ code: RICH_CLOSED_GENERATION_SCHEMA_INVALID });
     },
@@ -1022,6 +1104,10 @@ function generatedExerciseV1CCalculation(): RichClosedExercise {
   return richClosedV1CCalculationExerciseFixture();
 }
 
+function generatedExerciseV1DImageChoice(): RichClosedExercise {
+  return richClosedV1DImageChoiceExerciseFixture();
+}
+
 function generationInput() {
   return {
     studentId: 'student-1',
@@ -1152,6 +1238,29 @@ function generationInputV1CCalculation() {
       institution_matrix: 1,
       diagram_labeling: 1,
       calculation_mcq: 1,
+    },
+  };
+}
+
+function generationInputV1DImageChoice() {
+  return {
+    ...generationInput(),
+    questionCount: 14,
+    questionTypeMix: {
+      single_choice: 1,
+      multiple_choice: 1,
+      matching: 1,
+      ordering: 1,
+      case_qualification: 1,
+      error_detection: 1,
+      timeline: 1,
+      date_slider: 1,
+      true_false_grid: 1,
+      cause_consequence: 1,
+      institution_matrix: 1,
+      diagram_labeling: 1,
+      calculation_mcq: 1,
+      image_choice: 1,
     },
   };
 }

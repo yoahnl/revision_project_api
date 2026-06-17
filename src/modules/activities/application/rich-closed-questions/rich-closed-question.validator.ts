@@ -21,12 +21,14 @@ import {
   type RichClosedDiagramNode,
   type RichClosedExerciseValidationIssue,
   type RichClosedExerciseValidationResult,
+  type RichClosedImageChoiceOption,
   type RichClosedInstitutionMatrixCell,
   type RichClosedInstitutionMatrixValue,
   type RichClosedPair,
   type RichClosedQuestionKind,
   type RichClosedTrueFalseValue,
 } from './rich-closed-question.types';
+import { getRichClosedImageAsset } from './rich-closed-image-assets';
 
 const MAX_PROMPT_LENGTH = 700;
 const MAX_CASE_TEXT_LENGTH = 900;
@@ -84,6 +86,20 @@ const FORBIDDEN_RICH_CLOSED_RENDER_KEYS = new Set([
   'python',
   'imageUrl',
   'assetUrl',
+  'url',
+  'remoteUrl',
+  'src',
+  'href',
+  'storagePath',
+  'bucketPath',
+  'cdnUrl',
+  'base64',
+  'dataUri',
+  'blob',
+  'rawImage',
+  'assetPath',
+  'semanticLabel',
+  'answerHint',
   'canvas',
   'code',
   'markup',
@@ -235,6 +251,9 @@ export function validateRichClosedQuestion(
       break;
     case 'calculation_mcq':
       validateCalculationMcqQuestion(question, issues);
+      break;
+    case 'image_choice':
+      validateImageChoiceQuestion(question, issues);
       break;
     case 'case_qualification':
       validateCaseQualificationQuestion(question, issues);
@@ -945,6 +964,90 @@ function validateCalculationMcqQuestion(
   validateExplanation(question.explanation, issues);
 }
 
+function validateImageChoiceQuestion(
+  question: Record<string, unknown>,
+  issues: RichClosedExerciseValidationIssue[],
+) {
+  const choices = readImageChoices(question.choices, issues, 'choices');
+  const choiceIds = choices.map((choice) => choice.id);
+  const imageAssetIds = choices.map((choice) => choice.imageAssetId);
+  const correctChoiceId = readString(question.correctChoiceId);
+
+  if (
+    choices.length < MIN_CHOICES ||
+    choices.length > MAX_CHOICES ||
+    hasDuplicates(choiceIds) ||
+    hasDuplicates(imageAssetIds) ||
+    choices.some((choice) => {
+      const asset = getRichClosedImageAsset(choice.imageAssetId);
+
+      return (
+        asset === null ||
+        choice.altText !== asset.publicAltText ||
+        (choice.creditLabel !== undefined &&
+          choice.creditLabel !== asset.creditLabel) ||
+        (choice.license !== undefined && choice.license !== asset.license) ||
+        imageChoicePublicTextRevealsSemanticLabel(choice.label, asset) ||
+        imageChoicePublicTextRevealsSemanticLabel(choice.caption, asset)
+      );
+    })
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_IMAGE_CHOICE_INVALID',
+        'Image choice must use bounded choices from the controlled image asset catalog',
+        'choices',
+      ),
+    );
+  }
+
+  if (!choiceIds.includes(correctChoiceId)) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_IMAGE_CHOICE_INVALID',
+        'Image choice correction must target one existing choice',
+        'correctChoiceId',
+      ),
+    );
+  }
+
+  validateOptionalInstruction(question.instruction, issues);
+  validateExplanation(question.explanation, issues);
+}
+
+function imageChoicePublicTextRevealsSemanticLabel(
+  value: string | null | undefined,
+  asset: NonNullable<ReturnType<typeof getRichClosedImageAsset>>,
+): boolean {
+  if (value === undefined || value === null) {
+    return false;
+  }
+
+  const normalizedValueTokens = new Set(
+    normalizeImageChoicePublicText(value)
+      .split(' ')
+      .filter((token) => token.length > 0),
+  );
+  const semanticTokens = normalizeImageChoicePublicText(asset.semanticLabel)
+    .split(' ')
+    .filter((token) => token.length >= 4);
+
+  if (semanticTokens.length === 0 || normalizedValueTokens.size === 0) {
+    return false;
+  }
+
+  return semanticTokens.some((token) => normalizedValueTokens.has(token));
+}
+
+function normalizeImageChoicePublicText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLocaleLowerCase('fr-FR')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
 function validateCaseQualificationQuestion(
   question: Record<string, unknown>,
   issues: RichClosedExerciseValidationIssue[],
@@ -1511,6 +1614,40 @@ function readCalculationChoices(
   return choices;
 }
 
+function readImageChoices(
+  value: unknown,
+  issues: RichClosedExerciseValidationIssue[],
+  path: string,
+): RichClosedImageChoiceOption[] {
+  if (
+    !Array.isArray(value) ||
+    value.length < MIN_CHOICES ||
+    value.length > MAX_CHOICES
+  ) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_IMAGE_CHOICE_INVALID',
+        'Image choice choices must contain between two and six items',
+        path,
+      ),
+    );
+    return [];
+  }
+
+  const choices = value.filter(isImageChoiceOption);
+  if (choices.length !== value.length) {
+    issues.push(
+      issue(
+        'RICH_CLOSED_IMAGE_CHOICE_INVALID',
+        'Image choice choices must have ids, labels, catalog asset ids and public alt text',
+        path,
+      ),
+    );
+  }
+
+  return choices;
+}
+
 function readCalculationData(
   value: unknown,
   issues: RichClosedExerciseValidationIssue[],
@@ -1965,6 +2102,29 @@ function isCalculationChoice(
     plainString(value.id) &&
     boundedString(value.label, 1, 220) &&
     Number.isInteger(value.value)
+  );
+}
+
+function isImageChoiceOption(
+  value: unknown,
+): value is RichClosedImageChoiceOption {
+  return (
+    isRecord(value) &&
+    plainString(value.id) &&
+    boundedString(value.label, 1, 220) &&
+    plainString(value.imageAssetId) &&
+    boundedString(value.altText, 1, 320) &&
+    (value.caption === undefined ||
+      value.caption === null ||
+      boundedString(value.caption, 1, 220)) &&
+    (value.creditLabel === undefined ||
+      value.creditLabel === null ||
+      boundedString(value.creditLabel, 1, 220)) &&
+    (value.license === undefined ||
+      value.license === 'public_domain' ||
+      value.license === 'own_generated' ||
+      value.license === 'open_license' ||
+      value.license === 'internal_placeholder')
   );
 }
 

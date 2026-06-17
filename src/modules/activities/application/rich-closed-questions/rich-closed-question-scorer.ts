@@ -161,6 +161,12 @@ function normalizeAnswer(answer: unknown): RichClosedAnswer {
         questionKind,
         choiceId: readRequiredString(answer.choiceId),
       };
+    case 'image_choice':
+      return {
+        questionId,
+        questionKind,
+        choiceId: readRequiredString(answer.choiceId),
+      };
     case 'error_detection':
       return {
         questionId,
@@ -453,6 +459,23 @@ function scoreQuestion(
           expectedValue: evaluation.expectedValue,
           workedSteps: evaluation.workedSteps.map((step) => ({ ...step })),
         },
+      });
+    }
+    case 'image_choice': {
+      const imageChoiceAnswer = answer as Extract<
+        RichClosedAnswer,
+        { questionKind: 'image_choice' }
+      >;
+      assertKnownId(
+        imageChoiceAnswer.choiceId,
+        question.choices.map((choice) => choice.id),
+      );
+
+      return buildCorrectionItem({
+        question,
+        answer: imageChoiceAnswer,
+        isCorrect: imageChoiceAnswer.choiceId === question.correctChoiceId,
+        correction: { correctChoiceId: question.correctChoiceId },
       });
     }
   }
@@ -788,6 +811,8 @@ function hasForbiddenSubmitField(value: unknown): boolean {
       key === 'answersPayload' ||
       key === 'expectedAnswer' ||
       key === 'expectedAnswers' ||
+      key === 'semanticLabel' ||
+      key === 'answerHint' ||
       isForbiddenRenderKey(key)
     ) {
       return true;
@@ -821,6 +846,8 @@ function cloneAnswer(answer: RichClosedAnswer): RichClosedAnswer {
     case 'diagram_labeling':
       return { ...answer, values: cloneDiagramLabelingValues(answer.values) };
     case 'calculation_mcq':
+      return { ...answer };
+    case 'image_choice':
       return { ...answer };
     case 'error_detection':
       return { ...answer };
@@ -965,6 +992,18 @@ function isForbiddenRenderKey(key: string): boolean {
     'python',
     'imageUrl',
     'assetUrl',
+    'url',
+    'remoteUrl',
+    'src',
+    'href',
+    'storagePath',
+    'bucketPath',
+    'cdnUrl',
+    'base64',
+    'dataUri',
+    'blob',
+    'rawImage',
+    'assetPath',
     'canvas',
     'code',
     'markup',

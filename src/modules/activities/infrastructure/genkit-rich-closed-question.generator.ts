@@ -31,9 +31,13 @@ import {
   RICH_CLOSED_QUESTION_COUNT_INVALID,
   resolveRichClosedQuestionTypeMix,
 } from '../application/rich-closed-questions/rich-closed-question-generation-profile';
+import {
+  RICH_CLOSED_IMAGE_ASSET_IDS,
+  RICH_CLOSED_IMAGE_ASSETS,
+} from '../application/rich-closed-questions/rich-closed-image-assets';
 
 export const RICH_CLOSED_FLOW_NAME = 'richClosedQuestionGeneration';
-export const RICH_CLOSED_PROMPT_VERSION = 'rich-closed-v1c-003';
+export const RICH_CLOSED_PROMPT_VERSION = 'rich-closed-v1d-004';
 export const RICH_CLOSED_SCHEMA_VERSION = RICH_CLOSED_EXERCISE_VERSION;
 export const RICH_CLOSED_GENERATION_FAILED = 'RICH_CLOSED_GENERATION_FAILED';
 export const RICH_CLOSED_GENERATION_SCHEMA_INVALID =
@@ -52,6 +56,13 @@ const MAX_QUESTION_COUNT = 20;
 const NonEmptyStringSchema = z.string().trim().min(1);
 const DifficultySchema = z.enum(['LOW', 'MEDIUM', 'HIGH']);
 const SourceChunkIdsSchema = z.array(NonEmptyStringSchema).min(1);
+const ImageAssetIdSchema = z.enum(RICH_CLOSED_IMAGE_ASSET_IDS);
+const ImageAssetLicenseSchema = z.enum([
+  'public_domain',
+  'own_generated',
+  'open_license',
+  'internal_placeholder',
+]);
 
 const ChoiceSchema = z
   .object({
@@ -212,6 +223,18 @@ const CalculationChoiceSchema = z
     id: NonEmptyStringSchema,
     label: NonEmptyStringSchema,
     value: z.number().int(),
+  })
+  .strict();
+
+const ImageChoiceOptionSchema = z
+  .object({
+    id: NonEmptyStringSchema,
+    label: NonEmptyStringSchema,
+    imageAssetId: ImageAssetIdSchema,
+    altText: NonEmptyStringSchema,
+    caption: NonEmptyStringSchema.nullable().optional(),
+    creditLabel: NonEmptyStringSchema.nullable().optional(),
+    license: ImageAssetLicenseSchema.optional(),
   })
   .strict();
 
@@ -388,6 +411,17 @@ const CalculationMcqQuestionSchema = z
   })
   .strict();
 
+const ImageChoiceQuestionSchema = z
+  .object({
+    ...QuestionBaseSchema,
+    questionKind: z.literal('image_choice'),
+    instruction: NonEmptyStringSchema.nullable().optional(),
+    choices: z.array(ImageChoiceOptionSchema).min(2).max(6),
+    correctChoiceId: NonEmptyStringSchema,
+    explanation: z.string().trim().min(8),
+  })
+  .strict();
+
 const CaseQualificationQuestionSchema = z
   .object({
     ...QuestionBaseSchema,
@@ -424,6 +458,7 @@ const RichClosedQuestionSchema = z.discriminatedUnion('questionKind', [
   InstitutionMatrixQuestionSchema,
   DiagramLabelingQuestionSchema,
   CalculationMcqQuestionSchema,
+  ImageChoiceQuestionSchema,
 ]);
 
 const GeneratedRichClosedExerciseSchema = z
@@ -843,9 +878,10 @@ function buildRichClosedPrompt(input: {
     'Tu dois respecter exactement les questionKind demandés.',
     'Tu dois respecter questionTypeMix.',
     `questionTypeMix: ${JSON.stringify(input.questionTypeMix)}`,
-    'Tu dois produire uniquement les types rich closed autorisés: single_choice, multiple_choice, matching, ordering, case_qualification, error_detection, timeline, date_slider, true_false_grid, cause_consequence, institution_matrix, diagram_labeling, calculation_mcq.',
+    'Tu dois produire uniquement les types rich closed autorisés: single_choice, multiple_choice, matching, ordering, case_qualification, error_detection, timeline, date_slider, true_false_grid, cause_consequence, institution_matrix, diagram_labeling, calculation_mcq, image_choice.',
     'timeline, date_slider, true_false_grid et cause_consequence sont des types V1-B fermés: ils ne doivent jamais demander une réponse libre.',
     'institution_matrix, diagram_labeling et calculation_mcq sont des types V1-C fermés: ils ne doivent jamais demander une réponse libre.',
+    'image_choice est un type V1-D fermé: il doit choisir une image dans le catalogue contrôlé, sans réponse libre.',
     'Tu dois produire des questions fermées.',
     'Tu dois interdire toute réponse libre.',
     'Tu dois utiliser les chunks fournis comme seule source de vérité.',
@@ -864,17 +900,21 @@ function buildRichClosedPrompt(input: {
     'Tu dois produire diagram_labeling avec un diagramme sémantique simple: 2 à 8 nodes, 0 à 12 edges, 2 à 8 slots, 2 à 6 options fermées par slot, et des slots ancrés à des nodes ou edges existants.',
     'Tu dois produire calculation_mcq uniquement avec les modes absolute_majority_threshold ou largest_remainder_target_party_seats, des petits nombres lisibles, des choices à value uniques, une seule choice dont value correspond au calcul, et sans égalité de reste ambiguë.',
     'Pour calculation_mcq, le backend recalculera expectedValue: correctChoiceId doit pointer vers la choice dont value correspond au résultat déterministe.',
+    'Tu dois produire image_choice uniquement avec imageAssetId issus du catalogue image contrôlé, des choices fermées, un altText exactement égal au publicAltText du catalogue, un correctChoiceId privé, et sans URL, image générée, base64, blob, storagePath, semanticLabel ni widget.',
+    'Pour image_choice, label et caption sont publics et ne doivent jamais contenir ni recopier le semanticLabel: utilise des labels neutres comme “Image A”, “Image B”, et des captions non révélatrices.',
+    `Catalogue image contrôlé V1-D: ${formatImageAssetCatalogForPrompt()}`,
     'Tu ne dois jamais produire de formule libre, expression, rawFormula, calculationCode, eval, Function, JavaScript, Python, D’Hondt, Sainte-Laguë, plus forte moyenne, seuil électoral, votes blancs ou votes nuls.',
     'Tu dois produire multiple_choice avec au moins 2 bonnes réponses.',
     'Tu dois éviter les questions de pure restitution.',
     'Tu dois éviter les prompts commençant par “Qui”, “Quand”, “Quelle date”, “Quelle est la définition”, sauf nécessité exceptionnelle.',
     'Tu dois produire des explications privées de correction.',
     'Les corrections privées correctChoiceId, correctChoiceIds, correctPairs, correctOrder, correctValues, correctErrorId et correctYear ne doivent jamais être exposées dans un payload public pré-submit.',
-    'Tu ne dois jamais inclure de modelAnswer, answerText, freeTextAnswer, textAnswer, HTML, SVG, Mermaid, markdown rendu libre, widget libre, renderPayload, imageUrl, assetUrl, canvas, code, formula, expression, rawFormula, calculationCode, script ou markup.',
+    'Tu ne dois jamais inclure de semanticLabel ni answerHint dans une question générée.',
+    'Tu ne dois jamais inclure de modelAnswer, answerText, freeTextAnswer, textAnswer, HTML, SVG, Mermaid, markdown rendu libre, widget libre, renderPayload, imageUrl, assetUrl, url, remoteUrl, src, href, storagePath, bucketPath, cdnUrl, base64, dataUri, blob, rawImage, assetPath, canvas, code, formula, expression, rawFormula, calculationCode, script ou markup.',
     'Tu ne dois jamais produire de widget libre.',
     'Tu ne dois jamais produire un diagramme sous forme de code, balisage, HTML, SVG, Mermaid, Canvas, image URL ou widget libre.',
-    'Tu ne dois jamais produire true_false, image_choice, fill_blank_dropdown, widget libre, ni aucun type V1-022 ou suivant.',
-    'Types V1-022+ interdits: image_choice, fill_blank_dropdown.',
+    'Tu ne dois jamais produire true_false, fill_blank_dropdown, widget libre, ni aucun type V1-023 ou suivant.',
+    'Types V1-023+ interdits: fill_blank_dropdown.',
     'Tu dois retourner un JSON object only: un objet JSON brut, sans Markdown, sans code fences, sans texte avant ou après.',
     'Aucun champ additionnel n’est autorisé.',
     `cognitiveSkill autorisés: ${RICH_CLOSED_COGNITIVE_SKILLS.join(', ')}`,
@@ -890,6 +930,7 @@ function buildRichClosedPrompt(input: {
     'Clés exactes institution_matrix: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, rows, columns, cells, correctValues, explanation.',
     'Clés exactes diagram_labeling: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, diagram, slots, correctValues, explanation.',
     'Clés exactes calculation_mcq: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, scenario, calculation, choices, correctChoiceId, explanation.',
+    'Clés exactes image_choice: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, instruction optionnel, choices, correctChoiceId, explanation. Chaque choice contient seulement id, label, imageAssetId, altText, caption optionnel, creditLabel optionnel, license optionnel.',
     'Clés exactes calculation absolute_majority_threshold: mode, validVotes.',
     'Clés exactes calculation largest_remainder_target_party_seats: mode, totalSeats, targetPartyId, parties; chaque party a id, label, votes.',
     'Clés exactes case_qualification: id, questionKind, prompt, difficulty, cognitiveSkill, sourceChunkIds, caseText, choices, correctChoiceId, explanation.',
@@ -928,11 +969,25 @@ function buildRichClosedRepairPrompt(input: {
     '- institution_matrix: rows (2 à 5), columns (2 à 5), cells (3 à 12 idéalement), options fermées par cellule, correctValues complets, explanation.',
     '- diagram_labeling: diagram sémantique (2 à 8 nodes, 0 à 12 edges), slots (2 à 8) ancrés à des nodes/edges existants, options fermées par slot, correctValues complets, explanation, sans HTML/SVG/Mermaid/widget.',
     '- calculation_mcq: scenario, calculation en mode absolute_majority_threshold ou largest_remainder_target_party_seats, choices avec value uniques, correctChoiceId, explanation, sans formule libre, sans D’Hondt, sans code.',
+    '- image_choice: choices (2 à 6) avec imageAssetId du catalogue contrôlé, altText public exact, label/caption neutres qui ne recopient pas semanticLabel, correctChoiceId, explanation, sans URL, image générée, base64, blob, storagePath, semanticLabel ni widget.',
     '- case_qualification: caseText, choices, correctChoiceId, explanation.',
     '- error_detection: statement, errorOptions, correctErrorId, explanation.',
     'Tu dois respecter le nombre exact de questions, le mix exact, et uniquement les sourceChunkIds autorisés.',
     buildRichClosedPrompt(input),
   ].join('\n\n');
+}
+
+function formatImageAssetCatalogForPrompt(): string {
+  return JSON.stringify(
+    RICH_CLOSED_IMAGE_ASSETS.map((asset) => ({
+      id: asset.id,
+      kind: asset.kind,
+      semanticLabel: asset.semanticLabel,
+      publicAltText: asset.publicAltText,
+      creditLabel: asset.creditLabel ?? null,
+      license: asset.license,
+    })),
+  );
 }
 
 function toPromptPayload(

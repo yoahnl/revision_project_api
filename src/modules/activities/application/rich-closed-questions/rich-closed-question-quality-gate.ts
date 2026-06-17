@@ -315,6 +315,8 @@ function isPrivatePublicPayloadKey(key: string): boolean {
     key === 'answersPayload' ||
     key === 'expectedAnswer' ||
     key === 'expectedAnswers' ||
+    key === 'semanticLabel' ||
+    key === 'answerHint' ||
     isForbiddenRenderPublicPayloadKey(key)
   );
 }
@@ -340,6 +342,18 @@ function isForbiddenRenderPublicPayloadKey(key: string): boolean {
     'python',
     'imageUrl',
     'assetUrl',
+    'url',
+    'remoteUrl',
+    'src',
+    'href',
+    'storagePath',
+    'bucketPath',
+    'cdnUrl',
+    'base64',
+    'dataUri',
+    'blob',
+    'rawImage',
+    'assetPath',
     'canvas',
     'code',
     'markup',

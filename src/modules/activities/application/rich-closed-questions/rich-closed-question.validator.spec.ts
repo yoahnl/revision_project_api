@@ -11,6 +11,7 @@ import {
   richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
+  richClosedV1DImageChoiceExerciseFixture,
 } from './rich-closed-question.fixtures';
 import type { RichClosedQuestion } from './rich-closed-question.types';
 
@@ -29,6 +30,7 @@ describe('rich closed question validator', () => {
     'institution_matrix',
     'diagram_labeling',
     'calculation_mcq',
+    'image_choice',
   ] as const)('accepts a valid rich closed %s question', (questionKind) => {
     const result = validateRichClosedQuestion(
       richClosedQuestionFixture(questionKind),
@@ -42,7 +44,7 @@ describe('rich closed question validator', () => {
   it('rejects a kind outside the rich closed allowlist', () => {
     const question = {
       ...richClosedQuestionFixture('single_choice'),
-      questionKind: 'image_choice',
+      questionKind: 'fill_blank_dropdown',
     } as unknown as RichClosedQuestion;
 
     const result = validateRichClosedQuestion(question);
@@ -77,6 +79,18 @@ describe('rich closed question validator', () => {
   it('accepts a valid V1-C calculation exercise fixture', () => {
     const result = validateRichClosedExercise(
       richClosedV1CCalculationExerciseFixture(),
+      {
+        knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
+      },
+    );
+
+    expect(result.accepted).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it('accepts a valid V1-D image choice exercise fixture', () => {
+    const result = validateRichClosedExercise(
+      richClosedV1DImageChoiceExerciseFixture(),
       {
         knownSourceChunkIds: ['chunk-1', 'chunk-2', 'chunk-3'],
       },
@@ -1115,6 +1129,183 @@ describe('rich closed question validator', () => {
       expect.objectContaining({
         code: 'RICH_CLOSED_RENDER_PAYLOAD_FORBIDDEN',
       }),
+    );
+  });
+
+  it.each([
+    ['choices', []],
+    [
+      'choices',
+      [
+        {
+          id: 'choice-image-a',
+          label: 'Image A',
+          imageAssetId: 'image-choice-historical-figure-001-v1',
+          altText:
+            'Portrait historique en noir et blanc d’un homme en uniforme.',
+        },
+      ],
+    ],
+    [
+      'choices',
+      [
+        {
+          id: 'choice-a',
+          label: 'Image A',
+          imageAssetId: 'image-choice-historical-figure-001-v1',
+          altText:
+            'Portrait historique en noir et blanc d’un homme en uniforme.',
+        },
+        {
+          id: 'choice-a',
+          label: 'Image B',
+          imageAssetId: 'image-choice-historical-figure-002-v1',
+          altText: 'Portrait peint d’un homme en tenue impériale.',
+        },
+      ],
+    ],
+  ] as const)('rejects invalid image_choice %s contract', (field, value) => {
+    const question = {
+      ...richClosedQuestionFixture('image_choice'),
+      [field]: value,
+    };
+
+    const result = validateRichClosedQuestion(question);
+
+    expect(result.accepted).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: 'RICH_CLOSED_IMAGE_CHOICE_INVALID' }),
+    );
+  });
+
+  it.each([
+    {
+      name: 'unknown asset id',
+      mutate: (
+        question: Extract<RichClosedQuestion, { questionKind: 'image_choice' }>,
+      ) => ({
+        ...question,
+        choices: [
+          { ...question.choices[0], imageAssetId: 'unknown-asset' },
+          question.choices[1],
+        ],
+      }),
+    },
+    {
+      name: 'duplicate asset ids',
+      mutate: (
+        question: Extract<RichClosedQuestion, { questionKind: 'image_choice' }>,
+      ) => ({
+        ...question,
+        choices: [
+          question.choices[0],
+          {
+            ...question.choices[1],
+            imageAssetId: question.choices[0].imageAssetId,
+            altText: question.choices[0].altText,
+          },
+        ],
+      }),
+    },
+    {
+      name: 'empty alt text',
+      mutate: (
+        question: Extract<RichClosedQuestion, { questionKind: 'image_choice' }>,
+      ) => ({
+        ...question,
+        choices: [{ ...question.choices[0], altText: '' }, question.choices[1]],
+      }),
+    },
+    {
+      name: 'alt text different from catalog',
+      mutate: (
+        question: Extract<RichClosedQuestion, { questionKind: 'image_choice' }>,
+      ) => ({
+        ...question,
+        choices: [
+          { ...question.choices[0], altText: 'Portrait de Charles de Gaulle' },
+          question.choices[1],
+        ],
+      }),
+    },
+    {
+      name: 'public label revealing semantic label',
+      mutate: (
+        question: Extract<RichClosedQuestion, { questionKind: 'image_choice' }>,
+      ) => ({
+        ...question,
+        choices: [
+          { ...question.choices[0], label: 'Charles de Gaulle' },
+          question.choices[1],
+          question.choices[2],
+        ],
+      }),
+    },
+    {
+      name: 'public caption revealing semantic label',
+      mutate: (
+        question: Extract<RichClosedQuestion, { questionKind: 'image_choice' }>,
+      ) => ({
+        ...question,
+        choices: [
+          question.choices[0],
+          question.choices[1],
+          { ...question.choices[2], caption: 'Simone Veil' },
+        ],
+      }),
+    },
+    {
+      name: 'unknown correctChoiceId',
+      mutate: (
+        question: Extract<RichClosedQuestion, { questionKind: 'image_choice' }>,
+      ) => ({
+        ...question,
+        correctChoiceId: 'unknown-choice',
+      }),
+    },
+  ])('rejects image_choice with $name', ({ mutate }) => {
+    const question = mutate(
+      richClosedQuestionFixture('image_choice') as Extract<
+        RichClosedQuestion,
+        { questionKind: 'image_choice' }
+      >,
+    );
+
+    const result = validateRichClosedQuestion(question);
+
+    expect(result.accepted).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: 'RICH_CLOSED_IMAGE_CHOICE_INVALID' }),
+    );
+  });
+
+  it.each([
+    'imageUrl',
+    'url',
+    'remoteUrl',
+    'src',
+    'href',
+    'storagePath',
+    'bucketPath',
+    'cdnUrl',
+    'base64',
+    'dataUri',
+    'blob',
+    'rawImage',
+    'renderPayload',
+    'semanticLabel',
+    'answerHint',
+  ] as const)('rejects image_choice carrying forbidden field %s', (field) => {
+    const question = {
+      ...richClosedQuestionFixture('image_choice'),
+      [field]: field === 'renderPayload' ? { widget: 'free' } : 'forbidden',
+    };
+
+    const result = validateRichClosedQuestion(question);
+
+    expect(result.accepted).toBe(false);
+    expect(result.issues).toContainEqual(
+      expect.objectContaining({ code: 'RICH_CLOSED_RENDER_PAYLOAD_FORBIDDEN' }),
     );
   });
 

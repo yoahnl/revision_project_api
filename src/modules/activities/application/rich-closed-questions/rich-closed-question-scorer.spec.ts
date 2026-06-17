@@ -6,6 +6,7 @@ import {
   richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
+  richClosedV1DImageChoiceExerciseFixture,
 } from './rich-closed-question.fixtures';
 import { scoreRichClosedExerciseSubmission } from './rich-closed-question-scorer';
 import type {
@@ -956,6 +957,84 @@ describe('scoreRichClosedExerciseSubmission', () => {
     );
   });
 
+  it('scores image_choice V1-D answers', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1DImageChoiceExerciseFixture(),
+      answers: correctAnswersV1DImageChoice(),
+    });
+
+    expect(result).toMatchObject({
+      correctAnswers: 14,
+      totalQuestions: 14,
+      score: 1,
+    });
+    expect(
+      result.items.find((item) => item.questionId === 'image-choice-1'),
+    ).toMatchObject({
+      isCorrect: true,
+      correction: {
+        correctChoiceId: 'choice-image-a',
+      },
+    });
+  });
+
+  it('marks a wrong image_choice choice as incorrect without partial scoring', () => {
+    const result = scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1DImageChoiceExerciseFixture(),
+      answers: replaceV1DImageChoiceAnswer({
+        questionId: 'image-choice-1',
+        questionKind: 'image_choice',
+        choiceId: 'choice-image-b',
+      }),
+    });
+
+    expect(
+      result.items.find((item) => item.questionId === 'image-choice-1'),
+    ).toMatchObject({
+      isCorrect: false,
+      partialScore: 0,
+      correction: {
+        correctChoiceId: 'choice-image-a',
+      },
+    });
+  });
+
+  it('rejects unknown and private-field image_choice answers', () => {
+    expectInvalidV1DImageChoice(
+      replaceV1DImageChoiceAnswer({
+        questionId: 'image-choice-1',
+        questionKind: 'image_choice',
+        choiceId: 'unknown-choice',
+      }),
+    );
+    expectInvalidV1DImageChoice(
+      replaceV1DImageChoiceAnswer({
+        questionId: 'image-choice-1',
+        questionKind: 'image_choice',
+        choiceId: 'choice-image-a',
+        imageUrl: 'https://example.test/image.png',
+      }),
+    );
+    expectInvalidV1DImageChoice(
+      replaceV1DImageChoiceAnswer({
+        questionId: 'image-choice-1',
+        questionKind: 'image_choice',
+        choiceId: 'choice-image-a',
+        blob: 'blob://unsafe',
+      }),
+    );
+    expectInvalidV1DImageChoice(
+      replaceV1DImageChoiceAnswer({
+        questionId: 'image-choice-1',
+        questionKind: 'image_choice',
+        choiceId: 'choice-image-a',
+        renderPayload: { widget: 'free-form' },
+      }),
+    );
+  });
+
   it('rejects incomplete ordering answers', () => {
     expect(() =>
       scoreRichClosedExerciseSubmission({
@@ -1143,6 +1222,16 @@ function expectInvalidV1CCalculation(answers: unknown[]) {
   ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
 }
 
+function expectInvalidV1DImageChoice(answers: unknown[]) {
+  expect(() =>
+    scoreRichClosedExerciseSubmission({
+      sessionId: 'session-1',
+      exercise: richClosedV1DImageChoiceExerciseFixture(),
+      answers,
+    }),
+  ).toThrow(RICH_CLOSED_SUBMIT_INVALID_INPUT);
+}
+
 function replaceAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return correctAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
@@ -1195,6 +1284,17 @@ function replaceV1CCalculationAnswer(answer: unknown): unknown[] {
       : {};
 
   return correctAnswersV1CCalculation().map((currentAnswer) =>
+    currentAnswer.questionId === record.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceV1DImageChoiceAnswer(answer: unknown): unknown[] {
+  const record =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { questionId?: unknown })
+      : {};
+
+  return correctAnswersV1DImageChoice().map((currentAnswer) =>
     currentAnswer.questionId === record.questionId ? answer : currentAnswer,
   );
 }
@@ -1333,6 +1433,17 @@ function correctAnswersV1CCalculation(): RichClosedAnswer[] {
       questionId: 'calculation-mcq-majority-1',
       questionKind: 'calculation_mcq',
       choiceId: 'choice-289',
+    },
+  ];
+}
+
+function correctAnswersV1DImageChoice(): RichClosedAnswer[] {
+  return [
+    ...correctAnswersV1CCalculation(),
+    {
+      questionId: 'image-choice-1',
+      questionKind: 'image_choice',
+      choiceId: 'choice-image-a',
     },
   ];
 }

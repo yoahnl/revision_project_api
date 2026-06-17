@@ -17,6 +17,7 @@ import {
   richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
+  richClosedV1DImageChoiceExerciseFixture,
 } from '../src/modules/activities/application/rich-closed-questions/rich-closed-question.fixtures';
 import { GetRichClosedExerciseResultUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise-result.use-case';
 import { GetRichClosedExerciseUseCase } from '../src/modules/activities/application/rich-closed-questions/get-rich-closed-exercise.use-case';
@@ -1353,6 +1354,155 @@ describe('Critical demo paths (e2e)', () => {
         .expect(400);
     });
 
+    it('routes rich closed V1-D image choice without image asset leaks', async () => {
+      const server = app.getHttpServer();
+      const questionTypeMix = {
+        single_choice: 1,
+        multiple_choice: 1,
+        matching: 1,
+        ordering: 1,
+        case_qualification: 1,
+        error_detection: 1,
+        timeline: 1,
+        date_slider: 1,
+        true_false_grid: 1,
+        cause_consequence: 1,
+        institution_matrix: 1,
+        diagram_labeling: 1,
+        calculation_mcq: 1,
+        image_choice: 1,
+      };
+      mocks.startRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1DImageChoicePublicExercise(),
+      );
+      mocks.getRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1DImageChoicePublicExercise(),
+      );
+      mocks.submitRichClosedExercise.execute.mockResolvedValueOnce(
+        richClosedV1DImageChoiceResult(),
+      );
+      mocks.getRichClosedExerciseResult.execute.mockResolvedValueOnce(
+        richClosedV1DImageChoiceResult(),
+      );
+
+      const startResponse = await request(server)
+        .post('/activities/rich-closed/start')
+        .send({
+          subjectId: 'subject-1',
+          knowledgeUnitId: 'unit-1',
+          questionCount: 14,
+          questionTypeMix,
+        })
+        .expect(201);
+      const startBody = startResponse.body as {
+        questions: Array<{ questionKind: RichClosedQuestionKind }>;
+        [key: string]: unknown;
+      };
+
+      expect(mocks.startRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        subjectId: 'subject-1',
+        documentId: undefined,
+        knowledgeUnitId: 'unit-1',
+        questionCount: 14,
+        complexityProfile: 'exam',
+        questionTypeMix,
+      });
+      expect(
+        startBody.questions.map((question) => question.questionKind),
+      ).toContain('image_choice');
+      assertNoSensitivePreSubmitFields(startBody);
+      expect(JSON.stringify(startBody)).toContain(
+        'image-choice-historical-figure-001-v1',
+      );
+      expect(JSON.stringify(startBody)).toContain('altText');
+      expect(JSON.stringify(startBody)).toContain('internal_placeholder');
+      expect(JSON.stringify(startBody)).not.toContain('correctChoiceId');
+      expect(JSON.stringify(startBody)).not.toContain('semanticLabel');
+      expect(JSON.stringify(startBody)).not.toContain('answerHint');
+      expect(JSON.stringify(startBody)).not.toContain('imageUrl');
+      expect(JSON.stringify(startBody)).not.toContain('base64');
+      expect(JSON.stringify(startBody)).not.toContain('blob');
+      expect(JSON.stringify(startBody)).not.toContain('storagePath');
+      expect(JSON.stringify(startBody)).not.toContain('de-gaulle');
+      expect(JSON.stringify(startBody)).not.toContain('napoleon');
+      expect(JSON.stringify(startBody)).not.toContain('simone');
+
+      const getResponse = await request(server)
+        .get('/activities/rich-closed/rich-session-v1d-image-choice')
+        .expect(200);
+      assertNoSensitivePreSubmitFields(getResponse.body);
+      expect(JSON.stringify(getResponse.body)).not.toContain('de-gaulle');
+      expect(JSON.stringify(getResponse.body)).not.toContain('napoleon');
+      expect(JSON.stringify(getResponse.body)).not.toContain('simone');
+
+      const submitResponse = await request(server)
+        .post('/activities/rich-closed/rich-session-v1d-image-choice/submit')
+        .send({ answers: richClosedV1DImageChoiceAnswers() })
+        .expect(201);
+
+      expect(mocks.submitRichClosedExercise.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'rich-session-v1d-image-choice',
+        answers: richClosedV1DImageChoiceAnswers(),
+      });
+      expect(submitResponse.body).toMatchObject({
+        correctAnswers: 14,
+        totalQuestions: 14,
+        score: 1,
+      });
+      expect(JSON.stringify(submitResponse.body)).toContain('correctChoiceId');
+      expect(JSON.stringify(submitResponse.body)).not.toContain('imageUrl');
+      expect(JSON.stringify(submitResponse.body)).not.toContain('base64');
+
+      const resultResponse = await request(server)
+        .get('/activities/rich-closed/rich-session-v1d-image-choice/result')
+        .expect(200);
+      expect(resultResponse.body).toMatchObject({
+        status: 'completed',
+        correctAnswers: 14,
+        totalQuestions: 14,
+      });
+
+      await request(server)
+        .post('/activities/rich-closed/rich-session-v1d-image-choice/submit')
+        .send({
+          answers: replaceRichClosedV1DImageChoiceAnswer({
+            questionId: 'image-choice-1',
+            questionKind: 'image_choice',
+            choiceId: 42,
+          }),
+        })
+        .expect(400);
+
+      await request(server)
+        .post('/activities/rich-closed/rich-session-v1d-image-choice/submit')
+        .send({
+          answers: replaceRichClosedV1DImageChoiceAnswer({
+            questionId: 'image-choice-1',
+            questionKind: 'image_choice',
+            choiceId: 'choice-image-a',
+            imageUrl: 'https://example.invalid/image.png',
+            blob: 'blob://unsafe',
+          }),
+        })
+        .expect(400);
+
+      mocks.submitRichClosedExercise.execute.mockRejectedValueOnce(
+        new Error('RICH_CLOSED_SUBMIT_INVALID_INPUT'),
+      );
+      await request(server)
+        .post('/activities/rich-closed/rich-session-v1d-image-choice/submit')
+        .send({
+          answers: replaceRichClosedV1DImageChoiceAnswer({
+            questionId: 'image-choice-1',
+            questionKind: 'image_choice',
+            choiceId: 'unknown-choice',
+          }),
+        })
+        .expect(400);
+    });
+
     it('validates and maps rich closed errors', async () => {
       const server = app.getHttpServer();
 
@@ -2018,6 +2168,13 @@ function richClosedV1CCalculationPublicExercise() {
   });
 }
 
+function richClosedV1DImageChoicePublicExercise() {
+  return toRichClosedPublicExerciseEnvelope({
+    sessionId: 'rich-session-v1d-image-choice',
+    exercise: richClosedV1DImageChoiceExerciseFixture(),
+  });
+}
+
 function richClosedResult() {
   return scoreRichClosedExerciseSubmission({
     sessionId: 'rich-session-1',
@@ -2063,6 +2220,14 @@ function richClosedV1CCalculationResult() {
     sessionId: 'rich-session-v1c-calculation',
     exercise: richClosedV1CCalculationExerciseFixture(),
     answers: richClosedV1CCalculationAnswers(),
+  });
+}
+
+function richClosedV1DImageChoiceResult() {
+  return scoreRichClosedExerciseSubmission({
+    sessionId: 'rich-session-v1d-image-choice',
+    exercise: richClosedV1DImageChoiceExerciseFixture(),
+    answers: richClosedV1DImageChoiceAnswers(),
   });
 }
 
@@ -2204,6 +2369,17 @@ function richClosedV1CCalculationAnswers(): RichClosedAnswer[] {
   ];
 }
 
+function richClosedV1DImageChoiceAnswers(): RichClosedAnswer[] {
+  return [
+    ...richClosedV1CCalculationAnswers(),
+    {
+      questionId: 'image-choice-1',
+      questionKind: 'image_choice',
+      choiceId: 'choice-image-a',
+    },
+  ];
+}
+
 function replaceRichClosedAnswer(answer: RichClosedAnswer): RichClosedAnswer[] {
   return richClosedAnswers().map((currentAnswer) =>
     currentAnswer.questionId === answer.questionId ? answer : currentAnswer,
@@ -2258,6 +2434,17 @@ function replaceRichClosedV1CCalculationAnswer(answer: unknown): unknown[] {
       : {};
 
   return richClosedV1CCalculationAnswers().map((currentAnswer) =>
+    currentAnswer.questionId === record.questionId ? answer : currentAnswer,
+  );
+}
+
+function replaceRichClosedV1DImageChoiceAnswer(answer: unknown): unknown[] {
+  const record =
+    typeof answer === 'object' && answer !== null
+      ? (answer as { questionId?: unknown })
+      : {};
+
+  return richClosedV1DImageChoiceAnswers().map((currentAnswer) =>
     currentAnswer.questionId === record.questionId ? answer : currentAnswer,
   );
 }
@@ -2359,6 +2546,8 @@ const forbiddenPreSubmitFields = new Set([
   'expectedValue',
   'workedSteps',
   'answersPayload',
+  'semanticLabel',
+  'answerHint',
   'storagePath',
   'promptVersion',
   'completion',
@@ -2381,6 +2570,17 @@ const forbiddenPreSubmitFields = new Set([
   'python',
   'imageUrl',
   'assetUrl',
+  'url',
+  'remoteUrl',
+  'src',
+  'href',
+  'bucketPath',
+  'cdnUrl',
+  'base64',
+  'dataUri',
+  'blob',
+  'rawImage',
+  'assetPath',
   'canvas',
   'code',
   'markup',

@@ -10,8 +10,12 @@ import {
   richClosedV1CCalculationExerciseFixture,
   richClosedV1CExerciseFixture,
   richClosedV1CFullExerciseFixture,
+  richClosedV1DImageChoiceExerciseFixture,
 } from './rich-closed-question.fixtures';
-import type { RichClosedCalculationMcqQuestion } from './rich-closed-question.types';
+import type {
+  RichClosedCalculationMcqQuestion,
+  RichClosedImageChoiceQuestion,
+} from './rich-closed-question.types';
 
 describe('rich closed question public mapper', () => {
   it.each([
@@ -28,6 +32,7 @@ describe('rich closed question public mapper', () => {
     'institution_matrix',
     'diagram_labeling',
     'calculation_mcq',
+    'image_choice',
   ] as const)('maps %s without leaking correction fields', (questionKind) => {
     const publicQuestion = toRichClosedPublicQuestion(
       richClosedQuestionFixture(questionKind),
@@ -49,6 +54,10 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('rawSvg');
     expect(serialized).not.toContain('mermaid');
     expect(serialized).not.toContain('renderPayload');
+    expect(serialized).not.toContain('semanticLabel');
+    expect(serialized).not.toContain('imageUrl');
+    expect(serialized).not.toContain('storagePath');
+    expect(serialized).not.toContain('base64');
   });
 
   it('maps a full exercise without leaking private correction data', () => {
@@ -251,6 +260,73 @@ describe('rich closed question public mapper', () => {
     expect(serialized).not.toContain('expression');
     expect(serialized).not.toContain('renderPayload');
     expect(serialized).not.toContain('widget');
+  });
+
+  it('maps a V1-D image choice exercise without leaking private image data', () => {
+    const publicExercise = toRichClosedPublicExercise(
+      richClosedV1DImageChoiceExerciseFixture(),
+    );
+    const serialized = JSON.stringify(publicExercise);
+
+    expect(publicExercise.questions).toHaveLength(14);
+    expect(
+      publicExercise.questions.map((question) => question.questionKind),
+    ).toContain('image_choice');
+    expect(serialized).toContain('imageAssetId');
+    expect(serialized).toContain('altText');
+    expect(serialized).toContain('internal_placeholder');
+    expect(serialized).not.toContain('correctChoiceId');
+    expect(serialized).not.toContain('semanticLabel');
+    expect(serialized).not.toContain('answerHint');
+    expect(serialized).not.toContain('imageUrl');
+    expect(serialized).not.toContain('url');
+    expect(serialized).not.toContain('storagePath');
+    expect(serialized).not.toContain('base64');
+    expect(serialized).not.toContain('blob');
+    expect(serialized).not.toContain('renderPayload');
+    expect(serialized).not.toContain('de-gaulle');
+    expect(serialized).not.toContain('napoleon');
+    expect(serialized).not.toContain('simone');
+    expect(serialized).not.toContain('explanation');
+    expect(serialized).not.toContain('score');
+  });
+
+  it('allowlists nested image choice fields before submit', () => {
+    const fixture = richClosedQuestionFixture(
+      'image_choice',
+    ) as RichClosedImageChoiceQuestion;
+    const choices = fixture.choices.map((choice) => ({
+      ...choice,
+      correctChoiceId: 'choice-correction-leak',
+      semanticLabel: 'Charles de Gaulle',
+      answerHint: 'appel du 18 juin',
+      imageUrl: 'https://example.test/image.png',
+      storagePath: 'gs://bucket/image.png',
+      base64: 'iVBORw0KGgo=',
+      blob: 'blob://unsafe',
+      renderPayload: { widget: 'free' },
+      feedback: 'private feedback',
+    })) as RichClosedImageChoiceQuestion['choices'];
+    const question: RichClosedImageChoiceQuestion = {
+      ...fixture,
+      choices,
+    };
+
+    const publicQuestion = toRichClosedPublicQuestion(question);
+    const serialized = JSON.stringify(publicQuestion);
+
+    expect(serialized).toContain('imageAssetId');
+    expect(serialized).toContain('altText');
+    expect(serialized).toContain('Asset de démonstration contrôlé');
+    expect(serialized).not.toContain('choice-correction-leak');
+    expect(serialized).not.toContain('semanticLabel');
+    expect(serialized).not.toContain('answerHint');
+    expect(serialized).not.toContain('imageUrl');
+    expect(serialized).not.toContain('storagePath');
+    expect(serialized).not.toContain('base64');
+    expect(serialized).not.toContain('blob');
+    expect(serialized).not.toContain('renderPayload');
+    expect(serialized).not.toContain('feedback');
   });
 
   it('removes internal choice feedback from public choice payloads', () => {

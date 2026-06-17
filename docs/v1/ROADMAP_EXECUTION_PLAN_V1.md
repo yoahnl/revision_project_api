@@ -15,6 +15,7 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 | V1-019  | Institution matrix V1-C                    | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_019_INSTITUTION_MATRIX.md                          |
 | V1-020  | Diagram labeling V1-C                      | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_020_DIAGRAM_LABELING.md                            |
 | V1-021  | Calculation MCQ modes de scrutin V1-C      | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_021_CALCULATION_MCQ.md                             |
+| V1-022  | Image choice/personnages historiques V1-D  | Réalisé | docs/v1/ROADMAP_EXECUTION_LOT_V1_022_IMAGE_CHOICE.md                                |
 
 ## Lots détaillés
 
@@ -105,3 +106,11 @@ Ce fichier existe côté API pour les lots backend V1 dont le prompt interdit to
 - Périmètre inclus : contrat backend, validation stricte des deux modes autorisés, recalcul déterministe backend, mapper public anti-fuite, parsing submit, scoring full-correct, correction post-submit, Genkit mockable, fixture V1-C calculation dédiée, smoke E2E.
 - Non-objectifs : V1-022, `image_choice`, `fill_blank_dropdown`, formule libre, eval/Function/parser d'expression, D'Hondt, Sainte-Laguë, seuils électoraux, votes blancs/nuls, provider IA réel, migration Prisma.
 - Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_021_CALCULATION_MCQ.md`.
+
+### V1-022 — Image choice/personnages historiques V1-D
+
+- Objectif : ajouter le type rich closed fermé `image_choice`.
+- Pourquoi maintenant : V1-021 a stabilisé les QCM calculés; on peut ouvrir un choix d'image borné sans URL distante ni widget libre.
+- Périmètre inclus : catalogue contrôlé d'assets image, contrat backend, validation stricte des choix et IDs allowlistés, mapper public anti-fuite, parsing submit, scoring full-correct, correction post-submit, Genkit mockable, fixture V1-D dédiée, smoke E2E.
+- Non-objectifs : V1-023, `fill_blank_dropdown`, upload d'images, URL distante, base64, storage path, rendu libre, provider IA réel, migration Prisma.
+- Rapport attendu : `docs/v1/ROADMAP_EXECUTION_LOT_V1_022_IMAGE_CHOICE.md`.

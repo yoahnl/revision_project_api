@@ -5,6 +5,7 @@ import {
   type RichClosedCognitiveSkill,
   type RichClosedQuestionKind,
 } from './rich-closed-question.types';
+import { getRichClosedImageAsset } from './rich-closed-image-assets';
 
 type RichClosedBaseQuestionFields<K extends RichClosedQuestionKind> = Pick<
   Extract<RichClosedQuestion, { questionKind: K }>,
@@ -98,6 +99,20 @@ export function richClosedV1CCalculationExerciseFixture(): RichClosedExercise {
     questions: [
       ...v1cFullFixture.questions,
       richClosedQuestionFixture('calculation_mcq'),
+    ],
+  };
+}
+
+export function richClosedV1DImageChoiceExerciseFixture(): RichClosedExercise {
+  const v1cCalculationFixture = richClosedV1CCalculationExerciseFixture();
+
+  return {
+    ...v1cCalculationFixture,
+    id: 'rich-exercise-v1d-image-choice-1',
+    title: 'Droit constitutionnel - exercice riche fermé V1-D image',
+    questions: [
+      ...v1cCalculationFixture.questions,
+      richClosedQuestionFixture('image_choice'),
     ],
   };
 }
@@ -538,6 +553,8 @@ export function richClosedQuestionFixture(
       };
     case 'calculation_mcq':
       return richClosedCalculationMcqAbsoluteMajorityFixture();
+    case 'image_choice':
+      return richClosedImageChoiceFixture();
     case 'case_qualification':
       return {
         ...baseQuestion('case-1', 'case_qualification'),
@@ -569,6 +586,54 @@ export function richClosedQuestionFixture(
           'La responsabilité politique du gouvernement devant le Parlement est le critère du parlementarisme.',
       };
   }
+}
+
+export function richClosedImageChoiceFixture(): Extract<
+  RichClosedQuestion,
+  { questionKind: 'image_choice' }
+> {
+  const assetA = readFixtureImageAsset('image-choice-historical-figure-001-v1');
+  const assetB = readFixtureImageAsset('image-choice-historical-figure-002-v1');
+  const assetC = readFixtureImageAsset('image-choice-historical-figure-003-v1');
+
+  return {
+    ...baseQuestion('image-choice-1', 'image_choice'),
+    prompt:
+      'Quel portrait correspond au personnage associé à l’appel du 18 juin ?',
+    instruction:
+      'Choisis uniquement parmi les images du catalogue contrôlé, sans réponse libre.',
+    choices: [
+      {
+        id: 'choice-image-a',
+        label: 'Image A',
+        imageAssetId: assetA.id,
+        altText: assetA.publicAltText,
+        caption: 'Portrait historique A',
+        creditLabel: assetA.creditLabel,
+        license: assetA.license,
+      },
+      {
+        id: 'choice-image-b',
+        label: 'Image B',
+        imageAssetId: assetB.id,
+        altText: assetB.publicAltText,
+        caption: 'Portrait historique B',
+        creditLabel: assetB.creditLabel,
+        license: assetB.license,
+      },
+      {
+        id: 'choice-image-c',
+        label: 'Image C',
+        imageAssetId: assetC.id,
+        altText: assetC.publicAltText,
+        caption: 'Portrait historique C',
+        creditLabel: assetC.creditLabel,
+        license: assetC.license,
+      },
+    ],
+    correctChoiceId: 'choice-image-a',
+    explanation: 'L’appel du 18 juin 1940 est associé à Charles de Gaulle.',
+  };
 }
 
 export function richClosedCalculationMcqAbsoluteMajorityFixture(): Extract<
@@ -652,6 +717,8 @@ function baseQuestion<K extends RichClosedQuestionKind>(
         return 'comparison';
       case 'diagram_labeling':
         return 'classification';
+      case 'image_choice':
+        return 'memorization';
       default:
         return 'case_application';
     }
@@ -664,4 +731,14 @@ function baseQuestion<K extends RichClosedQuestionKind>(
     cognitiveSkill,
     sourceChunkIds: ['chunk-1'],
   } as RichClosedBaseQuestionFields<K>;
+}
+
+function readFixtureImageAsset(id: string) {
+  const asset = getRichClosedImageAsset(id);
+
+  if (asset === null) {
+    throw new Error(`Missing fixture image asset ${id}`);
+  }
+
+  return asset;
 }
