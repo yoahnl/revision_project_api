@@ -9,18 +9,28 @@ import {
   NotFoundException,
   Param,
   Post,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import type { AuthenticatedStudent } from '../../auth/interfaces/authenticated-student';
+import {
+  MAX_DOCUMENT_BYTES,
+  type UploadedCoursePdfFile,
+  validateCoursePdfFile,
+} from '../../documents/interfaces/course-pdf-upload.validator';
 import { CreateCourseUseCase } from '../application/create-course.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
+import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CourseContainsDocumentsError } from '../domain/course.entity';
 import type { CreateCourseRequest } from './create-course.request';
 import {
+  toCourseDocumentResponse,
   toCourseDetailResponse,
   toCourseListItemResponse,
 } from './course-response.dto';
@@ -38,6 +48,7 @@ export class CoursesController {
     private readonly listCourses: ListSubjectCoursesWithStatsUseCase,
     private readonly getCourseDetail: GetCourseDetailUseCase,
     private readonly deleteCourseUseCase: DeleteCourseUseCase,
+    private readonly uploadCoursePdfForCourseUseCase: UploadCoursePdfForCourseUseCase,
   ) {}
 
   @Get('subjects/:subjectId/courses')
@@ -114,6 +125,35 @@ export class CoursesController {
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
       })
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/source/course-pdf')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: MAX_DOCUMENT_BYTES },
+    }),
+  )
+  uploadCoursePdfForCourse(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @UploadedFile() file: UploadedCoursePdfFile | undefined,
+    @Body() body: Record<string, unknown> = {},
+  ) {
+    rejectClientOwnedUploadFields(body);
+
+    const validatedFile = validateCoursePdfFile(file);
+
+    return this.uploadCoursePdfForCourseUseCase
+      .execute({
+        studentId: student.id,
+        firebaseUid: student.firebaseUid,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        originalFileName: validatedFile.originalFileName,
+        content: validatedFile.content,
+        mimeType: validatedFile.mimeType,
+      })
+      .then(toCourseDocumentResponse)
       .catch(normalizeCourseError);
   }
 }
@@ -204,6 +244,14 @@ function normalizeEstimatedMinutes(value: unknown) {
   }
 
   return value;
+}
+
+function rejectClientOwnedUploadFields(body: Record<string, unknown> = {}) {
+  if ('studentId' in body || 'subjectId' in body || 'courseId' in body) {
+    throw new BadRequestException(
+      'Course upload only accepts the multipart file field',
+    );
+  }
 }
 
 function normalizeCourseError(error: unknown): never {

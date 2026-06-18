@@ -17,12 +17,15 @@ type DocumentRecord = {
   id: string;
   studentId: string;
   subjectId: string;
+  courseId: string | null;
   kind: DocumentKind;
   fileName: string;
   storagePath: string;
   mimeType: string;
   status: DocumentStatus;
   errorCode: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 type DocumentChunkRecord = {
@@ -44,6 +47,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
   async create(input: {
     studentId: string;
     subjectId: string;
+    courseId?: string | null;
     kind: DocumentKind;
     fileName: string;
     storagePath: string;
@@ -76,6 +80,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
         data: {
           studentId: document.studentId,
           subjectId: document.subjectId,
+          courseId: input.courseId ?? null,
           kind: document.kind,
           fileName: document.fileName,
           storagePath: document.storagePath,
@@ -532,12 +537,15 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       id: document.id,
       studentId: document.studentId,
       subjectId: document.subjectId,
+      courseId: record.courseId,
       kind: document.kind,
       fileName: document.fileName,
       storagePath: document.storagePath,
       mimeType: document.mimeType,
       status: document.status,
       errorCode: document.errorCode,
+      createdAt: record.createdAt,
+      updatedAt: record.updatedAt,
     };
   }
 

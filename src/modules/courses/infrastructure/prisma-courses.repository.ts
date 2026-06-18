@@ -460,9 +460,13 @@ function toCourseWithStatsDto(
 function toCourseDocumentDto(
   document: CourseDetailRecord['documents'][number],
 ): CourseDocumentDto {
+  if (!document.courseId) {
+    throw new Error('Attached course document is missing courseId');
+  }
+
   return {
     id: document.id,
-    courseId: document.courseId ?? '',
+    courseId: document.courseId,
     documentId: document.id,
     fileName: document.fileName,
     kind: document.kind,

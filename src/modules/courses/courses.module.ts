@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
+import { DocumentsModule } from '../documents/documents.module';
+import { JobsModule } from '../jobs/jobs.module';
 import { BackfillCoursesFromDocumentsDryRunUseCase } from './application/backfill-courses-from-documents.use-case';
 import { COURSES_REPOSITORY } from './application/courses.repository';
 import { CreateCourseUseCase } from './application/create-course.use-case';
@@ -9,11 +11,12 @@ import { GetCourseDetailUseCase } from './application/get-course-detail.use-case
 import { GetCourseUseCase } from './application/get-course.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from './application/list-subject-courses-with-stats.use-case';
 import { ListSubjectCoursesUseCase } from './application/list-subject-courses.use-case';
+import { UploadCoursePdfForCourseUseCase } from './application/upload-course-pdf-for-course.use-case';
 import { PrismaCoursesRepository } from './infrastructure/prisma-courses.repository';
 import { CoursesController } from './interfaces/courses.controller';
 
 @Module({
-  imports: [AuthModule, PrismaModule],
+  imports: [AuthModule, DocumentsModule, JobsModule, PrismaModule],
   controllers: [CoursesController],
   providers: [
     CreateCourseUseCase,
@@ -23,6 +26,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseDetailUseCase,
     DeleteCourseUseCase,
     BackfillCoursesFromDocumentsDryRunUseCase,
+    UploadCoursePdfForCourseUseCase,
     {
       provide: COURSES_REPOSITORY,
       useClass: PrismaCoursesRepository,
@@ -36,6 +40,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseDetailUseCase,
     DeleteCourseUseCase,
     BackfillCoursesFromDocumentsDryRunUseCase,
+    UploadCoursePdfForCourseUseCase,
     COURSES_REPOSITORY,
   ],
 })

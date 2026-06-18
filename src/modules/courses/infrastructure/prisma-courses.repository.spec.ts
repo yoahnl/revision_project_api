@@ -240,6 +240,34 @@ describe('PrismaCoursesRepository', () => {
     });
   });
 
+  it('rejects course detail documents missing courseId instead of returning an empty courseId', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue(
+      courseRecord({
+        subject: { id: 'subject-1', name: 'Droit constitutionnel' },
+        documents: [
+          {
+            id: 'document-1',
+            courseId: null,
+            fileName: 'cours.pdf',
+            kind: 'COURSE_PDF',
+            status: 'READY',
+            errorCode: null,
+            createdAt: new Date('2026-06-18T12:00:00.000Z'),
+            updatedAt: new Date('2026-06-18T12:00:00.000Z'),
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      repository.findDetailByIdForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).rejects.toThrow('Attached course document is missing courseId');
+  });
+
   it('produces an idempotent dry-run backfill without writes', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.findMany.mockResolvedValue([

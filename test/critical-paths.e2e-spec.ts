@@ -14,6 +14,7 @@ import { CreateCourseUseCase } from '../src/modules/courses/application/create-c
 import { DeleteCourseUseCase } from '../src/modules/courses/application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../src/modules/courses/application/get-course-detail.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../src/modules/courses/application/list-subject-courses-with-stats.use-case';
+import { UploadCoursePdfForCourseUseCase } from '../src/modules/courses/application/upload-course-pdf-for-course.use-case';
 import { CourseContainsDocumentsError } from '../src/modules/courses/domain/course.entity';
 import {
   richClosedExerciseFixture,
@@ -118,6 +119,13 @@ describe('Critical demo paths (e2e)', () => {
         .expect(401);
       await request(server).get('/courses/course-1').expect(401);
       await request(server).delete('/courses/course-1').expect(401);
+      await request(server)
+        .post('/courses/course-1/source/course-pdf')
+        .attach('file', Buffer.from('%PDF-1.7'), {
+          filename: 'cours.pdf',
+          contentType: 'application/pdf',
+        })
+        .expect(401);
     });
   });
 
@@ -278,6 +286,85 @@ describe('Critical demo paths (e2e)', () => {
       await request(server)
         .delete('/courses/course-with-documents')
         .expect(409);
+    });
+
+    it('uploads a real course PDF source without client-provided subject context', async () => {
+      const server = app.getHttpServer();
+
+      const response = await request(server)
+        .post('/courses/course-1/source/course-pdf')
+        .attach('file', Buffer.from('%PDF-1.7'), {
+          filename: 'cours.pdf',
+          contentType: 'application/pdf',
+        })
+        .expect(201);
+
+      type CoursePdfUploadInput = {
+        studentId: string;
+        firebaseUid: string;
+        courseId: string;
+        originalFileName: string;
+        content: Buffer;
+        mimeType: string;
+      };
+      const uploadExecute = mocks.uploadCoursePdfForCourse
+        .execute as jest.MockedFunction<
+        (input: CoursePdfUploadInput) => Promise<unknown>
+      >;
+      const uploadInput = uploadExecute.mock.calls[0][0];
+
+      expect(uploadInput.content).toBeInstanceOf(Buffer);
+      expect(uploadInput).toMatchObject({
+        studentId: currentStudent.id,
+        firebaseUid: currentStudent.firebaseUid,
+        courseId: 'course-1',
+        originalFileName: 'cours.pdf',
+        mimeType: 'application/pdf',
+      });
+      expect(response.body).toMatchObject({
+        id: 'document-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+        fileName: 'cours.pdf',
+        kind: 'COURSE_PDF',
+        status: 'UPLOADED',
+      });
+      expect(
+        JSON.stringify(mocks.uploadCoursePdfForCourse.execute.mock.calls),
+      ).not.toContain('subjectId');
+    });
+
+    it('maps Course PDF upload validation and ownership errors', async () => {
+      const server = app.getHttpServer();
+
+      await request(server)
+        .post('/courses/course-1/source/course-pdf')
+        .attach('file', Buffer.from('not a pdf'), {
+          filename: 'notes.txt',
+          contentType: 'text/plain',
+        })
+        .expect(400);
+
+      await request(server)
+        .post('/courses/course-1/source/course-pdf')
+        .field('subjectId', 'client-subject')
+        .attach('file', Buffer.from('%PDF-1.7'), {
+          filename: 'cours.pdf',
+          contentType: 'application/pdf',
+        })
+        .expect(400);
+
+      mocks.uploadCoursePdfForCourse.execute.mockRejectedValueOnce(
+        new Error('Course not found'),
+      );
+
+      await request(server)
+        .post('/courses/other-student-course/source/course-pdf')
+        .attach('file', Buffer.from('%PDF-1.7'), {
+          filename: 'cours.pdf',
+          contentType: 'application/pdf',
+        })
+        .expect(404);
     });
 
     it('maps missing documents to a clean 404 response', async () => {
@@ -1903,6 +1990,8 @@ async function createAuthenticatedApp(
     .useValue(mocks.getCourseDetail)
     .overrideProvider(DeleteCourseUseCase)
     .useValue(mocks.deleteCourse)
+    .overrideProvider(UploadCoursePdfForCourseUseCase)
+    .useValue(mocks.uploadCoursePdfForCourse)
     .overrideProvider(StartNextActivityUseCase)
     .useValue(mocks.startNextActivity)
     .overrideProvider(StartOpenQuestionActivityUseCase)
@@ -1971,6 +2060,9 @@ function createCriticalPathMocks() {
     },
     deleteCourse: {
       execute: jest.fn().mockResolvedValue({ deleted: true }),
+    },
+    uploadCoursePdfForCourse: {
+      execute: jest.fn().mockResolvedValue(courseDocument()),
     },
     startNextActivity: {
       execute: jest.fn().mockResolvedValue(diagnosticQuizActivity()),
@@ -2051,6 +2143,20 @@ function courseDetail() {
         updatedAt: new Date('2026-06-18T10:00:00.000Z'),
       },
     ],
+  };
+}
+
+function courseDocument() {
+  return {
+    id: 'document-1',
+    courseId: 'course-1',
+    documentId: 'document-1',
+    fileName: 'cours.pdf',
+    kind: 'COURSE_PDF',
+    status: 'UPLOADED',
+    errorCode: null,
+    createdAt: new Date('2026-06-18T12:00:00.000Z'),
+    updatedAt: new Date('2026-06-18T12:00:00.000Z'),
   };
 }
 

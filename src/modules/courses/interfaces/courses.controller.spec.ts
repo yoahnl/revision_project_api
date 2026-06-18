@@ -8,6 +8,7 @@ import { CreateCourseUseCase } from '../application/create-course.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
+import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CoursesController } from './courses.controller';
 
 describe('CoursesController', () => {
@@ -126,6 +127,83 @@ describe('CoursesController', () => {
       controller.deleteCourse(currentStudent, 'course-1'),
     ).rejects.toThrow(ConflictException);
   });
+
+  it('uploads a course PDF with course-derived context only', async () => {
+    const { controller, uploadCoursePdfForCourse } = createController();
+    uploadCoursePdfForCourse.execute.mockResolvedValue(courseDocument());
+
+    await expect(
+      controller.uploadCoursePdfForCourse(
+        currentStudent,
+        ' course-1 ',
+        uploadedPdf(),
+      ),
+    ).resolves.toEqual(publicCourseDocument());
+
+    expect(uploadCoursePdfForCourse.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      firebaseUid: 'firebase-1',
+      courseId: 'course-1',
+      originalFileName: 'cours.pdf',
+      content: Buffer.from('%PDF-1.7'),
+      mimeType: 'application/pdf',
+    });
+  });
+
+  it('rejects missing and invalid course PDF uploads before the use case', () => {
+    const { controller, uploadCoursePdfForCourse } = createController();
+
+    expect(() =>
+      controller.uploadCoursePdfForCourse(
+        currentStudent,
+        'course-1',
+        undefined,
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      controller.uploadCoursePdfForCourse(currentStudent, 'course-1', {
+        ...uploadedPdf(),
+        originalname: 'notes.txt',
+      }),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      controller.uploadCoursePdfForCourse(currentStudent, 'course-1', {
+        ...uploadedPdf(),
+        mimetype: 'text/plain',
+      }),
+    ).toThrow(BadRequestException);
+    expect(uploadCoursePdfForCourse.execute).not.toHaveBeenCalled();
+  });
+
+  it('rejects client-provided course upload ownership fields', () => {
+    const { controller, uploadCoursePdfForCourse } = createController();
+
+    expect(() =>
+      controller.uploadCoursePdfForCourse(
+        currentStudent,
+        'course-1',
+        uploadedPdf(),
+        { subjectId: 'subject-1' },
+      ),
+    ).toThrow(BadRequestException);
+
+    expect(uploadCoursePdfForCourse.execute).not.toHaveBeenCalled();
+  });
+
+  it('maps unknown course uploads to 404', async () => {
+    const { controller, uploadCoursePdfForCourse } = createController();
+    uploadCoursePdfForCourse.execute.mockRejectedValue(
+      new Error('Course not found'),
+    );
+
+    await expect(
+      controller.uploadCoursePdfForCourse(
+        currentStudent,
+        'other-student-course',
+        uploadedPdf(),
+      ),
+    ).rejects.toThrow(NotFoundException);
+  });
 });
 
 const currentStudent = {
@@ -140,6 +218,7 @@ function createController() {
   const listCourses = { execute: jest.fn() };
   const getCourseDetail = { execute: jest.fn() };
   const deleteCourse = { execute: jest.fn() };
+  const uploadCoursePdfForCourse = { execute: jest.fn() };
 
   return {
     controller: new CoursesController(
@@ -147,11 +226,13 @@ function createController() {
       listCourses as unknown as ListSubjectCoursesWithStatsUseCase,
       getCourseDetail as unknown as GetCourseDetailUseCase,
       deleteCourse as unknown as DeleteCourseUseCase,
+      uploadCoursePdfForCourse as unknown as UploadCoursePdfForCourseUseCase,
     ),
     createCourse,
     listCourses,
     getCourseDetail,
     deleteCourse,
+    uploadCoursePdfForCourse,
   };
 }
 
@@ -190,6 +271,45 @@ function publicCourse(overrides: Record<string, unknown> = {}) {
     readySourceCount: 0,
     processingSourceCount: 0,
     failedSourceCount: 0,
+    ...overrides,
+  };
+}
+
+function uploadedPdf() {
+  return {
+    originalname: 'cours.pdf',
+    mimetype: 'application/pdf',
+    buffer: Buffer.from('%PDF-1.7'),
+    size: 8,
+  };
+}
+
+function courseDocument(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'document-1',
+    courseId: 'course-1',
+    documentId: 'document-1',
+    fileName: 'cours.pdf',
+    kind: 'COURSE_PDF',
+    status: 'UPLOADED',
+    errorCode: null,
+    createdAt: new Date('2026-06-18T12:00:00.000Z'),
+    updatedAt: new Date('2026-06-18T12:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function publicCourseDocument(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'document-1',
+    courseId: 'course-1',
+    documentId: 'document-1',
+    fileName: 'cours.pdf',
+    kind: 'COURSE_PDF',
+    status: 'UPLOADED',
+    errorCode: null,
+    createdAt: '2026-06-18T12:00:00.000Z',
+    updatedAt: '2026-06-18T12:00:00.000Z',
     ...overrides,
   };
 }

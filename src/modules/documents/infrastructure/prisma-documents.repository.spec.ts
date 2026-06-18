@@ -4,12 +4,15 @@ type DocumentRecord = {
   id: string;
   studentId: string;
   subjectId: string;
+  courseId: string | null;
   kind: 'COURSE_PDF' | 'EXAM_PDF' | 'EXAM_IMAGE';
   fileName: string;
   storagePath: string;
   mimeType: string;
   status: 'UPLOADED' | 'PROCESSING' | 'READY' | 'FAILED';
   errorCode?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 };
 
 type PrismaDocumentsMock = {
@@ -101,11 +104,15 @@ describe('PrismaDocumentsRepository', () => {
     id: 'document-1',
     studentId: 'student-1',
     subjectId: 'subject-1',
+    courseId: null,
     kind: 'COURSE_PDF',
     fileName: 'cours.pdf',
     storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
     mimeType: 'application/pdf',
     status: 'UPLOADED',
+    errorCode: null,
+    createdAt: new Date('2026-06-18T12:00:00.000Z'),
+    updatedAt: new Date('2026-06-18T12:00:00.000Z'),
     ...input,
   });
 
@@ -134,6 +141,7 @@ describe('PrismaDocumentsRepository', () => {
       data: {
         studentId: 'student-1',
         subjectId: 'subject-1',
+        courseId: null,
         kind: 'COURSE_PDF',
         fileName: 'cours.pdf',
         storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
@@ -150,6 +158,35 @@ describe('PrismaDocumentsRepository', () => {
       id: 'document-1',
       status: 'UPLOADED',
     });
+  });
+
+  it('creates a course-attached document when courseId is provided', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue({ id: 'subject-1' });
+    prisma.document.create.mockResolvedValue(record({ courseId: 'course-1' }));
+
+    const document = await repository.create({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      kind: 'COURSE_PDF',
+      fileName: 'cours.pdf',
+      storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+      mimeType: 'application/pdf',
+    });
+
+    expect(prisma.document.create).toHaveBeenCalledWith({
+      data: {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        kind: 'COURSE_PDF',
+        fileName: 'cours.pdf',
+        storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+        mimeType: 'application/pdf',
+      },
+    });
+    expect(document.courseId).toBe('course-1');
   });
 
   it('does not create a document when the subject is not owned by the student', async () => {

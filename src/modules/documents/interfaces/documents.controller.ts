@@ -25,11 +25,15 @@ import { ListSubjectDocumentsUseCase } from '../application/list-subject-documen
 import { RegisterDocumentUseCase } from '../application/register-document.use-case';
 import { UploadCoursePdfUseCase } from '../application/upload-course-pdf.use-case';
 import { DOCUMENT_KINDS, type DocumentKind } from '../domain/document.entity';
+import {
+  MAX_DOCUMENT_BYTES,
+  type UploadedCoursePdfFile,
+  validateCoursePdfFile,
+} from './course-pdf-upload.validator';
 
 const MAX_FILE_NAME_LENGTH = 255;
 const MAX_STORAGE_PATH_LENGTH = 512;
 const MAX_MIME_TYPE_LENGTH = 100;
-const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
 const ALLOWED_IMAGE_MIME_TYPES = new Set([
   'image/jpeg',
   'image/png',
@@ -47,13 +51,6 @@ class RegisterDocumentDto {
 class UploadCoursePdfDto {
   subjectId!: string;
 }
-
-type UploadedCoursePdfFile = {
-  originalname: string;
-  mimetype: string;
-  buffer?: Buffer;
-  size: number;
-};
 
 @Controller()
 @UseGuards(FirebaseAuthGuard)
@@ -188,54 +185,6 @@ export class DocumentsController {
       documentId: validatedDocumentId,
     });
   }
-}
-
-function validateCoursePdfFile(file: UploadedCoursePdfFile | undefined): {
-  originalFileName: string;
-  content: Buffer;
-  mimeType: string;
-} {
-  if (!file) {
-    throw new BadRequestException('Document file is required');
-  }
-
-  const originalFileName = trimRequiredString(
-    file.originalname,
-    'Document file name is required',
-    MAX_FILE_NAME_LENGTH,
-  );
-  validateFileName(originalFileName);
-
-  if (!originalFileName.toLowerCase().endsWith('.pdf')) {
-    throw new BadRequestException('Course documents must be PDF files');
-  }
-
-  const mimeType = trimRequiredString(
-    file.mimetype,
-    'Document mime type is required',
-    MAX_MIME_TYPE_LENGTH,
-  );
-
-  if (mimeType !== 'application/pdf') {
-    throw new BadRequestException('PDF documents must use application/pdf');
-  }
-
-  if (!file.buffer || file.buffer.length === 0 || file.size === 0) {
-    throw new BadRequestException('Document content is required');
-  }
-
-  if (
-    file.size > MAX_DOCUMENT_BYTES ||
-    file.buffer.length > MAX_DOCUMENT_BYTES
-  ) {
-    throw new BadRequestException('Document file is too large');
-  }
-
-  return {
-    originalFileName,
-    content: file.buffer,
-    mimeType,
-  };
 }
 
 function validateRegisterDocumentBody(

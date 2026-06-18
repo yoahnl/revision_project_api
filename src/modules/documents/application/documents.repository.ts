@@ -7,12 +7,15 @@ export interface RevisionDocumentDto {
   id: string;
   studentId: StudentId;
   subjectId: string;
+  courseId: string | null;
   kind: DocumentKind;
   fileName: string;
   storagePath: string;
   mimeType: string;
   status: DocumentStatus;
   errorCode: string | null;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 export interface PublicRevisionDocumentDto {
@@ -92,6 +95,7 @@ export interface DocumentsRepository {
   create(input: {
     studentId: StudentId;
     subjectId: string;
+    courseId?: string | null;
     kind: DocumentKind;
     fileName: string;
     storagePath: string;

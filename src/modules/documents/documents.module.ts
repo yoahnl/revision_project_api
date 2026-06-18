@@ -33,6 +33,6 @@ import { DocumentsController } from './interfaces/documents.controller';
       useClass: LocalDocumentFileStorage,
     },
   ],
-  exports: [DOCUMENTS_REPOSITORY],
+  exports: [DOCUMENTS_REPOSITORY, DOCUMENT_FILE_STORAGE],
 })
 export class DocumentsModule {}
