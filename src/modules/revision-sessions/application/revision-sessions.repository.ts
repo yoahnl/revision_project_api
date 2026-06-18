@@ -1,6 +1,7 @@
 import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionStatusValue,
+  RevisionSessionModeValue,
   RevisionSessionResponseDto,
   RevisionSessionStatusValue,
 } from '../domain/revision-session.entity';
@@ -27,8 +28,10 @@ export interface RevisionSessionPlanningContext {
     id: string;
     status: RevisionSessionStatusValue;
     subjectId: string;
+    courseId: string | null;
     documentId: string | null;
     knowledgeUnitId: string | null;
+    mode: RevisionSessionModeValue;
   };
   actions: Array<{
     kind: RevisionSessionActionKindValue;

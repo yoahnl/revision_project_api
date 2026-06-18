@@ -71,6 +71,7 @@ describe('PrismaRevisionSessionsRepository', () => {
         documentId: 'document-1',
         knowledgeUnitId: 'unit-1',
         status: 'STARTED',
+        mode: 'QUICK',
       },
     });
     expect(prisma.revisionSessionAction.create).toHaveBeenCalledWith({
@@ -88,6 +89,8 @@ describe('PrismaRevisionSessionsRepository', () => {
     });
     expect(result.history).toHaveLength(1);
     expect(result.currentAction?.kind).toBe('OPEN_QUESTION');
+    expect(result.session.courseId).toBeNull();
+    expect(result.session.mode).toBe('QUICK');
   });
 
   it('persists a rich closed session action without activity session id', async () => {
@@ -336,8 +339,10 @@ function revisionSessionRecord() {
     id: 'revision-session-1',
     studentId: 'student-1',
     subjectId: 'subject-1',
+    courseId: null,
     documentId: 'document-1',
     knowledgeUnitId: 'unit-1',
+    mode: 'QUICK',
     status: 'STARTED',
     createdAt: new Date('2026-06-15T10:00:00.000Z'),
     updatedAt: new Date('2026-06-15T10:00:00.000Z'),

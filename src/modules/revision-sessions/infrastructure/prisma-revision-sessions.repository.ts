@@ -2,12 +2,14 @@ import { Injectable } from '@nestjs/common';
 import {
   RevisionSessionActionKind,
   RevisionSessionActionStatus,
+  RevisionSessionMode,
   RevisionSessionStatus,
 } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionStatusValue,
+  RevisionSessionModeValue,
   RevisionSessionResponseDto,
   RevisionSessionStatusValue,
 } from '../domain/revision-session.entity';
@@ -21,8 +23,10 @@ type RevisionSessionRecord = {
   id: string;
   studentId: string;
   subjectId: string;
+  courseId: string | null;
   documentId: string | null;
   knowledgeUnitId: string | null;
+  mode: RevisionSessionModeValue;
   status: RevisionSessionStatusValue;
   createdAt: Date;
   completedAt: Date | null;
@@ -151,6 +155,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
           documentId: input.documentId,
           knowledgeUnitId: input.knowledgeUnitId,
           status: RevisionSessionStatus.STARTED,
+          mode: RevisionSessionMode.QUICK,
         },
       });
       const action = await tx.revisionSessionAction.create({
@@ -234,8 +239,10 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
         id: session.id,
         status: session.status,
         subjectId: session.subjectId,
+        courseId: session.courseId,
         documentId: session.documentId,
         knowledgeUnitId: session.knowledgeUnitId,
+        mode: session.mode,
       },
       actions: (session.actions ?? []).map((action) => ({
         kind: action.kind,
@@ -357,8 +364,10 @@ function toRevisionSessionResponse(
       id: session.id,
       status: session.status,
       subjectId: session.subjectId,
+      courseId: session.courseId,
       documentId: session.documentId,
       knowledgeUnitId: session.knowledgeUnitId,
+      mode: session.mode,
       createdAt: session.createdAt,
       completedAt: session.completedAt,
     },

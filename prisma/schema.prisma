@@ -18,6 +18,7 @@ model StudentProfile {
 
   goals    RevisionGoal[]
   subjects Subject[]
+  courses  Course[]
   mastery  MasteryState[]
   sessions ActivitySession[]
   revisionSessions RevisionSession[]
@@ -50,6 +51,7 @@ model Subject {
   updatedAt DateTime @updatedAt
 
   student        StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courses        Course[]
   documents      Document[]
   knowledgeUnits KnowledgeUnit[]
   mastery        MasteryState[]
@@ -65,10 +67,34 @@ model Subject {
   @@unique([id, studentId])
 }
 
+model Course {
+  id               String   @id @default(cuid())
+  studentId        String
+  subjectId        String
+  title            String
+  description      String?
+  chapterLabel     String?
+  estimatedMinutes Int?
+  displayOrder     Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  student          StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject          Subject          @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  documents        Document[]
+  revisionSessions RevisionSession[]
+
+  @@index([studentId])
+  @@index([subjectId, studentId])
+  @@index([subjectId, displayOrder])
+  @@unique([id, studentId])
+}
+
 model Document {
   id          String         @id @default(cuid())
   studentId   String
   subjectId   String
+  courseId    String?
   kind        DocumentKind
   fileName    String
   storagePath String
@@ -79,6 +105,7 @@ model Document {
   updatedAt   DateTime       @updatedAt
 
   subject        Subject                 @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  course         Course?                 @relation(fields: [courseId], references: [id], onDelete: Restrict)
   chunks         DocumentChunk[]
   knowledgeUnits KnowledgeUnit[]
   jobs           DocumentProcessingJob[]
@@ -90,6 +117,7 @@ model Document {
 
   @@index([studentId])
   @@index([subjectId])
+  @@index([courseId])
   @@unique([id, subjectId])
 }
 
@@ -570,8 +598,10 @@ model RevisionSession {
   id              String                @id @default(cuid())
   studentId       String
   subjectId       String
+  courseId        String?
   documentId      String?
   knowledgeUnitId String?
+  mode            RevisionSessionMode   @default(QUICK)
   status          RevisionSessionStatus @default(STARTED)
   createdAt       DateTime              @default(now())
   updatedAt       DateTime              @updatedAt
@@ -579,12 +609,14 @@ model RevisionSession {
 
   student       StudentProfile          @relation(fields: [studentId], references: [id], onDelete: Cascade)
   subject       Subject                 @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  course        Course?                 @relation(fields: [courseId, studentId], references: [id, studentId], onDelete: NoAction)
   document      Document?               @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
   knowledgeUnit KnowledgeUnit?          @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: NoAction)
   actions       RevisionSessionAction[]
 
   @@index([studentId])
   @@index([subjectId])
+  @@index([courseId])
   @@index([documentId])
   @@index([knowledgeUnitId])
   @@unique([id, studentId])
@@ -671,6 +703,12 @@ enum RevisionSessionStatus {
   STARTED
   COMPLETED
   ABANDONED
+}
+
+enum RevisionSessionMode {
+  QUICK
+  DEEP
+  EXAM
 }
 
 enum RevisionSessionActionKind {

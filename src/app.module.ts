@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { HealthController } from './health.controller';
 import { ActivitiesModule } from './modules/activities/activities.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { CoursesModule } from './modules/courses/courses.module';
 import { DocumentsModule } from './modules/documents/documents.module';
 import { RevisionModule } from './modules/revision/revision.module';
 import { RevisionSessionsModule } from './modules/revision-sessions/revision-sessions.module';
@@ -15,6 +16,7 @@ import { SubjectsModule } from './modules/subjects/subjects.module';
     AuthModule,
     SubjectsModule,
     RevisionModule,
+    CoursesModule,
     DocumentsModule,
     ActivitiesModule,
     RevisionSessionsModule,

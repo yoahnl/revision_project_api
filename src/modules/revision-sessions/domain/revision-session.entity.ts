@@ -5,6 +5,8 @@ import type {
 
 export type RevisionSessionStatusValue = 'STARTED' | 'COMPLETED' | 'ABANDONED';
 
+export type RevisionSessionModeValue = 'QUICK' | 'DEEP' | 'EXAM';
+
 export type RevisionSessionActionKindValue =
   | 'DIAGNOSTIC_QUIZ'
   | 'OPEN_QUESTION'
@@ -42,8 +44,10 @@ export interface RevisionSessionDto {
   id: string;
   status: RevisionSessionStatusValue;
   subjectId: string;
+  courseId: string | null;
   documentId: string | null;
   knowledgeUnitId: string | null;
+  mode: RevisionSessionModeValue;
   createdAt: Date;
   completedAt: Date | null;
 }
