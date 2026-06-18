@@ -168,6 +168,7 @@ function createRepository(): jest.Mocked<CoursesRepository> {
     listBySubjectForStudent: jest.fn(),
     deleteIfEmpty: jest.fn(),
     findCourseOwnershipContext: jest.fn(),
+    findFirstReadyCoursePdfDocumentForCourse: jest.fn(),
     attachDocumentToCourse: jest.fn(),
     backfillFromExistingDocumentsDryRun: jest.fn(),
     backfillFromExistingDocuments: jest.fn(),

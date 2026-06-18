@@ -268,6 +268,66 @@ describe('PrismaCoursesRepository', () => {
     ).rejects.toThrow('Attached course document is missing courseId');
   });
 
+  it('selects the first READY course PDF source deterministically', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(
+      documentRecord({
+        id: 'document-ready-1',
+        courseId: 'course-1',
+        kind: 'COURSE_PDF',
+        status: 'READY',
+        errorCode: null,
+        createdAt: new Date('2026-06-18T10:00:00.000Z'),
+        updatedAt: new Date('2026-06-18T10:00:00.000Z'),
+      }),
+    );
+
+    await expect(
+      repository.findFirstReadyCoursePdfDocumentForCourse({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toMatchObject({
+      id: 'document-ready-1',
+      documentId: 'document-ready-1',
+      courseId: 'course-1',
+      kind: 'COURSE_PDF',
+      status: 'READY',
+    });
+
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        courseId: 'course-1',
+        kind: 'COURSE_PDF',
+        status: 'READY',
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        courseId: true,
+        fileName: true,
+        kind: true,
+        status: true,
+        errorCode: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+  });
+
+  it('returns null when a course has no READY course PDF source', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.findFirstReadyCoursePdfDocumentForCourse({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('produces an idempotent dry-run backfill without writes', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.findMany.mockResolvedValue([

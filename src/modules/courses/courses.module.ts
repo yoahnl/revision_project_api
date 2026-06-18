@@ -3,7 +3,12 @@ import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
 import { AuthModule } from '../auth/auth.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { JobsModule } from '../jobs/jobs.module';
+import { StudyArtifactsModule } from '../study-artifacts/study-artifacts.module';
 import { BackfillCoursesFromDocumentsDryRunUseCase } from './application/backfill-courses-from-documents.use-case';
+import {
+  GenerateCourseRevisionSheetUseCase,
+  GetCourseRevisionSheetUseCase,
+} from './application/course-revision-sheet.use-case';
 import { COURSES_REPOSITORY } from './application/courses.repository';
 import { CreateCourseUseCase } from './application/create-course.use-case';
 import { DeleteCourseUseCase } from './application/delete-course.use-case';
@@ -16,7 +21,13 @@ import { PrismaCoursesRepository } from './infrastructure/prisma-courses.reposit
 import { CoursesController } from './interfaces/courses.controller';
 
 @Module({
-  imports: [AuthModule, DocumentsModule, JobsModule, PrismaModule],
+  imports: [
+    AuthModule,
+    DocumentsModule,
+    JobsModule,
+    PrismaModule,
+    StudyArtifactsModule,
+  ],
   controllers: [CoursesController],
   providers: [
     CreateCourseUseCase,
@@ -27,6 +38,8 @@ import { CoursesController } from './interfaces/courses.controller';
     DeleteCourseUseCase,
     BackfillCoursesFromDocumentsDryRunUseCase,
     UploadCoursePdfForCourseUseCase,
+    GetCourseRevisionSheetUseCase,
+    GenerateCourseRevisionSheetUseCase,
     {
       provide: COURSES_REPOSITORY,
       useClass: PrismaCoursesRepository,
@@ -41,6 +54,8 @@ import { CoursesController } from './interfaces/courses.controller';
     DeleteCourseUseCase,
     BackfillCoursesFromDocumentsDryRunUseCase,
     UploadCoursePdfForCourseUseCase,
+    GetCourseRevisionSheetUseCase,
+    GenerateCourseRevisionSheetUseCase,
     COURSES_REPOSITORY,
   ],
 })

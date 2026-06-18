@@ -279,6 +279,33 @@ export class PrismaCoursesRepository implements CoursesRepository {
       : null;
   }
 
+  async findFirstReadyCoursePdfDocumentForCourse(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDocumentDto | null> {
+    const document = await this.prisma.document.findFirst({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        kind: DocumentKind.COURSE_PDF,
+        status: 'READY',
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        courseId: true,
+        fileName: true,
+        kind: true,
+        status: true,
+        errorCode: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    return document ? toCourseDocumentDto(document) : null;
+  }
+
   async attachDocumentToCourse(input: {
     studentId: string;
     courseId: string;

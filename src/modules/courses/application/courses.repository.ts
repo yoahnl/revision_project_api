@@ -105,6 +105,11 @@ export interface CoursesRepository {
     courseId: string;
   }): Promise<CourseOwnershipContext | null>;
 
+  findFirstReadyCoursePdfDocumentForCourse(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDocumentDto | null>;
+
   attachDocumentToCourse(input: {
     studentId: string;
     courseId: string;

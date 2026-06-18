@@ -18,6 +18,12 @@ import { CurrentStudent } from '../../auth/interfaces/current-student.decorator'
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import type { AuthenticatedStudent } from '../../auth/interfaces/authenticated-student';
 import {
+  CourseRevisionSheetSourceNotReadyError,
+  GenerateCourseRevisionSheetUseCase,
+  GetCourseRevisionSheetUseCase,
+} from '../application/course-revision-sheet.use-case';
+import { toPublicRevisionSheet } from '../../study-artifacts/interfaces/study-artifact-response.mapper';
+import {
   MAX_DOCUMENT_BYTES,
   type UploadedCoursePdfFile,
   validateCoursePdfFile,
@@ -49,6 +55,8 @@ export class CoursesController {
     private readonly getCourseDetail: GetCourseDetailUseCase,
     private readonly deleteCourseUseCase: DeleteCourseUseCase,
     private readonly uploadCoursePdfForCourseUseCase: UploadCoursePdfForCourseUseCase,
+    private readonly getCourseRevisionSheetUseCase: GetCourseRevisionSheetUseCase,
+    private readonly generateCourseRevisionSheetUseCase: GenerateCourseRevisionSheetUseCase,
   ) {}
 
   @Get('subjects/:subjectId/courses')
@@ -156,6 +164,40 @@ export class CoursesController {
       .then(toCourseDocumentResponse)
       .catch(normalizeCourseError);
   }
+
+  @Get('courses/:courseId/revision-sheet')
+  getCourseRevisionSheet(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getCourseRevisionSheetUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .then((revisionSheet) => {
+        if (!revisionSheet) {
+          throw new NotFoundException('Revision sheet not found');
+        }
+
+        return toPublicRevisionSheet(revisionSheet);
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/revision-sheet')
+  generateCourseRevisionSheet(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.generateCourseRevisionSheetUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .then(toPublicRevisionSheet)
+      .catch(normalizeCourseError);
+  }
 }
 
 function validateCreateCourseBody(body: CreateCourseRequest) {
@@ -261,6 +303,10 @@ function normalizeCourseError(error: unknown): never {
 
   if (error instanceof CourseContainsDocumentsError) {
     throw new ConflictException('Course contains documents');
+  }
+
+  if (error instanceof CourseRevisionSheetSourceNotReadyError) {
+    throw new ConflictException(error.message);
   }
 
   if (
