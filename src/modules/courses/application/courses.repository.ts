@@ -15,6 +15,14 @@ export type CourseDocumentStatus =
 
 export type CourseDocumentKind = 'COURSE_PDF' | 'EXAM_PDF' | 'EXAM_IMAGE';
 
+export type CourseProgressState =
+  | 'NO_SOURCE'
+  | 'PROCESSING'
+  | 'FAILED_ONLY'
+  | 'NO_KNOWLEDGE_UNITS'
+  | 'READY_NOT_PRACTICED'
+  | 'PRACTICED';
+
 export interface CourseWithSourceStatsDto extends CourseDto {
   sourceCount: number;
   readySourceCount: number;
@@ -41,6 +49,45 @@ export interface CourseDetailDto {
     name: string;
   };
   sources: CourseDocumentDto[];
+}
+
+export interface CourseProgressDto {
+  courseId: string;
+  subjectId: string;
+  knowledgeUnitCount: number;
+  practicedKnowledgeUnitCount: number;
+  coverage: number;
+  mastery: number | null;
+  estimatedGlobalMastery: number;
+  readySourceCount: number;
+  processingSourceCount: number;
+  failedSourceCount: number;
+  lastPracticedAt: Date | null;
+  state: CourseProgressState;
+}
+
+export interface SubjectCourseProgressDto {
+  courseId: string;
+  title: string;
+  knowledgeUnitCount: number;
+  practicedKnowledgeUnitCount: number;
+  coverage: number;
+  mastery: number | null;
+  estimatedGlobalMastery: number;
+  state: CourseProgressState;
+}
+
+export interface SubjectProgressDto {
+  subjectId: string;
+  knowledgeUnitCount: number;
+  practicedKnowledgeUnitCount: number;
+  coverage: number;
+  mastery: number | null;
+  estimatedGlobalMastery: number;
+  courseCount: number;
+  readyCourseCount: number;
+  lastPracticedAt: Date | null;
+  courses: SubjectCourseProgressDto[];
 }
 
 export interface CreateCourseRepositoryInput {
@@ -101,6 +148,16 @@ export interface CoursesRepository {
     studentId: string;
     courseId: string;
   }): Promise<CourseDetailDto | null>;
+
+  findCourseProgressByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseProgressDto | null>;
+
+  findSubjectProgressForStudent(input: {
+    studentId: string;
+    subjectId: string;
+  }): Promise<SubjectProgressDto | null>;
 
   deleteIfEmpty(input: {
     studentId: string;

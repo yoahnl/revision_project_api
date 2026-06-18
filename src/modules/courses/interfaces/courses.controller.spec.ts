@@ -16,6 +16,10 @@ import {
 } from '../application/start-course-quick-revision-session.use-case';
 import { CreateCourseUseCase } from '../application/create-course.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
+import {
+  GetCourseProgressUseCase,
+  GetSubjectProgressUseCase,
+} from '../application/course-progress.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
@@ -110,6 +114,57 @@ describe('CoursesController', () => {
         },
       ],
     });
+  });
+
+  it('returns course progress without exposing mastery internals', async () => {
+    const { controller, getCourseProgress } = createController();
+    getCourseProgress.execute.mockResolvedValue(courseProgress());
+
+    await expect(
+      controller.getCourseProgress(currentStudent, ' course-1 '),
+    ).resolves.toEqual(publicCourseProgress());
+
+    expect(getCourseProgress.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+    expect(
+      JSON.stringify(
+        await controller.getCourseProgress(currentStudent, 'course-1'),
+      ),
+    ).not.toContain('storagePath');
+  });
+
+  it('returns subject progress with per-course summaries', async () => {
+    const { controller, getSubjectProgress } = createController();
+    getSubjectProgress.execute.mockResolvedValue(subjectProgress());
+
+    await expect(
+      controller.getSubjectProgress(currentStudent, ' subject-1 '),
+    ).resolves.toEqual(publicSubjectProgress());
+
+    expect(getSubjectProgress.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+    });
+  });
+
+  it('maps course and subject progress not found to 404', async () => {
+    const { controller, getCourseProgress, getSubjectProgress } =
+      createController();
+    getCourseProgress.execute.mockRejectedValueOnce(
+      new Error('Course not found'),
+    );
+    getSubjectProgress.execute.mockRejectedValueOnce(
+      new Error('Course subject not found'),
+    );
+
+    await expect(
+      controller.getCourseProgress(currentStudent, 'missing-course'),
+    ).rejects.toThrow(NotFoundException);
+    await expect(
+      controller.getSubjectProgress(currentStudent, 'missing-subject'),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('maps course not found to 404', async () => {
@@ -340,6 +395,8 @@ function createController() {
   const getCourseRevisionSheet = { execute: jest.fn() };
   const generateCourseRevisionSheet = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
+  const getCourseProgress = { execute: jest.fn() };
+  const getSubjectProgress = { execute: jest.fn() };
 
   return {
     controller: new CoursesController(
@@ -351,6 +408,8 @@ function createController() {
       getCourseRevisionSheet as unknown as GetCourseRevisionSheetUseCase,
       generateCourseRevisionSheet as unknown as GenerateCourseRevisionSheetUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
+      getCourseProgress as unknown as GetCourseProgressUseCase,
+      getSubjectProgress as unknown as GetSubjectProgressUseCase,
     ),
     createCourse,
     listCourses,
@@ -360,6 +419,8 @@ function createController() {
     getCourseRevisionSheet,
     generateCourseRevisionSheet,
     startCourseQuickRevisionSession,
+    getCourseProgress,
+    getSubjectProgress,
   };
 }
 
@@ -398,6 +459,96 @@ function publicCourse(overrides: Record<string, unknown> = {}) {
     readySourceCount: 0,
     processingSourceCount: 0,
     failedSourceCount: 0,
+    ...overrides,
+  };
+}
+
+function courseProgress(overrides: Record<string, unknown> = {}) {
+  return {
+    courseId: 'course-1',
+    subjectId: 'subject-1',
+    knowledgeUnitCount: 12,
+    practicedKnowledgeUnitCount: 3,
+    coverage: 0.25,
+    mastery: 0.72,
+    estimatedGlobalMastery: 0.18,
+    readySourceCount: 1,
+    processingSourceCount: 0,
+    failedSourceCount: 0,
+    lastPracticedAt: new Date('2026-06-18T12:00:00.000Z'),
+    state: 'PRACTICED',
+    ...overrides,
+  };
+}
+
+function publicCourseProgress(overrides: Record<string, unknown> = {}) {
+  return {
+    courseId: 'course-1',
+    subjectId: 'subject-1',
+    knowledgeUnitCount: 12,
+    practicedKnowledgeUnitCount: 3,
+    coverage: 0.25,
+    mastery: 0.72,
+    estimatedGlobalMastery: 0.18,
+    readySourceCount: 1,
+    processingSourceCount: 0,
+    failedSourceCount: 0,
+    lastPracticedAt: '2026-06-18T12:00:00.000Z',
+    state: 'PRACTICED',
+    ...overrides,
+  };
+}
+
+function subjectProgress(overrides: Record<string, unknown> = {}) {
+  return {
+    subjectId: 'subject-1',
+    knowledgeUnitCount: 12,
+    practicedKnowledgeUnitCount: 3,
+    coverage: 0.25,
+    mastery: 0.72,
+    estimatedGlobalMastery: 0.18,
+    courseCount: 1,
+    readyCourseCount: 1,
+    lastPracticedAt: new Date('2026-06-18T12:00:00.000Z'),
+    courses: [
+      {
+        courseId: 'course-1',
+        title: 'Institutions',
+        knowledgeUnitCount: 12,
+        practicedKnowledgeUnitCount: 3,
+        coverage: 0.25,
+        mastery: 0.72,
+        estimatedGlobalMastery: 0.18,
+        state: 'PRACTICED',
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function publicSubjectProgress(overrides: Record<string, unknown> = {}) {
+  return {
+    subjectId: 'subject-1',
+    knowledgeUnitCount: 12,
+    practicedKnowledgeUnitCount: 3,
+    coverage: 0.25,
+    mastery: 0.72,
+    estimatedGlobalMastery: 0.18,
+    courseCount: 1,
+    readyCourseCount: 1,
+    lastPracticedAt: '2026-06-18T12:00:00.000Z',
+    courses: [
+      {
+        courseId: 'course-1',
+        title: 'Institutions',
+        knowledgeUnitCount: 12,
+        practicedKnowledgeUnitCount: 3,
+        coverage: 0.25,
+        mastery: 0.72,
+        estimatedGlobalMastery: 0.18,
+        state: 'PRACTICED',
+      },
+    ],
     ...overrides,
   };
 }

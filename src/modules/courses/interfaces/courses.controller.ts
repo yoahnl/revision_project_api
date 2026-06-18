@@ -23,6 +23,10 @@ import {
   GetCourseRevisionSheetUseCase,
 } from '../application/course-revision-sheet.use-case';
 import {
+  GetCourseProgressUseCase,
+  GetSubjectProgressUseCase,
+} from '../application/course-progress.use-case';
+import {
   CourseQuickRevisionKnowledgeUnitNotReadyError,
   CourseQuickRevisionSourceNotReadyError,
   StartCourseQuickRevisionSessionUseCase,
@@ -44,6 +48,8 @@ import {
   toCourseDocumentResponse,
   toCourseDetailResponse,
   toCourseListItemResponse,
+  toCourseProgressResponse,
+  toSubjectProgressResponse,
 } from './course-response.dto';
 
 const MAX_COURSE_TITLE_LENGTH = 140;
@@ -63,6 +69,8 @@ export class CoursesController {
     private readonly getCourseRevisionSheetUseCase: GetCourseRevisionSheetUseCase,
     private readonly generateCourseRevisionSheetUseCase: GenerateCourseRevisionSheetUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
+    private readonly getCourseProgressUseCase: GetCourseProgressUseCase,
+    private readonly getSubjectProgressUseCase: GetSubjectProgressUseCase,
   ) {}
 
   @Get('subjects/:subjectId/courses')
@@ -125,6 +133,37 @@ export class CoursesController {
         courseId: trimRequiredString(courseId, 'Course id is required'),
       })
       .then(toCourseDetailResponse)
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/progress')
+  getCourseProgress(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getCourseProgressUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .then(toCourseProgressResponse)
+      .catch(normalizeCourseError);
+  }
+
+  @Get('subjects/:subjectId/progress')
+  getSubjectProgress(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('subjectId') subjectId: string,
+  ) {
+    return this.getSubjectProgressUseCase
+      .execute({
+        studentId: student.id,
+        subjectId: trimRequiredString(
+          subjectId,
+          'Course subjectId is required',
+        ),
+      })
+      .then(toSubjectProgressResponse)
       .catch(normalizeCourseError);
   }
 

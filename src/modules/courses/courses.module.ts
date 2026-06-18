@@ -10,6 +10,10 @@ import {
   GenerateCourseRevisionSheetUseCase,
   GetCourseRevisionSheetUseCase,
 } from './application/course-revision-sheet.use-case';
+import {
+  GetCourseProgressUseCase,
+  GetSubjectProgressUseCase,
+} from './application/course-progress.use-case';
 import { COURSES_REPOSITORY } from './application/courses.repository';
 import { CreateCourseUseCase } from './application/create-course.use-case';
 import { DeleteCourseUseCase } from './application/delete-course.use-case';
@@ -44,6 +48,8 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseRevisionSheetUseCase,
     GenerateCourseRevisionSheetUseCase,
     StartCourseQuickRevisionSessionUseCase,
+    GetCourseProgressUseCase,
+    GetSubjectProgressUseCase,
     {
       provide: COURSES_REPOSITORY,
       useClass: PrismaCoursesRepository,
@@ -61,6 +67,8 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseRevisionSheetUseCase,
     GenerateCourseRevisionSheetUseCase,
     StartCourseQuickRevisionSessionUseCase,
+    GetCourseProgressUseCase,
+    GetSubjectProgressUseCase,
     COURSES_REPOSITORY,
   ],
 })

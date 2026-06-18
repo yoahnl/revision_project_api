@@ -17,6 +17,10 @@ import {
   GenerateCourseRevisionSheetUseCase,
   GetCourseRevisionSheetUseCase,
 } from '../src/modules/courses/application/course-revision-sheet.use-case';
+import {
+  GetCourseProgressUseCase,
+  GetSubjectProgressUseCase,
+} from '../src/modules/courses/application/course-progress.use-case';
 import { GetCourseDetailUseCase } from '../src/modules/courses/application/get-course-detail.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../src/modules/courses/application/list-subject-courses-with-stats.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../src/modules/courses/application/upload-course-pdf-for-course.use-case';
@@ -128,6 +132,8 @@ describe('Critical demo paths (e2e)', () => {
         .send({ title: 'Droit constitutionnel' })
         .expect(401);
       await request(server).get('/courses/course-1').expect(401);
+      await request(server).get('/courses/course-1/progress').expect(401);
+      await request(server).get('/subjects/subject-1/progress').expect(401);
       await request(server).delete('/courses/course-1').expect(401);
       await request(server).get('/courses/course-1/revision-sheet').expect(401);
       await request(server)
@@ -273,6 +279,65 @@ describe('Critical demo paths (e2e)', () => {
         status: 'READY',
       });
 
+      const courseProgressResponse = await request(server)
+        .get('/courses/course-1/progress')
+        .expect(200);
+
+      expect(mocks.getCourseProgress.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        courseId: 'course-1',
+      });
+      expect(courseProgressResponse.body).toMatchObject({
+        courseId: 'course-1',
+        subjectId: 'subject-1',
+        knowledgeUnitCount: 12,
+        practicedKnowledgeUnitCount: 3,
+        coverage: 0.25,
+        mastery: 0.72,
+        estimatedGlobalMastery: 0.18,
+        readySourceCount: 1,
+        processingSourceCount: 0,
+        failedSourceCount: 0,
+        state: 'PRACTICED',
+      });
+      assertNoSensitivePreSubmitFields(courseProgressResponse.body);
+      expect(JSON.stringify(courseProgressResponse.body)).not.toContain(
+        'storagePath',
+      );
+      expect(JSON.stringify(courseProgressResponse.body)).not.toContain(
+        'correctChoiceId',
+      );
+
+      const subjectProgressResponse = await request(server)
+        .get('/subjects/subject-1/progress')
+        .expect(200);
+
+      expect(mocks.getSubjectProgress.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        subjectId: 'subject-1',
+      });
+      expect(subjectProgressResponse.body).toMatchObject({
+        subjectId: 'subject-1',
+        knowledgeUnitCount: 12,
+        practicedKnowledgeUnitCount: 3,
+        coverage: 0.25,
+        mastery: 0.72,
+        estimatedGlobalMastery: 0.18,
+        courseCount: 1,
+        readyCourseCount: 1,
+        courses: [
+          {
+            courseId: 'course-1',
+            title: 'Droit constitutionnel',
+            state: 'PRACTICED',
+          },
+        ],
+      });
+      assertNoSensitivePreSubmitFields(subjectProgressResponse.body);
+      expect(JSON.stringify(subjectProgressResponse.body)).not.toContain(
+        'storagePath',
+      );
+
       await request(server).delete('/courses/course-1').expect(204);
 
       expect(mocks.deleteCourse.execute).toHaveBeenCalledWith({
@@ -293,6 +358,20 @@ describe('Critical demo paths (e2e)', () => {
         new Error('Course not found'),
       );
       await request(server).get('/courses/other-student-course').expect(404);
+
+      mocks.getCourseProgress.execute.mockRejectedValueOnce(
+        new Error('Course not found'),
+      );
+      await request(server)
+        .get('/courses/other-student-course/progress')
+        .expect(404);
+
+      mocks.getSubjectProgress.execute.mockRejectedValueOnce(
+        new Error('Course subject not found'),
+      );
+      await request(server)
+        .get('/subjects/other-student-subject/progress')
+        .expect(404);
 
       mocks.deleteCourse.execute.mockRejectedValueOnce(
         new CourseContainsDocumentsError(),
@@ -2116,6 +2195,10 @@ async function createAuthenticatedApp(
     .useValue(mocks.listCoursesWithStats)
     .overrideProvider(GetCourseDetailUseCase)
     .useValue(mocks.getCourseDetail)
+    .overrideProvider(GetCourseProgressUseCase)
+    .useValue(mocks.getCourseProgress)
+    .overrideProvider(GetSubjectProgressUseCase)
+    .useValue(mocks.getSubjectProgress)
     .overrideProvider(DeleteCourseUseCase)
     .useValue(mocks.deleteCourse)
     .overrideProvider(UploadCoursePdfForCourseUseCase)
@@ -2191,6 +2274,12 @@ function createCriticalPathMocks() {
     },
     getCourseDetail: {
       execute: jest.fn().mockResolvedValue(courseDetail()),
+    },
+    getCourseProgress: {
+      execute: jest.fn().mockResolvedValue(courseProgress()),
+    },
+    getSubjectProgress: {
+      execute: jest.fn().mockResolvedValue(subjectProgress()),
     },
     deleteCourse: {
       execute: jest.fn().mockResolvedValue({ deleted: true }),
@@ -2286,6 +2375,50 @@ function courseDetail() {
         errorCode: null,
         createdAt: new Date('2026-06-18T10:00:00.000Z'),
         updatedAt: new Date('2026-06-18T10:00:00.000Z'),
+      },
+    ],
+  };
+}
+
+function courseProgress(overrides: Record<string, unknown> = {}) {
+  return {
+    courseId: 'course-1',
+    subjectId: 'subject-1',
+    knowledgeUnitCount: 12,
+    practicedKnowledgeUnitCount: 3,
+    coverage: 0.25,
+    mastery: 0.72,
+    estimatedGlobalMastery: 0.18,
+    readySourceCount: 1,
+    processingSourceCount: 0,
+    failedSourceCount: 0,
+    lastPracticedAt: new Date('2026-06-18T12:00:00.000Z'),
+    state: 'PRACTICED',
+    ...overrides,
+  };
+}
+
+function subjectProgress() {
+  return {
+    subjectId: 'subject-1',
+    knowledgeUnitCount: 12,
+    practicedKnowledgeUnitCount: 3,
+    coverage: 0.25,
+    mastery: 0.72,
+    estimatedGlobalMastery: 0.18,
+    courseCount: 1,
+    readyCourseCount: 1,
+    lastPracticedAt: new Date('2026-06-18T12:00:00.000Z'),
+    courses: [
+      {
+        courseId: 'course-1',
+        title: 'Droit constitutionnel',
+        knowledgeUnitCount: 12,
+        practicedKnowledgeUnitCount: 3,
+        coverage: 0.25,
+        mastery: 0.72,
+        estimatedGlobalMastery: 0.18,
+        state: 'PRACTICED',
       },
     ],
   };

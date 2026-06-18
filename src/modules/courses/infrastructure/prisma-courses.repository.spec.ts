@@ -405,6 +405,297 @@ describe('PrismaCoursesRepository', () => {
     ).resolves.toBeNull();
   });
 
+  it('computes course progress from READY course PDF knowledge units only', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue(courseRecord());
+    prisma.document.findMany.mockResolvedValue([
+      progressDocument({ id: 'ready-doc', status: 'READY' }),
+      progressDocument({ id: 'uploaded-doc', status: 'UPLOADED' }),
+      progressDocument({ id: 'failed-doc', status: 'FAILED' }),
+    ]);
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      progressKnowledgeUnit({
+        id: 'unit-1',
+        documentId: 'ready-doc',
+        mastery: [
+          {
+            score: 0.8,
+            lastPracticedAt: new Date('2026-06-18T10:00:00.000Z'),
+          },
+        ],
+      }),
+      progressKnowledgeUnit({
+        id: 'unit-2',
+        documentId: 'ready-doc',
+        mastery: [
+          {
+            score: 0.6,
+            lastPracticedAt: new Date('2026-06-18T12:00:00.000Z'),
+          },
+        ],
+      }),
+      progressKnowledgeUnit({
+        id: 'unit-3',
+        documentId: 'ready-doc',
+        mastery: [],
+      }),
+      progressKnowledgeUnit({
+        id: 'unit-4',
+        documentId: 'ready-doc',
+        mastery: [],
+      }),
+    ]);
+
+    await expect(
+      repository.findCourseProgressByIdForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toEqual({
+      courseId: 'course-1',
+      subjectId: 'subject-1',
+      knowledgeUnitCount: 4,
+      practicedKnowledgeUnitCount: 2,
+      coverage: 0.5,
+      mastery: 0.7,
+      estimatedGlobalMastery: 0.35,
+      readySourceCount: 1,
+      processingSourceCount: 1,
+      failedSourceCount: 1,
+      lastPracticedAt: new Date('2026-06-18T12:00:00.000Z'),
+      state: 'PRACTICED',
+    });
+
+    expect(prisma.document.findMany).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        courseId: 'course-1',
+        kind: 'COURSE_PDF',
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        courseId: true,
+        status: true,
+      },
+    });
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        subjectId: 'subject-1',
+        documentId: { in: ['ready-doc'] },
+        subject: { studentId: 'student-1' },
+        document: {
+          studentId: 'student-1',
+          subjectId: 'subject-1',
+          courseId: 'course-1',
+          kind: 'COURSE_PDF',
+          status: 'READY',
+        },
+      },
+      select: {
+        id: true,
+        documentId: true,
+        mastery: {
+          where: { studentId: 'student-1' },
+          select: { score: true, lastPracticedAt: true },
+          take: 1,
+        },
+      },
+    });
+  });
+
+  it.each([
+    {
+      label: 'NO_SOURCE',
+      documents: [],
+      knowledgeUnits: [],
+      expected: {
+        state: 'NO_SOURCE',
+        knowledgeUnitCount: 0,
+        practicedKnowledgeUnitCount: 0,
+        coverage: 0,
+        mastery: null,
+        estimatedGlobalMastery: 0,
+        readySourceCount: 0,
+        processingSourceCount: 0,
+        failedSourceCount: 0,
+        lastPracticedAt: null,
+      },
+    },
+    {
+      label: 'PROCESSING',
+      documents: [
+        progressDocument({ id: 'uploaded-doc', status: 'UPLOADED' }),
+        progressDocument({ id: 'processing-doc', status: 'PROCESSING' }),
+      ],
+      knowledgeUnits: [],
+      expected: {
+        state: 'PROCESSING',
+        knowledgeUnitCount: 0,
+        practicedKnowledgeUnitCount: 0,
+        coverage: 0,
+        mastery: null,
+        estimatedGlobalMastery: 0,
+        readySourceCount: 0,
+        processingSourceCount: 2,
+        failedSourceCount: 0,
+        lastPracticedAt: null,
+      },
+    },
+    {
+      label: 'FAILED_ONLY',
+      documents: [progressDocument({ id: 'failed-doc', status: 'FAILED' })],
+      knowledgeUnits: [],
+      expected: {
+        state: 'FAILED_ONLY',
+        knowledgeUnitCount: 0,
+        practicedKnowledgeUnitCount: 0,
+        coverage: 0,
+        mastery: null,
+        estimatedGlobalMastery: 0,
+        readySourceCount: 0,
+        processingSourceCount: 0,
+        failedSourceCount: 1,
+        lastPracticedAt: null,
+      },
+    },
+    {
+      label: 'NO_KNOWLEDGE_UNITS',
+      documents: [progressDocument({ id: 'ready-doc', status: 'READY' })],
+      knowledgeUnits: [],
+      expected: {
+        state: 'NO_KNOWLEDGE_UNITS',
+        knowledgeUnitCount: 0,
+        practicedKnowledgeUnitCount: 0,
+        coverage: 0,
+        mastery: null,
+        estimatedGlobalMastery: 0,
+        readySourceCount: 1,
+        processingSourceCount: 0,
+        failedSourceCount: 0,
+        lastPracticedAt: null,
+      },
+    },
+    {
+      label: 'READY_NOT_PRACTICED',
+      documents: [progressDocument({ id: 'ready-doc', status: 'READY' })],
+      knowledgeUnits: [
+        progressKnowledgeUnit({ id: 'unit-1', documentId: 'ready-doc' }),
+      ],
+      expected: {
+        state: 'READY_NOT_PRACTICED',
+        knowledgeUnitCount: 1,
+        practicedKnowledgeUnitCount: 0,
+        coverage: 0,
+        mastery: null,
+        estimatedGlobalMastery: 0,
+        readySourceCount: 1,
+        processingSourceCount: 0,
+        failedSourceCount: 0,
+        lastPracticedAt: null,
+      },
+    },
+  ])('computes $label course progress state', async (scenario) => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue(courseRecord());
+    prisma.document.findMany.mockResolvedValue(scenario.documents);
+    prisma.knowledgeUnit.findMany.mockResolvedValue(scenario.knowledgeUnits);
+
+    await expect(
+      repository.findCourseProgressByIdForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toEqual({
+      courseId: 'course-1',
+      subjectId: 'subject-1',
+      ...scenario.expected,
+    });
+
+    if (scenario.documents.some((document) => document.status === 'READY')) {
+      expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledTimes(1);
+    } else {
+      expect(prisma.knowledgeUnit.findMany).not.toHaveBeenCalled();
+    }
+  });
+
+  it('aggregates subject progress across real courses without legacy documents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue({ id: 'subject-1' });
+    prisma.course.findMany.mockResolvedValue([
+      courseRecord({ id: 'course-1', title: 'Institutions' }),
+      courseRecord({ id: 'course-2', title: 'Procédure' }),
+    ]);
+    prisma.document.findMany.mockResolvedValue([
+      progressDocument({ id: 'doc-1', courseId: 'course-1', status: 'READY' }),
+      progressDocument({
+        id: 'doc-2',
+        courseId: 'course-2',
+        status: 'PROCESSING',
+      }),
+    ]);
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      progressKnowledgeUnit({
+        id: 'unit-1',
+        documentId: 'doc-1',
+        mastery: [
+          {
+            score: 0.75,
+            lastPracticedAt: new Date('2026-06-18T12:00:00.000Z'),
+          },
+        ],
+      }),
+      progressKnowledgeUnit({
+        id: 'unit-2',
+        documentId: 'doc-1',
+        mastery: [],
+      }),
+    ]);
+
+    await expect(
+      repository.findSubjectProgressForStudent({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+      }),
+    ).resolves.toMatchObject({
+      subjectId: 'subject-1',
+      knowledgeUnitCount: 2,
+      practicedKnowledgeUnitCount: 1,
+      coverage: 0.5,
+      mastery: 0.75,
+      estimatedGlobalMastery: 0.375,
+      courseCount: 2,
+      readyCourseCount: 1,
+      courses: [
+        {
+          courseId: 'course-1',
+          title: 'Institutions',
+          state: 'PRACTICED',
+        },
+        {
+          courseId: 'course-2',
+          title: 'Procédure',
+          state: 'PROCESSING',
+        },
+      ],
+    });
+
+    expect(prisma.document.findMany).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: { in: ['course-1', 'course-2'] },
+        kind: 'COURSE_PDF',
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        courseId: true,
+        status: true,
+      },
+    });
+  });
+
   it('produces an idempotent dry-run backfill without writes', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.findMany.mockResolvedValue([
@@ -510,6 +801,25 @@ function documentRecord(overrides: Record<string, unknown> = {}) {
     subjectId: 'subject-1',
     courseId: null,
     fileName: 'Cours stats S1.pdf',
+    ...overrides,
+  };
+}
+
+function progressDocument(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'document-1',
+    courseId: 'course-1',
+    status: 'READY',
+    createdAt: new Date('2026-06-18T10:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function progressKnowledgeUnit(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'unit-1',
+    documentId: 'document-1',
+    mastery: [],
     ...overrides,
   };
 }

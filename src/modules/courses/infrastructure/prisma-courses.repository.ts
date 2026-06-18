@@ -6,12 +6,15 @@ import type {
   CourseDetailDto,
   CourseDocumentStatus,
   CourseDto,
+  CourseProgressDto,
+  CourseProgressState,
   CourseQuickRevisionKnowledgeUnitDto,
   CourseOwnershipContext,
   CourseDocumentDto,
   CourseWithSourceStatsDto,
   CoursesRepository,
   CreateCourseRepositoryInput,
+  SubjectProgressDto,
 } from '../application/courses.repository';
 import {
   CourseContainsDocumentsError,
@@ -52,6 +55,25 @@ type QuickRevisionKnowledgeUnitRecord = {
   title: string;
   displayOrder: number | null;
   createdAt: Date;
+  mastery: Array<{
+    score: number;
+    lastPracticedAt: Date | null;
+  }>;
+};
+
+type ProgressCourseRecord = CourseRecord & {
+  title: string;
+};
+
+type ProgressDocumentRecord = {
+  id: string;
+  courseId: string | null;
+  status: CourseDocumentStatus;
+};
+
+type ProgressKnowledgeUnitRecord = {
+  id: string;
+  documentId: string | null;
   mastery: Array<{
     score: number;
     lastPracticedAt: Date | null;
@@ -231,6 +253,167 @@ export class PrismaCoursesRepository implements CoursesRepository {
       },
       sources,
     };
+  }
+
+  async findCourseProgressByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseProgressDto | null> {
+    const course = await this.prisma.course.findFirst({
+      where: {
+        id: input.courseId,
+        studentId: input.studentId,
+      },
+    });
+
+    if (!course) {
+      return null;
+    }
+
+    const documents = (await this.prisma.document.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        kind: DocumentKind.COURSE_PDF,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        courseId: true,
+        status: true,
+      },
+    })) as ProgressDocumentRecord[];
+
+    const readyDocumentIds = documents
+      .filter((document) => document.status === 'READY')
+      .map((document) => document.id);
+
+    const knowledgeUnits =
+      readyDocumentIds.length === 0
+        ? []
+        : ((await this.prisma.knowledgeUnit.findMany({
+            where: {
+              subjectId: course.subjectId,
+              documentId: { in: readyDocumentIds },
+              subject: { studentId: input.studentId },
+              // Progress is intentionally course-level: legacy documents
+              // without courseId and non-READY/non-COURSE_PDF docs cannot
+              // contribute to the available KnowledgeUnit count.
+              document: {
+                studentId: input.studentId,
+                subjectId: course.subjectId,
+                courseId: course.id,
+                kind: DocumentKind.COURSE_PDF,
+                status: 'READY',
+              },
+            },
+            select: {
+              id: true,
+              documentId: true,
+              mastery: {
+                where: { studentId: input.studentId },
+                select: { score: true, lastPracticedAt: true },
+                take: 1,
+              },
+            },
+          })) as ProgressKnowledgeUnitRecord[]);
+
+    return buildCourseProgressDto(course, documents, knowledgeUnits);
+  }
+
+  async findSubjectProgressForStudent(input: {
+    studentId: string;
+    subjectId: string;
+  }): Promise<SubjectProgressDto | null> {
+    const subject = await this.prisma.subject.findFirst({
+      where: {
+        id: input.subjectId,
+        studentId: input.studentId,
+      },
+      select: { id: true },
+    });
+
+    if (!subject) {
+      return null;
+    }
+
+    const courses = (await this.prisma.course.findMany({
+      where: {
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+    })) as ProgressCourseRecord[];
+
+    if (courses.length === 0) {
+      return emptySubjectProgress(input.subjectId);
+    }
+
+    const courseIds = courses.map((course) => course.id);
+    const documents = (await this.prisma.document.findMany({
+      where: {
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        courseId: { in: courseIds },
+        kind: DocumentKind.COURSE_PDF,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        courseId: true,
+        status: true,
+      },
+    })) as ProgressDocumentRecord[];
+    const readyDocumentIds = documents
+      .filter((document) => document.status === 'READY')
+      .map((document) => document.id);
+    const documentCourseIdByDocumentId = new Map(
+      documents
+        .filter((document) => document.courseId)
+        .map((document) => [document.id, document.courseId as string]),
+    );
+
+    const knowledgeUnits =
+      readyDocumentIds.length === 0
+        ? []
+        : ((await this.prisma.knowledgeUnit.findMany({
+            where: {
+              subjectId: input.subjectId,
+              documentId: { in: readyDocumentIds },
+              subject: { studentId: input.studentId },
+              document: {
+                studentId: input.studentId,
+                subjectId: input.subjectId,
+                courseId: { in: courseIds },
+                kind: DocumentKind.COURSE_PDF,
+                status: 'READY',
+              },
+            },
+            select: {
+              id: true,
+              documentId: true,
+              mastery: {
+                where: { studentId: input.studentId },
+                select: { score: true, lastPracticedAt: true },
+                take: 1,
+              },
+            },
+          })) as ProgressKnowledgeUnitRecord[]);
+
+    const documentsByCourseId = groupByCourseId(documents);
+    const knowledgeUnitsByCourseId = groupKnowledgeUnitsByCourseId(
+      knowledgeUnits,
+      documentCourseIdByDocumentId,
+    );
+    const courseProgresses = courses.map((course) =>
+      buildCourseProgressDto(
+        course,
+        documentsByCourseId.get(course.id) ?? [],
+        knowledgeUnitsByCourseId.get(course.id) ?? [],
+      ),
+    );
+
+    return buildSubjectProgressDto(input.subjectId, courses, courseProgresses);
   }
 
   async deleteIfEmpty(input: {
@@ -523,6 +706,267 @@ function applyDocumentStatus(
   } else if (status === 'FAILED') {
     stats.failedSourceCount += 1;
   }
+}
+
+function groupByCourseId(documents: ProgressDocumentRecord[]) {
+  const byCourseId = new Map<string, ProgressDocumentRecord[]>();
+
+  for (const document of documents) {
+    if (!document.courseId) {
+      continue;
+    }
+
+    const documentsForCourse = byCourseId.get(document.courseId) ?? [];
+    documentsForCourse.push(document);
+    byCourseId.set(document.courseId, documentsForCourse);
+  }
+
+  return byCourseId;
+}
+
+function groupKnowledgeUnitsByCourseId(
+  knowledgeUnits: ProgressKnowledgeUnitRecord[],
+  documentCourseIdByDocumentId: Map<string, string>,
+) {
+  const byCourseId = new Map<string, ProgressKnowledgeUnitRecord[]>();
+
+  for (const unit of knowledgeUnits) {
+    if (!unit.documentId) {
+      continue;
+    }
+
+    const courseId = documentCourseIdByDocumentId.get(unit.documentId);
+    if (!courseId) {
+      continue;
+    }
+
+    const unitsForCourse = byCourseId.get(courseId) ?? [];
+    unitsForCourse.push(unit);
+    byCourseId.set(courseId, unitsForCourse);
+  }
+
+  return byCourseId;
+}
+
+function buildCourseProgressDto(
+  course: ProgressCourseRecord,
+  documents: ProgressDocumentRecord[],
+  knowledgeUnits: ProgressKnowledgeUnitRecord[],
+): CourseProgressDto {
+  const sourceStats = progressSourceStats(documents);
+  const practicedMastery = knowledgeUnits
+    .map((unit) => unit.mastery[0])
+    .filter((mastery): mastery is NonNullable<typeof mastery> =>
+      Boolean(mastery),
+    );
+  const knowledgeUnitCount = knowledgeUnits.length;
+  const practicedKnowledgeUnitCount = practicedMastery.length;
+  const coverage =
+    knowledgeUnitCount === 0
+      ? 0
+      : safeRatio(practicedKnowledgeUnitCount, knowledgeUnitCount);
+  const mastery =
+    practicedMastery.length === 0
+      ? null
+      : roundRatio(
+          practicedMastery.reduce((sum, item) => sum + item.score, 0) /
+            practicedMastery.length,
+        );
+  const estimatedGlobalMastery =
+    mastery == null ? 0 : roundRatio(coverage * mastery);
+
+  return {
+    courseId: course.id,
+    subjectId: course.subjectId,
+    knowledgeUnitCount,
+    practicedKnowledgeUnitCount,
+    coverage,
+    mastery,
+    estimatedGlobalMastery,
+    readySourceCount: sourceStats.readySourceCount,
+    processingSourceCount: sourceStats.processingSourceCount,
+    failedSourceCount: sourceStats.failedSourceCount,
+    lastPracticedAt: latestPracticedAt(practicedMastery),
+    state: progressState(sourceStats, knowledgeUnitCount, practicedMastery),
+  };
+}
+
+function buildSubjectProgressDto(
+  subjectId: string,
+  courses: ProgressCourseRecord[],
+  courseProgresses: CourseProgressDto[],
+): SubjectProgressDto {
+  const knowledgeUnitCount = courseProgresses.reduce(
+    (sum, progress) => sum + progress.knowledgeUnitCount,
+    0,
+  );
+  const practicedKnowledgeUnitCount = courseProgresses.reduce(
+    (sum, progress) => sum + progress.practicedKnowledgeUnitCount,
+    0,
+  );
+  const practicedMasteryValues = courseProgresses.flatMap(
+    (progress): number[] => {
+      if (
+        progress.mastery == null ||
+        progress.practicedKnowledgeUnitCount === 0
+      ) {
+        return [];
+      }
+
+      return Array<number>(progress.practicedKnowledgeUnitCount).fill(
+        progress.mastery,
+      );
+    },
+  );
+  const coverage =
+    knowledgeUnitCount === 0
+      ? 0
+      : safeRatio(practicedKnowledgeUnitCount, knowledgeUnitCount);
+  const mastery =
+    practicedMasteryValues.length === 0
+      ? null
+      : roundRatio(
+          practicedMasteryValues.reduce((sum, score) => sum + score, 0) /
+            practicedMasteryValues.length,
+        );
+  const estimatedGlobalMastery =
+    mastery == null ? 0 : roundRatio(coverage * mastery);
+  const latest = latestDate(
+    courseProgresses.map((item) => item.lastPracticedAt),
+  );
+  const titleByCourseId = new Map(
+    courses.map((course) => [course.id, course.title]),
+  );
+
+  return {
+    subjectId,
+    knowledgeUnitCount,
+    practicedKnowledgeUnitCount,
+    coverage,
+    mastery,
+    estimatedGlobalMastery,
+    courseCount: courses.length,
+    readyCourseCount: courseProgresses.filter(
+      (progress) => progress.readySourceCount > 0,
+    ).length,
+    lastPracticedAt: latest,
+    courses: courseProgresses.map((progress) => ({
+      courseId: progress.courseId,
+      title: titleByCourseId.get(progress.courseId) ?? 'Cours',
+      knowledgeUnitCount: progress.knowledgeUnitCount,
+      practicedKnowledgeUnitCount: progress.practicedKnowledgeUnitCount,
+      coverage: progress.coverage,
+      mastery: progress.mastery,
+      estimatedGlobalMastery: progress.estimatedGlobalMastery,
+      state: progress.state,
+    })),
+  };
+}
+
+function emptySubjectProgress(subjectId: string): SubjectProgressDto {
+  return {
+    subjectId,
+    knowledgeUnitCount: 0,
+    practicedKnowledgeUnitCount: 0,
+    coverage: 0,
+    mastery: null,
+    estimatedGlobalMastery: 0,
+    courseCount: 0,
+    readyCourseCount: 0,
+    lastPracticedAt: null,
+    courses: [],
+  };
+}
+
+function progressSourceStats(documents: ProgressDocumentRecord[]) {
+  let readySourceCount = 0;
+  let processingSourceCount = 0;
+  let failedSourceCount = 0;
+
+  for (const document of documents) {
+    if (document.status === 'READY') {
+      readySourceCount += 1;
+    } else if (
+      document.status === 'UPLOADED' ||
+      document.status === 'PROCESSING'
+    ) {
+      processingSourceCount += 1;
+    } else if (document.status === 'FAILED') {
+      failedSourceCount += 1;
+    }
+  }
+
+  return {
+    sourceCount: documents.length,
+    readySourceCount,
+    processingSourceCount,
+    failedSourceCount,
+  };
+}
+
+function progressState(
+  sourceStats: ReturnType<typeof progressSourceStats>,
+  knowledgeUnitCount: number,
+  practicedMastery: Array<{ score: number; lastPracticedAt: Date | null }>,
+): CourseProgressState {
+  if (sourceStats.sourceCount === 0) {
+    return 'NO_SOURCE';
+  }
+
+  if (
+    sourceStats.readySourceCount === 0 &&
+    sourceStats.processingSourceCount > 0
+  ) {
+    return 'PROCESSING';
+  }
+
+  if (sourceStats.readySourceCount === 0 && sourceStats.failedSourceCount > 0) {
+    return 'FAILED_ONLY';
+  }
+
+  if (knowledgeUnitCount === 0) {
+    return 'NO_KNOWLEDGE_UNITS';
+  }
+
+  if (practicedMastery.length === 0) {
+    return 'READY_NOT_PRACTICED';
+  }
+
+  return 'PRACTICED';
+}
+
+function safeRatio(numerator: number, denominator: number) {
+  if (denominator === 0) {
+    return 0;
+  }
+
+  return roundRatio(numerator / denominator);
+}
+
+function roundRatio(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Number(value.toFixed(3));
+}
+
+function latestPracticedAt(
+  mastery: Array<{ score: number; lastPracticedAt: Date | null }>,
+) {
+  return latestDate(mastery.map((item) => item.lastPracticedAt));
+}
+
+function latestDate(dates: Array<Date | null>) {
+  const timestamps = dates
+    .filter((date): date is Date => date instanceof Date)
+    .map((date) => date.getTime());
+
+  if (timestamps.length === 0) {
+    return null;
+  }
+
+  return new Date(Math.max(...timestamps));
 }
 
 function toCourseWithStatsDto(
