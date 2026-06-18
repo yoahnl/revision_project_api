@@ -117,6 +117,12 @@ export interface DocumentsRepository {
     documentId: string;
   }): Promise<boolean>;
 
+  deleteCourseDocumentForStudent(input: {
+    studentId: StudentId;
+    courseId: string;
+    documentId: string;
+  }): Promise<boolean>;
+
   findById(documentId: string): Promise<RevisionDocumentDto | null>;
 
   markProcessing(documentId: string): Promise<void>;

@@ -16,6 +16,7 @@ import {
 } from './application/course-progress.use-case';
 import { COURSES_REPOSITORY } from './application/courses.repository';
 import { CreateCourseUseCase } from './application/create-course.use-case';
+import { DeleteCourseDocumentUseCase } from './application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from './application/delete-course.use-case';
 import { GetCourseDetailUseCase } from './application/get-course-detail.use-case';
 import { GetCourseUseCase } from './application/get-course.use-case';
@@ -43,6 +44,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseUseCase,
     GetCourseDetailUseCase,
     DeleteCourseUseCase,
+    DeleteCourseDocumentUseCase,
     BackfillCoursesFromDocumentsDryRunUseCase,
     UploadCoursePdfForCourseUseCase,
     GetCourseRevisionSheetUseCase,
@@ -62,6 +64,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseUseCase,
     GetCourseDetailUseCase,
     DeleteCourseUseCase,
+    DeleteCourseDocumentUseCase,
     BackfillCoursesFromDocumentsDryRunUseCase,
     UploadCoursePdfForCourseUseCase,
     GetCourseRevisionSheetUseCase,

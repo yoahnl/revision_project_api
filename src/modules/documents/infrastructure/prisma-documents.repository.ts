@@ -179,6 +179,47 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
     });
   }
 
+  async deleteCourseDocumentForStudent(input: {
+    studentId: string;
+    courseId: string;
+    documentId: string;
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const document = await tx.document.findFirst({
+        where: {
+          id: input.documentId,
+          studentId: input.studentId,
+          courseId: input.courseId,
+        },
+        select: {
+          id: true,
+          subjectId: true,
+        },
+      });
+
+      if (!document) {
+        return false;
+      }
+
+      await tx.knowledgeUnit.deleteMany({
+        where: {
+          documentId: input.documentId,
+          subjectId: document.subjectId,
+        },
+      });
+
+      const result = await tx.document.deleteMany({
+        where: {
+          id: input.documentId,
+          studentId: input.studentId,
+          courseId: input.courseId,
+        },
+      });
+
+      return result.count === 1;
+    });
+  }
+
   async findById(documentId: string): Promise<RevisionDocumentDto | null> {
     const record = await this.prisma.document.findUnique({
       where: { id: documentId },

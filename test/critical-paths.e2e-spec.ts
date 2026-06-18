@@ -11,6 +11,7 @@ import { StartOpenQuestionActivityUseCase } from '../src/modules/activities/appl
 import { SubmitActivityResultUseCase } from '../src/modules/activities/application/submit-activity-result.use-case';
 import { SubmitOpenAnswerUseCase } from '../src/modules/activities/application/submit-open-answer.use-case';
 import { CreateCourseUseCase } from '../src/modules/courses/application/create-course.use-case';
+import { DeleteCourseDocumentUseCase } from '../src/modules/courses/application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from '../src/modules/courses/application/delete-course.use-case';
 import {
   CourseRevisionSheetSourceNotReadyError,
@@ -135,6 +136,9 @@ describe('Critical demo paths (e2e)', () => {
       await request(server).get('/courses/course-1/progress').expect(401);
       await request(server).get('/subjects/subject-1/progress').expect(401);
       await request(server).delete('/courses/course-1').expect(401);
+      await request(server)
+        .delete('/courses/course-1/sources/document-1')
+        .expect(401);
       await request(server).get('/courses/course-1/revision-sheet').expect(401);
       await request(server)
         .post('/courses/course-1/revision-sheet')
@@ -344,6 +348,16 @@ describe('Critical demo paths (e2e)', () => {
         studentId: currentStudent.id,
         courseId: 'course-1',
       });
+
+      await request(server)
+        .delete('/courses/course-1/sources/document-1')
+        .expect(204);
+
+      expect(mocks.deleteCourseDocument.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        courseId: 'course-1',
+        documentId: 'document-1',
+      });
     });
 
     it('maps Course API validation, not found and conflict errors', async () => {
@@ -379,6 +393,13 @@ describe('Critical demo paths (e2e)', () => {
       await request(server)
         .delete('/courses/course-with-documents')
         .expect(409);
+
+      mocks.deleteCourseDocument.execute.mockRejectedValueOnce(
+        new NotFoundException('Course source not found'),
+      );
+      await request(server)
+        .delete('/courses/course-1/sources/other-document')
+        .expect(404);
     });
 
     it('uploads a real course PDF source without client-provided subject context', async () => {
@@ -2201,6 +2222,8 @@ async function createAuthenticatedApp(
     .useValue(mocks.getSubjectProgress)
     .overrideProvider(DeleteCourseUseCase)
     .useValue(mocks.deleteCourse)
+    .overrideProvider(DeleteCourseDocumentUseCase)
+    .useValue(mocks.deleteCourseDocument)
     .overrideProvider(UploadCoursePdfForCourseUseCase)
     .useValue(mocks.uploadCoursePdfForCourse)
     .overrideProvider(GetCourseRevisionSheetUseCase)
@@ -2283,6 +2306,9 @@ function createCriticalPathMocks() {
     },
     deleteCourse: {
       execute: jest.fn().mockResolvedValue({ deleted: true }),
+    },
+    deleteCourseDocument: {
+      execute: jest.fn().mockResolvedValue(undefined),
     },
     uploadCoursePdfForCourse: {
       execute: jest.fn().mockResolvedValue(courseDocument()),

@@ -38,6 +38,7 @@ import {
   validateCoursePdfFile,
 } from '../../documents/interfaces/course-pdf-upload.validator';
 import { CreateCourseUseCase } from '../application/create-course.use-case';
+import { DeleteCourseDocumentUseCase } from '../application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
@@ -65,6 +66,7 @@ export class CoursesController {
     private readonly listCourses: ListSubjectCoursesWithStatsUseCase,
     private readonly getCourseDetail: GetCourseDetailUseCase,
     private readonly deleteCourseUseCase: DeleteCourseUseCase,
+    private readonly deleteCourseDocumentUseCase: DeleteCourseDocumentUseCase,
     private readonly uploadCoursePdfForCourseUseCase: UploadCoursePdfForCourseUseCase,
     private readonly getCourseRevisionSheetUseCase: GetCourseRevisionSheetUseCase,
     private readonly generateCourseRevisionSheetUseCase: GenerateCourseRevisionSheetUseCase,
@@ -177,6 +179,22 @@ export class CoursesController {
       .execute({
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Delete('courses/:courseId/sources/:documentId')
+  @HttpCode(204)
+  async deleteCourseDocument(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Param('documentId') documentId: string,
+  ): Promise<void> {
+    await this.deleteCourseDocumentUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        documentId: trimRequiredString(documentId, 'Document id is required'),
       })
       .catch(normalizeCourseError);
   }

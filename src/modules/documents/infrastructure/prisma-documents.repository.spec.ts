@@ -360,6 +360,48 @@ describe('PrismaDocumentsRepository', () => {
     expect(prisma.document.deleteMany).not.toHaveBeenCalled();
   });
 
+  it('deletes a course document only when it belongs to the requested course', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(
+      record({ courseId: 'course-1' }),
+    );
+    prisma.knowledgeUnit.deleteMany.mockResolvedValue({ count: 2 });
+    prisma.document.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      repository.deleteCourseDocumentForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+      }),
+    ).resolves.toBe(true);
+
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+        courseId: 'course-1',
+      },
+      select: {
+        id: true,
+        subjectId: true,
+      },
+    });
+    expect(prisma.knowledgeUnit.deleteMany).toHaveBeenCalledWith({
+      where: {
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+      },
+    });
+    expect(prisma.document.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+        courseId: 'course-1',
+      },
+    });
+  });
+
   it('marks uploaded documents as processing and records the running job', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.updateMany.mockResolvedValue({ count: 1 });

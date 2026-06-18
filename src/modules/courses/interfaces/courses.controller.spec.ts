@@ -15,6 +15,7 @@ import {
   StartCourseQuickRevisionSessionUseCase,
 } from '../application/start-course-quick-revision-session.use-case';
 import { CreateCourseUseCase } from '../application/create-course.use-case';
+import { DeleteCourseDocumentUseCase } from '../application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import {
   GetCourseProgressUseCase,
@@ -191,6 +192,40 @@ describe('CoursesController', () => {
     await expect(
       controller.deleteCourse(currentStudent, 'course-1'),
     ).rejects.toThrow(ConflictException);
+  });
+
+  it('deletes a course source for the current student', async () => {
+    const { controller, deleteCourseDocument } = createController();
+    deleteCourseDocument.execute.mockResolvedValue(undefined);
+
+    await expect(
+      controller.deleteCourseDocument(
+        currentStudent,
+        ' course-1 ',
+        ' document-1 ',
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(deleteCourseDocument.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+    });
+  });
+
+  it('maps missing course sources to 404', async () => {
+    const { controller, deleteCourseDocument } = createController();
+    deleteCourseDocument.execute.mockRejectedValue(
+      new NotFoundException('Course source not found'),
+    );
+
+    await expect(
+      controller.deleteCourseDocument(
+        currentStudent,
+        'course-1',
+        'document-other',
+      ),
+    ).rejects.toThrow(NotFoundException);
   });
 
   it('uploads a course PDF with course-derived context only', async () => {
@@ -391,6 +426,7 @@ function createController() {
   const listCourses = { execute: jest.fn() };
   const getCourseDetail = { execute: jest.fn() };
   const deleteCourse = { execute: jest.fn() };
+  const deleteCourseDocument = { execute: jest.fn() };
   const uploadCoursePdfForCourse = { execute: jest.fn() };
   const getCourseRevisionSheet = { execute: jest.fn() };
   const generateCourseRevisionSheet = { execute: jest.fn() };
@@ -404,6 +440,7 @@ function createController() {
       listCourses as unknown as ListSubjectCoursesWithStatsUseCase,
       getCourseDetail as unknown as GetCourseDetailUseCase,
       deleteCourse as unknown as DeleteCourseUseCase,
+      deleteCourseDocument as unknown as DeleteCourseDocumentUseCase,
       uploadCoursePdfForCourse as unknown as UploadCoursePdfForCourseUseCase,
       getCourseRevisionSheet as unknown as GetCourseRevisionSheetUseCase,
       generateCourseRevisionSheet as unknown as GenerateCourseRevisionSheetUseCase,
@@ -415,6 +452,7 @@ function createController() {
     listCourses,
     getCourseDetail,
     deleteCourse,
+    deleteCourseDocument,
     uploadCoursePdfForCourse,
     getCourseRevisionSheet,
     generateCourseRevisionSheet,
