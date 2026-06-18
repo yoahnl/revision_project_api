@@ -6,6 +6,7 @@ import type {
   CourseDetailDto,
   CourseDocumentStatus,
   CourseDto,
+  CourseQuickRevisionKnowledgeUnitDto,
   CourseOwnershipContext,
   CourseDocumentDto,
   CourseWithSourceStatsDto,
@@ -42,6 +43,19 @@ type DocumentAttachmentRecord = {
   subjectId: string;
   courseId: string | null;
   fileName: string;
+};
+
+type QuickRevisionKnowledgeUnitRecord = {
+  id: string;
+  subjectId: string;
+  documentId: string | null;
+  title: string;
+  displayOrder: number | null;
+  createdAt: Date;
+  mastery: Array<{
+    score: number;
+    lastPracticedAt: Date | null;
+  }>;
 };
 
 @Injectable()
@@ -306,6 +320,46 @@ export class PrismaCoursesRepository implements CoursesRepository {
     return document ? toCourseDocumentDto(document) : null;
   }
 
+  async findFirstQuickRevisionKnowledgeUnitForCourseDocument(input: {
+    studentId: string;
+    courseId: string;
+    subjectId: string;
+    documentId: string;
+  }): Promise<CourseQuickRevisionKnowledgeUnitDto | null> {
+    const knowledgeUnits = (await this.prisma.knowledgeUnit.findMany({
+      where: {
+        subjectId: input.subjectId,
+        documentId: input.documentId,
+        subject: { studentId: input.studentId },
+        document: {
+          id: input.documentId,
+          studentId: input.studentId,
+          subjectId: input.subjectId,
+          courseId: input.courseId,
+          kind: DocumentKind.COURSE_PDF,
+          status: 'READY',
+        },
+      },
+      select: {
+        id: true,
+        subjectId: true,
+        documentId: true,
+        title: true,
+        displayOrder: true,
+        createdAt: true,
+        mastery: {
+          where: { studentId: input.studentId },
+          select: { score: true, lastPracticedAt: true },
+          take: 1,
+        },
+      },
+    })) as QuickRevisionKnowledgeUnitRecord[];
+
+    const [selected] = knowledgeUnits.sort(compareQuickRevisionKnowledgeUnits);
+
+    return selected ? toCourseQuickRevisionKnowledgeUnitDto(selected) : null;
+  }
+
   async attachDocumentToCourse(input: {
     studentId: string;
     courseId: string;
@@ -513,6 +567,60 @@ function toDocumentAttachment(
     subjectId: document.subjectId,
     courseId: document.courseId,
     fileName: document.fileName,
+  };
+}
+
+function compareQuickRevisionKnowledgeUnits(
+  left: QuickRevisionKnowledgeUnitRecord,
+  right: QuickRevisionKnowledgeUnitRecord,
+) {
+  const leftMastery = left.mastery[0];
+  const rightMastery = right.mastery[0];
+  const scoreDelta = (leftMastery?.score ?? 0) - (rightMastery?.score ?? 0);
+
+  if (scoreDelta !== 0) {
+    return scoreDelta;
+  }
+
+  const leftPracticedAt = leftMastery?.lastPracticedAt?.getTime() ?? 0;
+  const rightPracticedAt = rightMastery?.lastPracticedAt?.getTime() ?? 0;
+  const practiceDelta = leftPracticedAt - rightPracticedAt;
+
+  if (practiceDelta !== 0) {
+    return practiceDelta;
+  }
+
+  const orderDelta =
+    (left.displayOrder ?? Number.MAX_SAFE_INTEGER) -
+    (right.displayOrder ?? Number.MAX_SAFE_INTEGER);
+
+  if (orderDelta !== 0) {
+    return orderDelta;
+  }
+
+  const createdAtDelta = left.createdAt.getTime() - right.createdAt.getTime();
+
+  if (createdAtDelta !== 0) {
+    return createdAtDelta;
+  }
+
+  return left.id.localeCompare(right.id);
+}
+
+function toCourseQuickRevisionKnowledgeUnitDto(
+  unit: QuickRevisionKnowledgeUnitRecord,
+): CourseQuickRevisionKnowledgeUnitDto {
+  if (!unit.documentId) {
+    throw new Error(
+      'Course quick revision knowledge unit is missing documentId',
+    );
+  }
+
+  return {
+    id: unit.id,
+    subjectId: unit.subjectId,
+    documentId: unit.documentId,
+    title: unit.title,
   };
 }
 

@@ -25,9 +25,11 @@ export class StartRevisionSessionUseCase {
   async execute(input: {
     studentId: string;
     subjectId: string;
+    courseId?: string | null;
     documentId?: string;
     knowledgeUnitId?: string;
     preferredAction?: RevisionSessionPreferredAction;
+    questionCount?: number;
   }): Promise<RevisionSessionResponseDto> {
     const actionKind = resolveInitialActionKind(input);
 
@@ -85,6 +87,9 @@ export class StartRevisionSessionUseCase {
       studentId: input.studentId,
       subjectId: context.subjectId,
       knowledgeUnitId: context.knowledgeUnitId ?? undefined,
+      ...(input.questionCount !== undefined
+        ? { questionCount: input.questionCount }
+        : {}),
     });
 
     return this.createSessionWithPayload({
@@ -102,6 +107,7 @@ export class StartRevisionSessionUseCase {
     input: {
       studentId: string;
       subjectId: string;
+      courseId?: string | null;
     };
     context: {
       subjectId: string;
@@ -119,6 +125,9 @@ export class StartRevisionSessionUseCase {
       await this.revisionSessionsRepository.createWithInitialAction({
         studentId: input.input.studentId,
         subjectId: input.context.subjectId,
+        ...(input.input.courseId !== undefined
+          ? { courseId: input.input.courseId }
+          : {}),
         documentId: input.documentId,
         knowledgeUnitId: input.knowledgeUnitId,
         action: {

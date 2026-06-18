@@ -22,6 +22,11 @@ import {
   GenerateCourseRevisionSheetUseCase,
   GetCourseRevisionSheetUseCase,
 } from '../application/course-revision-sheet.use-case';
+import {
+  CourseQuickRevisionKnowledgeUnitNotReadyError,
+  CourseQuickRevisionSourceNotReadyError,
+  StartCourseQuickRevisionSessionUseCase,
+} from '../application/start-course-quick-revision-session.use-case';
 import { toPublicRevisionSheet } from '../../study-artifacts/interfaces/study-artifact-response.mapper';
 import {
   MAX_DOCUMENT_BYTES,
@@ -57,6 +62,7 @@ export class CoursesController {
     private readonly uploadCoursePdfForCourseUseCase: UploadCoursePdfForCourseUseCase,
     private readonly getCourseRevisionSheetUseCase: GetCourseRevisionSheetUseCase,
     private readonly generateCourseRevisionSheetUseCase: GenerateCourseRevisionSheetUseCase,
+    private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
   ) {}
 
   @Get('subjects/:subjectId/courses')
@@ -198,6 +204,22 @@ export class CoursesController {
       .then(toPublicRevisionSheet)
       .catch(normalizeCourseError);
   }
+
+  @Post('courses/:courseId/revision-sessions/quick')
+  startQuickRevisionSession(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Body() body: Record<string, unknown> = {},
+  ) {
+    rejectClientOwnedQuickRevisionFields(body);
+
+    return this.startCourseQuickRevisionSessionUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
 }
 
 function validateCreateCourseBody(body: CreateCourseRequest) {
@@ -296,6 +318,22 @@ function rejectClientOwnedUploadFields(body: Record<string, unknown> = {}) {
   }
 }
 
+function rejectClientOwnedQuickRevisionFields(
+  body: Record<string, unknown> = {},
+) {
+  if (
+    'studentId' in body ||
+    'subjectId' in body ||
+    'documentId' in body ||
+    'knowledgeUnitId' in body ||
+    'courseId' in body
+  ) {
+    throw new BadRequestException(
+      'Course quick revision only accepts courseId from the URL',
+    );
+  }
+}
+
 function normalizeCourseError(error: unknown): never {
   if (error instanceof BadRequestException) {
     throw error;
@@ -306,6 +344,13 @@ function normalizeCourseError(error: unknown): never {
   }
 
   if (error instanceof CourseRevisionSheetSourceNotReadyError) {
+    throw new ConflictException(error.message);
+  }
+
+  if (
+    error instanceof CourseQuickRevisionSourceNotReadyError ||
+    error instanceof CourseQuickRevisionKnowledgeUnitNotReadyError
+  ) {
     throw new ConflictException(error.message);
   }
 

@@ -328,6 +328,83 @@ describe('PrismaCoursesRepository', () => {
     ).resolves.toBeNull();
   });
 
+  it('selects a quick revision knowledge unit from the READY course document', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      knowledgeUnitRecord({
+        id: 'unit-strong',
+        displayOrder: 0,
+        mastery: [{ score: 0.8, lastPracticedAt: null }],
+      }),
+      knowledgeUnitRecord({
+        id: 'unit-weak',
+        displayOrder: 1,
+        mastery: [
+          {
+            score: 0.2,
+            lastPracticedAt: new Date('2026-06-10T10:00:00.000Z'),
+          },
+        ],
+      }),
+    ]);
+
+    await expect(
+      repository.findFirstQuickRevisionKnowledgeUnitForCourseDocument({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        subjectId: 'subject-1',
+        documentId: 'document-ready-1',
+      }),
+    ).resolves.toMatchObject({
+      id: 'unit-weak',
+      subjectId: 'subject-1',
+      documentId: 'document-ready-1',
+    });
+
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        subjectId: 'subject-1',
+        documentId: 'document-ready-1',
+        subject: { studentId: 'student-1' },
+        document: {
+          id: 'document-ready-1',
+          studentId: 'student-1',
+          subjectId: 'subject-1',
+          courseId: 'course-1',
+          kind: 'COURSE_PDF',
+          status: 'READY',
+        },
+      },
+      select: {
+        id: true,
+        subjectId: true,
+        documentId: true,
+        title: true,
+        displayOrder: true,
+        createdAt: true,
+        mastery: {
+          where: { studentId: 'student-1' },
+          select: { score: true, lastPracticedAt: true },
+          take: 1,
+        },
+      },
+    });
+  });
+
+  it('returns null when a READY course document has no knowledge unit', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findMany.mockResolvedValue([]);
+
+    await expect(
+      repository.findFirstQuickRevisionKnowledgeUnitForCourseDocument({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        subjectId: 'subject-1',
+        documentId: 'document-ready-1',
+      }),
+    ).resolves.toBeNull();
+  });
+
   it('produces an idempotent dry-run backfill without writes', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.findMany.mockResolvedValue([
@@ -403,6 +480,9 @@ function createPrismaMock() {
       update: jest.fn(),
       updateMany: jest.fn(),
     },
+    knowledgeUnit: {
+      findMany: jest.fn(),
+    },
     $transaction: jest.fn(),
   };
 }
@@ -430,6 +510,19 @@ function documentRecord(overrides: Record<string, unknown> = {}) {
     subjectId: 'subject-1',
     courseId: null,
     fileName: 'Cours stats S1.pdf',
+    ...overrides,
+  };
+}
+
+function knowledgeUnitRecord(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'unit-1',
+    subjectId: 'subject-1',
+    documentId: 'document-ready-1',
+    title: 'Contrôle parlementaire',
+    displayOrder: 0,
+    createdAt: new Date('2026-06-18T10:00:00.000Z'),
+    mastery: [],
     ...overrides,
   };
 }

@@ -28,5 +28,6 @@ import { RevisionSessionsController } from './interfaces/revision-sessions.contr
       useClass: PrismaRevisionSessionsRepository,
     },
   ],
+  exports: [StartRevisionSessionUseCase],
 })
 export class RevisionSessionsModule {}

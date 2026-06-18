@@ -58,6 +58,13 @@ export interface CourseOwnershipContext {
   subjectId: string;
 }
 
+export interface CourseQuickRevisionKnowledgeUnitDto {
+  id: string;
+  subjectId: string;
+  documentId: string;
+  title: string | null;
+}
+
 export interface CourseBackfillDryRunItem {
   documentId: string;
   studentId: string;
@@ -109,6 +116,13 @@ export interface CoursesRepository {
     studentId: string;
     courseId: string;
   }): Promise<CourseDocumentDto | null>;
+
+  findFirstQuickRevisionKnowledgeUnitForCourseDocument(input: {
+    studentId: string;
+    courseId: string;
+    subjectId: string;
+    documentId: string;
+  }): Promise<CourseQuickRevisionKnowledgeUnitDto | null>;
 
   attachDocumentToCourse(input: {
     studentId: string;

@@ -20,6 +20,11 @@ import {
 import { GetCourseDetailUseCase } from '../src/modules/courses/application/get-course-detail.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../src/modules/courses/application/list-subject-courses-with-stats.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../src/modules/courses/application/upload-course-pdf-for-course.use-case';
+import {
+  CourseQuickRevisionKnowledgeUnitNotReadyError,
+  CourseQuickRevisionSourceNotReadyError,
+  StartCourseQuickRevisionSessionUseCase,
+} from '../src/modules/courses/application/start-course-quick-revision-session.use-case';
 import { CourseContainsDocumentsError } from '../src/modules/courses/domain/course.entity';
 import {
   richClosedExerciseFixture,
@@ -420,6 +425,73 @@ describe('Critical demo paths (e2e)', () => {
 
       await request(app.getHttpServer())
         .post('/courses/course-without-ready-source/revision-sheet')
+        .expect(409);
+    });
+
+    it('starts a course-level quick revision session without client-owned ids', async () => {
+      const response = await request(app.getHttpServer())
+        .post('/courses/course-1/revision-sessions/quick')
+        .send({})
+        .expect(201);
+
+      expect(
+        mocks.startCourseQuickRevisionSession.execute.mock.calls,
+      ).toMatchObject([
+        [
+          {
+            studentId: currentStudent.id,
+            courseId: 'course-1',
+          },
+        ],
+      ]);
+      const responseBody = response.body as {
+        session?: Record<string, unknown>;
+        currentAction?: Record<string, unknown>;
+      };
+      expect(responseBody.session).toMatchObject({
+        id: 'revision-session-1',
+        courseId: 'course-1',
+        mode: 'QUICK',
+      });
+      expect(responseBody.currentAction).toMatchObject({
+        kind: 'DIAGNOSTIC_QUIZ',
+      });
+      expect(JSON.stringify(responseBody)).not.toContain('correctChoiceId');
+      expect(JSON.stringify(responseBody)).not.toContain('correctAnswers');
+      expect(JSON.stringify(responseBody)).not.toContain('score');
+      expect(
+        JSON.stringify(
+          mocks.startCourseQuickRevisionSession.execute.mock.calls,
+        ),
+      ).not.toContain('client-picked-document');
+    });
+
+    it('rejects client-owned quick revision ids and maps readiness errors', async () => {
+      await request(app.getHttpServer())
+        .post('/courses/course-1/revision-sessions/quick')
+        .send({
+          subjectId: 'client-subject',
+          documentId: 'client-picked-document',
+          knowledgeUnitId: 'client-unit',
+        })
+        .expect(400);
+
+      mocks.startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
+        new CourseQuickRevisionSourceNotReadyError(),
+      );
+
+      await request(app.getHttpServer())
+        .post('/courses/course-without-ready-source/revision-sessions/quick')
+        .send({})
+        .expect(409);
+
+      mocks.startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
+        new CourseQuickRevisionKnowledgeUnitNotReadyError(),
+      );
+
+      await request(app.getHttpServer())
+        .post('/courses/course-without-ready-unit/revision-sessions/quick')
+        .send({})
         .expect(409);
     });
 
@@ -2052,6 +2124,8 @@ async function createAuthenticatedApp(
     .useValue(mocks.getCourseRevisionSheet)
     .overrideProvider(GenerateCourseRevisionSheetUseCase)
     .useValue(mocks.generateCourseRevisionSheet)
+    .overrideProvider(StartCourseQuickRevisionSessionUseCase)
+    .useValue(mocks.startCourseQuickRevisionSession)
     .overrideProvider(StartNextActivityUseCase)
     .useValue(mocks.startNextActivity)
     .overrideProvider(StartOpenQuestionActivityUseCase)
@@ -2129,6 +2203,11 @@ function createCriticalPathMocks() {
     },
     generateCourseRevisionSheet: {
       execute: jest.fn().mockResolvedValue(revisionSheet()),
+    },
+    startCourseQuickRevisionSession: {
+      execute: jest
+        .fn()
+        .mockResolvedValue(courseQuickRevisionSessionResponse()),
     },
     startNextActivity: {
       execute: jest.fn().mockResolvedValue(diagnosticQuizActivity()),
@@ -2820,8 +2899,10 @@ function revisionSessionResponse() {
       id: 'revision-session-1',
       status: 'STARTED',
       subjectId: 'subject-1',
+      courseId: null,
       documentId: 'document-1',
       knowledgeUnitId: 'unit-1',
+      mode: 'QUICK',
       createdAt: new Date('2026-06-15T12:00:00.000Z'),
       completedAt: null,
     },
@@ -2849,14 +2930,53 @@ function revisionSessionResponse() {
   };
 }
 
+function courseQuickRevisionSessionResponse() {
+  return {
+    session: {
+      id: 'revision-session-1',
+      status: 'STARTED',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      mode: 'QUICK',
+      createdAt: new Date('2026-06-15T12:00:00.000Z'),
+      completedAt: null,
+    },
+    currentAction: {
+      id: 'action-1',
+      kind: 'DIAGNOSTIC_QUIZ',
+      status: 'READY',
+      displayOrder: 0,
+      activitySessionId: 'quiz-session-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      payload: diagnosticQuizActivity(),
+    },
+    history: [
+      {
+        id: 'action-1',
+        kind: 'DIAGNOSTIC_QUIZ',
+        status: 'READY',
+        displayOrder: 0,
+        activitySessionId: 'quiz-session-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    ],
+  };
+}
+
 function richClosedRevisionSessionResponse() {
   return {
     session: {
       id: 'revision-session-1',
       status: 'STARTED',
       subjectId: 'subject-1',
+      courseId: null,
       documentId: 'document-1',
       knowledgeUnitId: 'unit-1',
+      mode: 'QUICK',
       createdAt: new Date('2026-06-15T12:00:00.000Z'),
       completedAt: null,
     },

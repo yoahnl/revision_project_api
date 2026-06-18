@@ -136,6 +136,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
   async createWithInitialAction(input: {
     studentId: string;
     subjectId: string;
+    courseId?: string | null;
     documentId: string | null;
     knowledgeUnitId: string | null;
     action: {
@@ -152,6 +153,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
         data: {
           studentId: input.studentId,
           subjectId: input.subjectId,
+          courseId: input.courseId ?? null,
           documentId: input.documentId,
           knowledgeUnitId: input.knowledgeUnitId,
           status: RevisionSessionStatus.STARTED,
@@ -228,6 +230,16 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       where: {
         subjectId: session.subjectId,
         subject: { studentId: input.studentId },
+        ...(session.courseId
+          ? {
+              document: {
+                studentId: input.studentId,
+                courseId: session.courseId,
+                kind: 'COURSE_PDF',
+                status: 'READY',
+              },
+            }
+          : {}),
       },
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
       take: 20,

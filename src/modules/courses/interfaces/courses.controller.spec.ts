@@ -9,6 +9,11 @@ import {
   GenerateCourseRevisionSheetUseCase,
   GetCourseRevisionSheetUseCase,
 } from '../application/course-revision-sheet.use-case';
+import {
+  CourseQuickRevisionKnowledgeUnitNotReadyError,
+  CourseQuickRevisionSourceNotReadyError,
+  StartCourseQuickRevisionSessionUseCase,
+} from '../application/start-course-quick-revision-session.use-case';
 import { CreateCourseUseCase } from '../application/create-course.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
@@ -260,6 +265,63 @@ describe('CoursesController', () => {
       controller.generateCourseRevisionSheet(currentStudent, 'course-1'),
     ).rejects.toThrow(ConflictException);
   });
+
+  it('starts a course quick revision session with URL courseId only', async () => {
+    const { controller, startCourseQuickRevisionSession } = createController();
+    startCourseQuickRevisionSession.execute.mockResolvedValue(
+      revisionSessionResponse(),
+    );
+
+    await expect(
+      controller.startQuickRevisionSession(currentStudent, ' course-1 '),
+    ).resolves.toMatchObject({
+      session: {
+        id: 'session-1',
+        courseId: 'course-1',
+        mode: 'QUICK',
+      },
+      currentAction: {
+        kind: 'DIAGNOSTIC_QUIZ',
+      },
+    });
+
+    expect(startCourseQuickRevisionSession.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+  });
+
+  it('rejects client-owned course quick revision fields', () => {
+    const { controller, startCourseQuickRevisionSession } = createController();
+
+    expect(() =>
+      controller.startQuickRevisionSession(currentStudent, 'course-1', {
+        subjectId: 'subject-1',
+      }),
+    ).toThrow(BadRequestException);
+
+    expect(startCourseQuickRevisionSession.execute).not.toHaveBeenCalled();
+  });
+
+  it('maps course quick revision unavailability to 409', async () => {
+    const { controller, startCourseQuickRevisionSession } = createController();
+
+    startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
+      new CourseQuickRevisionSourceNotReadyError(),
+    );
+
+    await expect(
+      controller.startQuickRevisionSession(currentStudent, 'course-1'),
+    ).rejects.toThrow(ConflictException);
+
+    startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
+      new CourseQuickRevisionKnowledgeUnitNotReadyError(),
+    );
+
+    await expect(
+      controller.startQuickRevisionSession(currentStudent, 'course-1'),
+    ).rejects.toThrow(ConflictException);
+  });
 });
 
 const currentStudent = {
@@ -277,6 +339,7 @@ function createController() {
   const uploadCoursePdfForCourse = { execute: jest.fn() };
   const getCourseRevisionSheet = { execute: jest.fn() };
   const generateCourseRevisionSheet = { execute: jest.fn() };
+  const startCourseQuickRevisionSession = { execute: jest.fn() };
 
   return {
     controller: new CoursesController(
@@ -287,6 +350,7 @@ function createController() {
       uploadCoursePdfForCourse as unknown as UploadCoursePdfForCourseUseCase,
       getCourseRevisionSheet as unknown as GetCourseRevisionSheetUseCase,
       generateCourseRevisionSheet as unknown as GenerateCourseRevisionSheetUseCase,
+      startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
     ),
     createCourse,
     listCourses,
@@ -295,6 +359,7 @@ function createController() {
     uploadCoursePdfForCourse,
     getCourseRevisionSheet,
     generateCourseRevisionSheet,
+    startCourseQuickRevisionSession,
   };
 }
 
@@ -449,5 +514,35 @@ function publicRevisionSheet(overrides: Record<string, unknown> = {}) {
       },
     ],
     ...overrides,
+  };
+}
+
+function revisionSessionResponse() {
+  return {
+    session: {
+      id: 'session-1',
+      status: 'STARTED',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      mode: 'QUICK',
+      createdAt: new Date('2026-06-18T10:00:00.000Z'),
+      completedAt: null,
+    },
+    currentAction: {
+      id: 'action-1',
+      kind: 'DIAGNOSTIC_QUIZ',
+      status: 'READY',
+      displayOrder: 0,
+      activitySessionId: 'activity-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      payload: {
+        type: 'diagnostic_quiz',
+        sessionId: 'activity-1',
+      },
+    },
+    history: [],
   };
 }

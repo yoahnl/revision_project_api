@@ -55,6 +55,7 @@ export interface RevisionSessionsRepository {
   createWithInitialAction(input: {
     studentId: string;
     subjectId: string;
+    courseId?: string | null;
     documentId: string | null;
     knowledgeUnitId: string | null;
     action: {

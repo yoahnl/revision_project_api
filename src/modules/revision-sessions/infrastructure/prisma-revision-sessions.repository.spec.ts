@@ -68,6 +68,7 @@ describe('PrismaRevisionSessionsRepository', () => {
       data: {
         studentId: 'student-1',
         subjectId: 'subject-1',
+        courseId: null,
         documentId: 'document-1',
         knowledgeUnitId: 'unit-1',
         status: 'STARTED',
@@ -91,6 +92,45 @@ describe('PrismaRevisionSessionsRepository', () => {
     expect(result.currentAction?.kind).toBe('OPEN_QUESTION');
     expect(result.session.courseId).toBeNull();
     expect(result.session.mode).toBe('QUICK');
+  });
+
+  it('persists the courseId for course-level quick sessions', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.create.mockResolvedValue(
+      revisionSessionRecord({ courseId: 'course-1' }),
+    );
+    prisma.revisionSessionAction.create.mockResolvedValue(actionRecord());
+
+    const result = await repository.createWithInitialAction({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      action: {
+        kind: 'DIAGNOSTIC_QUIZ',
+        status: 'READY',
+        displayOrder: 0,
+        activitySessionId: 'activity-session-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    });
+
+    expect(prisma.revisionSession.create.mock.calls).toMatchObject([
+      [
+        {
+          data: {
+            courseId: 'course-1',
+            mode: 'QUICK',
+          },
+        },
+      ],
+    ]);
+    expect(result.session.courseId).toBe('course-1');
   });
 
   it('persists a rich closed session action without activity session id', async () => {
@@ -235,6 +275,39 @@ describe('PrismaRevisionSessionsRepository', () => {
     ]);
   });
 
+  it('limits planning candidates to READY course documents for course sessions', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findFirst.mockResolvedValue({
+      ...revisionSessionRecord({ courseId: 'course-1' }),
+      actions: [],
+    });
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      { id: 'unit-course-1', documentId: 'document-1', title: 'Notion 1' },
+    ]);
+
+    const result = await repository.findPlanningContextByIdForStudent({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        subjectId: 'subject-1',
+        subject: { studentId: 'student-1' },
+        document: {
+          studentId: 'student-1',
+          courseId: 'course-1',
+          kind: 'COURSE_PDF',
+          status: 'READY',
+        },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+      take: 20,
+      select: { id: true, documentId: true, title: true },
+    });
+    expect(result.allowedKnowledgeUnitIds).toEqual(['unit-course-1']);
+  });
+
   it('appends an action with the next display order inside a transaction', async () => {
     const { prisma, repository } = createRepository();
     prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
@@ -334,7 +407,13 @@ function createPrismaMock() {
   return prisma;
 }
 
-function revisionSessionRecord() {
+function revisionSessionRecord(
+  overrides: Partial<ReturnType<typeof revisionSessionRecordShape>> = {},
+) {
+  return { ...revisionSessionRecordShape(), ...overrides };
+}
+
+function revisionSessionRecordShape() {
   return {
     id: 'revision-session-1',
     studentId: 'student-1',

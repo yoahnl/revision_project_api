@@ -145,17 +145,24 @@ export class RequestNextRevisionSessionActionUseCase {
       };
     }
 
+    const courseBoundKnowledgeUnitId =
+      input.context.session.courseId !== null
+        ? (input.decision.knowledgeUnitId ??
+          input.context.session.knowledgeUnitId ??
+          input.context.allowedKnowledgeUnitIds[0])
+        : input.decision.knowledgeUnitId;
+
     const activity = await this.startNextActivity.execute({
       studentId: input.studentId,
       subjectId: input.subjectId,
-      knowledgeUnitId: input.decision.knowledgeUnitId ?? undefined,
+      knowledgeUnitId: courseBoundKnowledgeUnitId ?? undefined,
     });
 
     return {
       payload: activity,
       activitySessionId: activity.sessionId,
       documentId: activity.documentId ?? input.sessionDocumentId,
-      knowledgeUnitId: input.decision.knowledgeUnitId,
+      knowledgeUnitId: courseBoundKnowledgeUnitId ?? null,
     };
   }
 }
