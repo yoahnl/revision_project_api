@@ -3,8 +3,12 @@ import { DocumentKind } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import type {
   CourseBackfillDryRunResult,
+  CourseDetailDto,
+  CourseDocumentStatus,
   CourseDto,
   CourseOwnershipContext,
+  CourseDocumentDto,
+  CourseWithSourceStatsDto,
   CoursesRepository,
   CreateCourseRepositoryInput,
 } from '../application/courses.repository';
@@ -14,6 +18,23 @@ import {
 } from '../domain/course.entity';
 
 type CourseRecord = CourseDto;
+
+type CourseDetailRecord = CourseRecord & {
+  subject: {
+    id: string;
+    name: string;
+  };
+  documents: Array<{
+    id: string;
+    courseId: string | null;
+    fileName: string;
+    kind: 'COURSE_PDF' | 'EXAM_PDF' | 'EXAM_IMAGE';
+    status: CourseDocumentStatus;
+    errorCode: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+};
 
 type DocumentAttachmentRecord = {
   id: string;
@@ -88,6 +109,114 @@ export class PrismaCoursesRepository implements CoursesRepository {
     });
 
     return courses.map(toCourseDto);
+  }
+
+  async listBySubjectForStudentWithStats(input: {
+    studentId: string;
+    subjectId: string;
+  }): Promise<CourseWithSourceStatsDto[]> {
+    await ensureSubjectForStudent(this.prisma, input);
+
+    const courses = (await this.prisma.course.findMany({
+      where: {
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+    })) as CourseRecord[];
+
+    if (courses.length === 0) {
+      return [];
+    }
+
+    const documents = await this.prisma.document.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: { in: courses.map((course) => course.id) },
+      },
+      select: {
+        courseId: true,
+        status: true,
+      },
+    });
+
+    const statsByCourseId = new Map<string, CourseDocumentStats>();
+
+    for (const course of courses) {
+      statsByCourseId.set(course.id, emptySourceStats());
+    }
+
+    for (const document of documents) {
+      if (!document.courseId) {
+        continue;
+      }
+
+      const stats = statsByCourseId.get(document.courseId);
+      if (!stats) {
+        continue;
+      }
+
+      applyDocumentStatus(stats, document.status);
+    }
+
+    return courses.map((course) =>
+      toCourseWithStatsDto(course, statsByCourseId.get(course.id)),
+    );
+  }
+
+  async findDetailByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDetailDto | null> {
+    const course = await this.prisma.course.findFirst({
+      where: {
+        id: input.courseId,
+        studentId: input.studentId,
+      },
+      include: {
+        subject: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        documents: {
+          where: {
+            studentId: input.studentId,
+          },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            courseId: true,
+            fileName: true,
+            kind: true,
+            status: true,
+            errorCode: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!course) {
+      return null;
+    }
+
+    const stats = emptySourceStats();
+    const sources = course.documents.map((document) => {
+      applyDocumentStatus(stats, document.status);
+      return toCourseDocumentDto(document);
+    });
+
+    return {
+      course: toCourseWithStatsDto(course, stats),
+      subject: {
+        id: course.subject.id,
+        name: course.subject.name,
+      },
+      sources,
+    };
   }
 
   async deleteIfEmpty(input: {
@@ -281,6 +410,66 @@ function toCourseDto(course: CourseRecord): CourseDto {
     displayOrder: course.displayOrder,
     createdAt: course.createdAt,
     updatedAt: course.updatedAt,
+  };
+}
+
+type CourseDocumentStats = {
+  sourceCount: number;
+  readySourceCount: number;
+  processingSourceCount: number;
+  failedSourceCount: number;
+};
+
+function emptySourceStats(): CourseDocumentStats {
+  return {
+    sourceCount: 0,
+    readySourceCount: 0,
+    processingSourceCount: 0,
+    failedSourceCount: 0,
+  };
+}
+
+function applyDocumentStatus(
+  stats: CourseDocumentStats,
+  status: CourseDocumentStatus,
+) {
+  stats.sourceCount += 1;
+
+  if (status === 'READY') {
+    stats.readySourceCount += 1;
+  } else if (status === 'PROCESSING') {
+    stats.processingSourceCount += 1;
+  } else if (status === 'FAILED') {
+    stats.failedSourceCount += 1;
+  }
+}
+
+function toCourseWithStatsDto(
+  course: CourseRecord,
+  stats: CourseDocumentStats = emptySourceStats(),
+): CourseWithSourceStatsDto {
+  return {
+    ...toCourseDto(course),
+    sourceCount: stats.sourceCount,
+    readySourceCount: stats.readySourceCount,
+    processingSourceCount: stats.processingSourceCount,
+    failedSourceCount: stats.failedSourceCount,
+  };
+}
+
+function toCourseDocumentDto(
+  document: CourseDetailRecord['documents'][number],
+): CourseDocumentDto {
+  return {
+    id: document.id,
+    courseId: document.courseId ?? '',
+    documentId: document.id,
+    fileName: document.fileName,
+    kind: document.kind,
+    status: document.status,
+    errorCode: document.errorCode,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
   };
 }
 

@@ -171,6 +171,8 @@ function createRepository(): jest.Mocked<CoursesRepository> {
     attachDocumentToCourse: jest.fn(),
     backfillFromExistingDocumentsDryRun: jest.fn(),
     backfillFromExistingDocuments: jest.fn(),
+    listBySubjectForStudentWithStats: jest.fn(),
+    findDetailByIdForStudent: jest.fn(),
   };
 }
 

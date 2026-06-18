@@ -1,3 +1,1830 @@
+# CORE-02 — Course API + accueil/détail réels — API
+
+## 1. Résultat
+
+CORE-02 côté backend est réalisé : l’API NestJS expose les endpoints Course minimaux préparés par CORE-01, avec authentification Firebase, ownership strict par `studentId`, validation des payloads, DTO publics bornés, mapping d’erreurs HTTP et tests unitaires/e2e. Aucun endpoint d’upload sous cours n’a été ajouté, aucune table ni modèle `CourseSource` n’a été créé et aucun flow IA/rich closed n’a été modifié.
+
+Endpoints ajoutés :
+
+- `GET /subjects/:subjectId/courses`
+- `POST /subjects/:subjectId/courses`
+- `GET /courses/:courseId`
+- `DELETE /courses/:courseId`
+
+## 2. Audit initial
+
+Sources inspectées côté API :
+
+- `docs/MVP_REAL_INTEGRATION_ROADMAP.md`
+- `docs/MVP_REAL_INTEGRATION_DECISIONS.md`
+- `docs/core/CORE_01_COURSE_MINIMAL_DOCUMENT_COURSE_ID_REPORT.md`
+- `prisma/schema.prisma`
+- `src/app.module.ts`
+- `src/modules/courses/**`
+- `src/modules/subjects/**`
+- `src/modules/documents/**`
+- `src/modules/revision-sessions/**`
+- `test/critical-paths.e2e-spec.ts`
+
+Constats :
+
+- CORE-01 avait créé `Course`, `Document.courseId`, les use cases internes et `CoursesModule`, mais sans controller public.
+- `Subject` et `Course` sont filtrés par `studentId`; le repository Course vérifie la matière possédée avant création/listing.
+- La suppression d’un cours avec documents passe déjà par `CourseContainsDocumentsError`; CORE-02 mappe cette erreur en `409 Conflict`.
+- `Document.courseId` reste nullable et l’upload `/documents/course-pdf` existant continue de fonctionner sans rattachement Course.
+- Les e2e critiques remplacent les use cases par des mocks : l’ajout du controller Course impose donc d’override les nouveaux use cases dans le test app.
+
+## 3. Préflight Git
+
+- Repo : `revision_project_api` (`/Users/karim/Project/app-révision/api`)
+- Branche initiale observée : `main`
+- Status initial CORE-02 observé : clean avant modifications du lot
+- Derniers commits observés :
+  - `e7328c7 024: Intégration des cours et documents associés`
+  - `79d665c 025: Audit readiness V1`
+  - `232a1b3 023: Ajout du runbook de démonstration V1`
+  - `493888e 022: Intégration des QCM avec choix d'images`
+  - `5441805 021: Intégration des QCM de calcul`
+- Aucun commit, amend, merge, rebase, push ou tag n’a été fait.
+
+## 4. Périmètre réalisé
+
+### API
+
+- Ajout du `CoursesController` protégé par `FirebaseAuthGuard`.
+- Ajout des DTO/mappers publics Course.
+- Ajout des use cases lecture : listing avec compteurs de documents/sources et détail avec documents attachés.
+- Extension du repository Course pour lire les compteurs et détails sans exposer de payload arbitraire.
+- Extension du module Course avec `AuthModule`, controller et providers.
+
+### Tests
+
+- Tests unitaires controller : validation, création, détail, 404, 409.
+- Tests use cases lecture : validation d’IDs, listing, détail, not found.
+- Tests e2e critiques : auth requise, happy path Course API, validation/not found/conflict.
+- Non-régression : rich closed, subjects, documents, revision-sessions, e2e complet, build, lint.
+
+## 5. Contrat API Course
+
+### `GET /subjects/:subjectId/courses`
+
+Retourne une liste de cours de la matière possédée par l’étudiant courant, triée côté repository par `displayOrder` puis `createdAt`, avec compteurs de documents attachés :
+
+- `sourceCount`
+- `readySourceCount`
+- `processingSourceCount`
+- `failedSourceCount`
+
+Le nom JSON `sourceCount` reste volontairement orienté produit, mais l’implémentation s’appuie uniquement sur `Document.courseId`, sans table `CourseSource`.
+
+### `POST /subjects/:subjectId/courses`
+
+Crée un cours vide. Payload accepté :
+
+- `title` requis, trim, minimum 2 caractères, maximum 140.
+- `description` optionnelle, trim, maximum 1000.
+- `chapterLabel` optionnelle, trim, maximum 120.
+- `estimatedMinutes` optionnel, entier 1 à 1440.
+
+Le `studentId` vient uniquement du guard/auth, jamais du body.
+
+### `GET /courses/:courseId`
+
+Retourne le détail réel du cours possédé, avec résumé matière et documents déjà rattachés via `courseId`.
+
+### `DELETE /courses/:courseId`
+
+Supprime uniquement un cours vide. Si des documents sont attachés, retourne `409 Conflict`. Aucun document ou fichier utilisateur n’est supprimé implicitement.
+
+## 6. Ownership et sécurité
+
+- Tous les endpoints utilisent `@CurrentStudent()`.
+- Le `studentId` n’est jamais accepté depuis le body ou les query params.
+- La création/listing vérifie que la matière appartient à l’étudiant.
+- Le détail/suppression vérifient que le cours appartient à l’étudiant.
+- Le repository conserve la protection cross-subject/cross-student pour l’attachement futur de documents.
+- Aucun secret, token réel, UID réel ou URL privée n’a été ajouté.
+
+## 7. Non-objectifs respectés
+
+- Pas de CORE-03.
+- Pas d’upload PDF sous cours.
+- Pas de table/modèle `CourseSource`.
+- Pas d’endpoint fiche/progression/session quick Course.
+- Pas de modification Prisma/migration dans CORE-02.
+- Pas de modification Genkit/IA.
+- Pas de modification frontend dans le repo API.
+- Pas de suppression destructive.
+
+## 8. Fichiers créés/modifiés/supprimés
+
+### Créés
+
+- `src/modules/courses/application/course-read-use-cases.spec.ts`
+- `src/modules/courses/application/get-course-detail.use-case.ts`
+- `src/modules/courses/application/list-subject-courses-with-stats.use-case.ts`
+- `src/modules/courses/interfaces/course-response.dto.ts`
+- `src/modules/courses/interfaces/create-course.request.ts`
+- `src/modules/courses/interfaces/courses.controller.ts`
+- `src/modules/courses/interfaces/courses.controller.spec.ts`
+- `docs/core/CORE_02_COURSE_API_AND_FRONT_INTEGRATION_REPORT.md`
+
+### Modifiés
+
+- `src/modules/courses/application/course-use-cases.spec.ts`
+- `src/modules/courses/application/courses.repository.ts`
+- `src/modules/courses/courses.module.ts`
+- `src/modules/courses/infrastructure/prisma-courses.repository.ts`
+- `test/critical-paths.e2e-spec.ts`
+
+### Supprimés
+
+- Aucun.
+
+## 9. Tests ajoutés ou renforcés
+
+- `course-read-use-cases.spec.ts` : lecture Course réelle, validation IDs, not found.
+- `courses.controller.spec.ts` : contrat HTTP controller, validation, mapping 404/409.
+- `critical-paths.e2e-spec.ts` : routes Course protégées, happy path create/list/get/delete, erreurs 400/404/409.
+- `course-use-cases.spec.ts` : mock repository aligné sur les nouvelles méthodes.
+
+## 10. Validations lancées avec résultats
+
+- `npm test -- modules/courses --runInBand` : OK, 4 suites passées, 28 tests passés.
+- `npm run test:e2e -- --runInBand` : un premier passage a échoué transitoirement sur un submit rich closed V1-C (405), le test isolé `routes rich closed V1-C institution matrix` est passé, puis le rerun e2e complet est passé : 2 suites, 27 tests. Après renommage anti-`CourseSource`, le rerun e2e est encore OK.
+- `npm test -- subjects --runInBand` : OK, 5 suites, 16 tests.
+- `npm test -- documents --runInBand` : OK, 9 suites, 63 tests.
+- `npm test -- revision-sessions --runInBand` : OK, 6 suites, 41 tests.
+- `npx prisma validate` : OK.
+- `npx prisma generate` : OK, client Prisma généré.
+- `npm run lint:check` : premier passage KO sur cinq erreurs dans mes ajouts, corrigé, puis OK. Après renommage anti-`CourseSource`, encore OK.
+- `npm run build` : premier passage KO sur un narrowing TypeScript `unknown`, corrigé, puis OK. Après renommage anti-`CourseSource`, encore OK.
+- `npm test -- --runInBand` : OK, 73 suites passées, 1 suite skipped existante, 630 tests passés, 1 test skipped existant.
+
+## 11. Validations non lancées avec justification
+
+- Aucune migration Prisma appliquée : CORE-02 ne modifie pas Prisma.
+- Aucun seed/backfill lancé : hors périmètre.
+- Aucun provider IA réel lancé : hors périmètre et interdit.
+- Aucun déploiement lancé.
+
+## 12. Risques restants
+
+- L’API Course expose les cours, mais l’upload sous cours reste volontairement absent jusqu’à CORE-03.
+- Les compteurs de documents attachés dépendent de `Document.status`; `UPLOADED` compte comme source totale mais pas comme processing/ready/failed.
+- Le controller fait de la validation manuelle pour rester cohérent avec les controllers existants ; une future passe pourrait centraliser en pipes/classes DTO, mais ce n’était pas l’objectif du lot.
+
+## 13. Ce qui reste pour CORE-03
+
+- Ajouter l’upload PDF sous cours.
+- Dériver `studentId` et `subjectId` depuis le cours, pas depuis le body client.
+- Utiliser/réviser `attachDocumentToCourse` avec tests HTTP cross-student/cross-subject.
+- Déclencher le pipeline document existant sans régression.
+
+## 14. Auto-review
+
+- Pas de table/modèle `CourseSource`.
+- Pas de CORE-03.
+- Pas de modification Prisma.
+- Pas de suppression implicite de documents.
+- DELETE cours avec documents => `409`.
+- Endpoints protégés par auth.
+- Ownership étudiant/matière conservé.
+- Rich closed/e2e non cassés après rerun complet.
+- Aucun commit réalisé.
+
+## 15. Points discutables du prompt
+
+- Exposer DELETE dès CORE-02 est utile pour le contrat, mais l’UI front ne s’en sert pas encore ; c’est acceptable car le comportement `409` est important à verrouiller tôt.
+- Garder la validation controller manuelle évite une refonte, mais il faudra probablement standardiser les DTO plus tard.
+- Les compteurs de sources/documents sont simples ; une progression Course plus riche devra attendre CORE-04/CORE-05.
+
+## 16. Contenu complet des fichiers créés/modifiés/supprimés
+
+Le présent rapport est un fichier créé, mais il n’est pas auto-inclus dans cette section afin d’éviter une récursion infinie. Aucun fichier supprimé. Tous les autres fichiers créés/modifiés sont inclus intégralement ci-dessous.
+
+### Modifié `src/modules/courses/application/course-use-cases.spec.ts`
+
+```ts
+import { BackfillCoursesFromDocumentsDryRunUseCase } from './backfill-courses-from-documents.use-case';
+import { CreateCourseUseCase } from './create-course.use-case';
+import { DeleteCourseUseCase } from './delete-course.use-case';
+import { GetCourseUseCase } from './get-course.use-case';
+import { ListSubjectCoursesUseCase } from './list-subject-courses.use-case';
+import type { CourseDto, CoursesRepository } from './courses.repository';
+
+describe('Course use cases', () => {
+  it('creates a course with trimmed input for an owned subject', async () => {
+    const repository = createRepository();
+    const created = courseRecord({ title: 'Loi normale', displayOrder: 2 });
+    repository.create.mockResolvedValue(created);
+
+    const result = await new CreateCourseUseCase(repository).execute({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      title: ' Loi normale ',
+      description: ' Chapitre de probabilites ',
+      chapterLabel: ' Chapitre 3 ',
+      estimatedMinutes: 20,
+    });
+
+    expect(repository.create.mock.calls[0]).toEqual([
+      {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        title: 'Loi normale',
+        description: 'Chapitre de probabilites',
+        chapterLabel: 'Chapitre 3',
+        estimatedMinutes: 20,
+      },
+    ]);
+    expect(result).toBe(created);
+  });
+
+  it('rejects invalid course creation input before reaching the repository', async () => {
+    const repository = createRepository();
+
+    await expect(
+      new CreateCourseUseCase(repository).execute({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        title: 'x',
+        estimatedMinutes: 0,
+      }),
+    ).rejects.toThrow('Course title must contain at least 2 characters');
+
+    expect(repository.create.mock.calls).toHaveLength(0);
+  });
+
+  it('lists only courses for a student subject', async () => {
+    const repository = createRepository();
+    const courses = [
+      courseRecord({ id: 'course-1', displayOrder: 0 }),
+      courseRecord({ id: 'course-2', displayOrder: 1 }),
+    ];
+    repository.listBySubjectForStudent.mockResolvedValue(courses);
+
+    const result = await new ListSubjectCoursesUseCase(repository).execute({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+    });
+
+    expect(repository.listBySubjectForStudent.mock.calls[0]).toEqual([
+      {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+      },
+    ]);
+    expect(result).toEqual(courses);
+  });
+
+  it('returns a course only for its owner', async () => {
+    const repository = createRepository();
+    repository.findByIdForStudent.mockResolvedValue(courseRecord());
+
+    const result = await new GetCourseUseCase(repository).execute({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+
+    expect(result.id).toBe('course-1');
+    expect(repository.findByIdForStudent.mock.calls[0]).toEqual([
+      {
+        studentId: 'student-1',
+        courseId: 'course-1',
+      },
+    ]);
+  });
+
+  it('throws not found when a course belongs to another student', async () => {
+    const repository = createRepository();
+    repository.findByIdForStudent.mockResolvedValue(null);
+
+    await expect(
+      new GetCourseUseCase(repository).execute({
+        studentId: 'student-2',
+        courseId: 'course-1',
+      }),
+    ).rejects.toThrow('Course not found');
+  });
+
+  it('deletes an empty course', async () => {
+    const repository = createRepository();
+    repository.deleteIfEmpty.mockResolvedValue(true);
+
+    await expect(
+      new DeleteCourseUseCase(repository).execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toEqual({ deleted: true });
+
+    expect(repository.deleteIfEmpty.mock.calls[0]).toEqual([
+      {
+        studentId: 'student-1',
+        courseId: 'course-1',
+      },
+    ]);
+  });
+
+  it('refuses to delete a course containing documents', async () => {
+    const repository = createRepository();
+    repository.deleteIfEmpty.mockRejectedValue(
+      new Error('Course contains documents'),
+    );
+
+    await expect(
+      new DeleteCourseUseCase(repository).execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).rejects.toThrow('Course contains documents');
+  });
+
+  it('runs a backfill dry-run without applying writes', async () => {
+    const repository = createRepository();
+    repository.backfillFromExistingDocumentsDryRun.mockResolvedValue({
+      documentsWithoutCourseCount: 2,
+      coursesToCreateCount: 2,
+      documentsToAttachCount: 2,
+      items: [
+        {
+          documentId: 'document-1',
+          studentId: 'student-1',
+          subjectId: 'subject-1',
+          proposedTitle: 'Cours stats S1',
+        },
+      ],
+    });
+
+    const result = await new BackfillCoursesFromDocumentsDryRunUseCase(
+      repository,
+    ).execute();
+
+    expect(result.documentsWithoutCourseCount).toBe(2);
+    expect(
+      repository.backfillFromExistingDocumentsDryRun.mock.calls,
+    ).toHaveLength(1);
+    expect(repository.backfillFromExistingDocuments.mock.calls).toHaveLength(0);
+  });
+});
+
+function createRepository(): jest.Mocked<CoursesRepository> {
+  return {
+    create: jest.fn(),
+    findByIdForStudent: jest.fn(),
+    listBySubjectForStudent: jest.fn(),
+    deleteIfEmpty: jest.fn(),
+    findCourseOwnershipContext: jest.fn(),
+    attachDocumentToCourse: jest.fn(),
+    backfillFromExistingDocumentsDryRun: jest.fn(),
+    backfillFromExistingDocuments: jest.fn(),
+    listBySubjectForStudentWithStats: jest.fn(),
+    findDetailByIdForStudent: jest.fn(),
+  };
+}
+
+function courseRecord(input: Partial<CourseDto> = {}): CourseDto {
+  return {
+    id: 'course-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    title: 'Loi normale',
+    description: null,
+    chapterLabel: null,
+    estimatedMinutes: 20,
+    displayOrder: 0,
+    createdAt: new Date('2026-06-18T10:00:00.000Z'),
+    updatedAt: new Date('2026-06-18T10:00:00.000Z'),
+    ...input,
+  };
+}
+
+```
+
+### Modifié `src/modules/courses/application/courses.repository.ts`
+
+```ts
+import type {
+  CourseDocumentAttachment,
+  CourseEntity,
+} from '../domain/course.entity';
+
+export const COURSES_REPOSITORY = Symbol('COURSES_REPOSITORY');
+
+export type CourseDto = CourseEntity;
+
+export type CourseDocumentStatus =
+  | 'UPLOADED'
+  | 'PROCESSING'
+  | 'READY'
+  | 'FAILED';
+
+export type CourseDocumentKind = 'COURSE_PDF' | 'EXAM_PDF' | 'EXAM_IMAGE';
+
+export interface CourseWithSourceStatsDto extends CourseDto {
+  sourceCount: number;
+  readySourceCount: number;
+  processingSourceCount: number;
+  failedSourceCount: number;
+}
+
+export interface CourseDocumentDto {
+  id: string;
+  courseId: string;
+  documentId: string;
+  fileName: string;
+  kind: CourseDocumentKind;
+  status: CourseDocumentStatus;
+  errorCode: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface CourseDetailDto {
+  course: CourseWithSourceStatsDto;
+  subject: {
+    id: string;
+    name: string;
+  };
+  sources: CourseDocumentDto[];
+}
+
+export interface CreateCourseRepositoryInput {
+  studentId: string;
+  subjectId: string;
+  title: string;
+  description?: string | null;
+  chapterLabel?: string | null;
+  estimatedMinutes?: number | null;
+}
+
+export interface CourseOwnershipContext {
+  courseId: string;
+  studentId: string;
+  subjectId: string;
+}
+
+export interface CourseBackfillDryRunItem {
+  documentId: string;
+  studentId: string;
+  subjectId: string;
+  proposedTitle: string;
+}
+
+export interface CourseBackfillDryRunResult {
+  documentsWithoutCourseCount: number;
+  coursesToCreateCount: number;
+  documentsToAttachCount: number;
+  items: CourseBackfillDryRunItem[];
+}
+
+export interface CoursesRepository {
+  create(input: CreateCourseRepositoryInput): Promise<CourseDto>;
+
+  findByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDto | null>;
+
+  listBySubjectForStudent(input: {
+    studentId: string;
+    subjectId: string;
+  }): Promise<CourseDto[]>;
+
+  listBySubjectForStudentWithStats(input: {
+    studentId: string;
+    subjectId: string;
+  }): Promise<CourseWithSourceStatsDto[]>;
+
+  findDetailByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDetailDto | null>;
+
+  deleteIfEmpty(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<boolean>;
+
+  findCourseOwnershipContext(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseOwnershipContext | null>;
+
+  attachDocumentToCourse(input: {
+    studentId: string;
+    courseId: string;
+    documentId: string;
+  }): Promise<CourseDocumentAttachment>;
+
+  backfillFromExistingDocumentsDryRun(): Promise<CourseBackfillDryRunResult>;
+
+  backfillFromExistingDocuments(): Promise<CourseBackfillDryRunResult>;
+}
+
+```
+
+### Créé `src/modules/courses/application/course-read-use-cases.spec.ts`
+
+```ts
+import { GetCourseDetailUseCase } from './get-course-detail.use-case';
+import { ListSubjectCoursesWithStatsUseCase } from './list-subject-courses-with-stats.use-case';
+import type { CoursesRepository } from './courses.repository';
+
+describe('Course read use cases', () => {
+  it('lists subject courses with source stats', async () => {
+    const repository = createRepository();
+    repository.listBySubjectForStudentWithStats.mockResolvedValue([
+      courseWithStats({ id: 'course-1', sourceCount: 2, readySourceCount: 1 }),
+    ]);
+
+    const result = await new ListSubjectCoursesWithStatsUseCase(
+      repository,
+    ).execute({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+    });
+
+    expect(repository.listBySubjectForStudentWithStats.mock.calls[0]).toEqual([
+      { studentId: 'student-1', subjectId: 'subject-1' },
+    ]);
+    expect(result[0]?.sourceCount).toBe(2);
+    expect(result[0]?.readySourceCount).toBe(1);
+  });
+
+  it('returns course detail with subject and sources', async () => {
+    const repository = createRepository();
+    repository.findDetailByIdForStudent.mockResolvedValue({
+      course: courseWithStats(),
+      subject: { id: 'subject-1', name: 'Droit constitutionnel' },
+      sources: [
+        {
+          id: 'document-1',
+          courseId: 'course-1',
+          documentId: 'document-1',
+          fileName: 'cours.pdf',
+          kind: 'COURSE_PDF',
+          status: 'READY',
+          errorCode: null,
+          createdAt: new Date('2026-06-18T10:00:00.000Z'),
+          updatedAt: new Date('2026-06-18T10:00:00.000Z'),
+        },
+      ],
+    });
+
+    const result = await new GetCourseDetailUseCase(repository).execute({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+
+    expect(repository.findDetailByIdForStudent.mock.calls[0]).toEqual([
+      { studentId: 'student-1', courseId: 'course-1' },
+    ]);
+    expect(result.subject.name).toBe('Droit constitutionnel');
+    expect(result.sources[0]?.status).toBe('READY');
+  });
+
+  it('throws not found when a course is not owned by the student', async () => {
+    const repository = createRepository();
+    repository.findDetailByIdForStudent.mockResolvedValue(null);
+
+    await expect(
+      new GetCourseDetailUseCase(repository).execute({
+        studentId: 'student-2',
+        courseId: 'course-1',
+      }),
+    ).rejects.toThrow('Course not found');
+  });
+});
+
+function createRepository(): jest.Mocked<CoursesRepository> {
+  return {
+    create: jest.fn(),
+    findByIdForStudent: jest.fn(),
+    listBySubjectForStudent: jest.fn(),
+    deleteIfEmpty: jest.fn(),
+    findCourseOwnershipContext: jest.fn(),
+    attachDocumentToCourse: jest.fn(),
+    backfillFromExistingDocumentsDryRun: jest.fn(),
+    backfillFromExistingDocuments: jest.fn(),
+    listBySubjectForStudentWithStats: jest.fn(),
+    findDetailByIdForStudent: jest.fn(),
+  };
+}
+
+function courseWithStats(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'course-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    title: 'Droit constitutionnel',
+    description: 'Institutions et normes',
+    chapterLabel: 'Chapitre 1',
+    estimatedMinutes: 30,
+    displayOrder: 0,
+    createdAt: new Date('2026-06-18T10:00:00.000Z'),
+    updatedAt: new Date('2026-06-18T10:00:00.000Z'),
+    sourceCount: 0,
+    readySourceCount: 0,
+    processingSourceCount: 0,
+    failedSourceCount: 0,
+    ...overrides,
+  };
+}
+
+```
+
+### Créé `src/modules/courses/application/get-course-detail.use-case.ts`
+
+```ts
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  COURSES_REPOSITORY,
+  type CourseDetailDto,
+  type CoursesRepository,
+} from './courses.repository';
+
+@Injectable()
+export class GetCourseDetailUseCase {
+  constructor(
+    @Inject(COURSES_REPOSITORY)
+    private readonly coursesRepository: CoursesRepository,
+  ) {}
+
+  async execute(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDetailDto> {
+    const detail = await this.coursesRepository.findDetailByIdForStudent({
+      studentId: requiredId(input.studentId, 'studentId'),
+      courseId: requiredId(input.courseId, 'courseId'),
+    });
+
+    if (!detail) {
+      throw new Error('Course not found');
+    }
+
+    return detail;
+  }
+}
+
+function requiredId(value: string, name: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    throw new Error(`${name} is required`);
+  }
+
+  return trimmed;
+}
+
+```
+
+### Créé `src/modules/courses/application/list-subject-courses-with-stats.use-case.ts`
+
+```ts
+import { Inject, Injectable } from '@nestjs/common';
+import {
+  COURSES_REPOSITORY,
+  type CoursesRepository,
+  type CourseWithSourceStatsDto,
+} from './courses.repository';
+
+@Injectable()
+export class ListSubjectCoursesWithStatsUseCase {
+  constructor(
+    @Inject(COURSES_REPOSITORY)
+    private readonly coursesRepository: CoursesRepository,
+  ) {}
+
+  async execute(input: {
+    studentId: string;
+    subjectId: string;
+  }): Promise<CourseWithSourceStatsDto[]> {
+    return this.coursesRepository.listBySubjectForStudentWithStats({
+      studentId: requiredId(input.studentId, 'studentId'),
+      subjectId: requiredId(input.subjectId, 'subjectId'),
+    });
+  }
+}
+
+function requiredId(value: string, name: string) {
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    throw new Error(`${name} is required`);
+  }
+
+  return trimmed;
+}
+
+```
+
+### Modifié `src/modules/courses/courses.module.ts`
+
+```ts
+import { Module } from '@nestjs/common';
+import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
+import { AuthModule } from '../auth/auth.module';
+import { BackfillCoursesFromDocumentsDryRunUseCase } from './application/backfill-courses-from-documents.use-case';
+import { COURSES_REPOSITORY } from './application/courses.repository';
+import { CreateCourseUseCase } from './application/create-course.use-case';
+import { DeleteCourseUseCase } from './application/delete-course.use-case';
+import { GetCourseDetailUseCase } from './application/get-course-detail.use-case';
+import { GetCourseUseCase } from './application/get-course.use-case';
+import { ListSubjectCoursesWithStatsUseCase } from './application/list-subject-courses-with-stats.use-case';
+import { ListSubjectCoursesUseCase } from './application/list-subject-courses.use-case';
+import { PrismaCoursesRepository } from './infrastructure/prisma-courses.repository';
+import { CoursesController } from './interfaces/courses.controller';
+
+@Module({
+  imports: [AuthModule, PrismaModule],
+  controllers: [CoursesController],
+  providers: [
+    CreateCourseUseCase,
+    ListSubjectCoursesUseCase,
+    ListSubjectCoursesWithStatsUseCase,
+    GetCourseUseCase,
+    GetCourseDetailUseCase,
+    DeleteCourseUseCase,
+    BackfillCoursesFromDocumentsDryRunUseCase,
+    {
+      provide: COURSES_REPOSITORY,
+      useClass: PrismaCoursesRepository,
+    },
+  ],
+  exports: [
+    CreateCourseUseCase,
+    ListSubjectCoursesUseCase,
+    ListSubjectCoursesWithStatsUseCase,
+    GetCourseUseCase,
+    GetCourseDetailUseCase,
+    DeleteCourseUseCase,
+    BackfillCoursesFromDocumentsDryRunUseCase,
+    COURSES_REPOSITORY,
+  ],
+})
+export class CoursesModule {}
+
+```
+
+### Modifié `src/modules/courses/infrastructure/prisma-courses.repository.ts`
+
+```ts
+import { Injectable } from '@nestjs/common';
+import { DocumentKind } from '../../../generated/prisma/enums';
+import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
+import type {
+  CourseBackfillDryRunResult,
+  CourseDetailDto,
+  CourseDocumentStatus,
+  CourseDto,
+  CourseOwnershipContext,
+  CourseDocumentDto,
+  CourseWithSourceStatsDto,
+  CoursesRepository,
+  CreateCourseRepositoryInput,
+} from '../application/courses.repository';
+import {
+  CourseContainsDocumentsError,
+  type CourseDocumentAttachment,
+} from '../domain/course.entity';
+
+type CourseRecord = CourseDto;
+
+type CourseDetailRecord = CourseRecord & {
+  subject: {
+    id: string;
+    name: string;
+  };
+  documents: Array<{
+    id: string;
+    courseId: string | null;
+    fileName: string;
+    kind: 'COURSE_PDF' | 'EXAM_PDF' | 'EXAM_IMAGE';
+    status: CourseDocumentStatus;
+    errorCode: string | null;
+    createdAt: Date;
+    updatedAt: Date;
+  }>;
+};
+
+type DocumentAttachmentRecord = {
+  id: string;
+  studentId: string;
+  subjectId: string;
+  courseId: string | null;
+  fileName: string;
+};
+
+@Injectable()
+export class PrismaCoursesRepository implements CoursesRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async create(input: CreateCourseRepositoryInput): Promise<CourseDto> {
+    return this.prisma.$transaction(async (tx) => {
+      await ensureSubjectForStudent(tx, {
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+      });
+
+      const maxOrder = await tx.course.aggregate({
+        where: {
+          studentId: input.studentId,
+          subjectId: input.subjectId,
+        },
+        _max: { displayOrder: true },
+      });
+      const displayOrder = (maxOrder._max.displayOrder ?? -1) + 1;
+
+      const course = await tx.course.create({
+        data: {
+          studentId: input.studentId,
+          subjectId: input.subjectId,
+          title: input.title,
+          description: input.description ?? null,
+          chapterLabel: input.chapterLabel ?? null,
+          estimatedMinutes: input.estimatedMinutes ?? null,
+          displayOrder,
+        },
+      });
+
+      return toCourseDto(course);
+    });
+  }
+
+  async findByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDto | null> {
+    const course = await this.prisma.course.findFirst({
+      where: {
+        id: input.courseId,
+        studentId: input.studentId,
+      },
+    });
+
+    return course ? toCourseDto(course) : null;
+  }
+
+  async listBySubjectForStudent(input: {
+    studentId: string;
+    subjectId: string;
+  }): Promise<CourseDto[]> {
+    await ensureSubjectForStudent(this.prisma, input);
+
+    const courses = await this.prisma.course.findMany({
+      where: {
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+    });
+
+    return courses.map(toCourseDto);
+  }
+
+  async listBySubjectForStudentWithStats(input: {
+    studentId: string;
+    subjectId: string;
+  }): Promise<CourseWithSourceStatsDto[]> {
+    await ensureSubjectForStudent(this.prisma, input);
+
+    const courses = (await this.prisma.course.findMany({
+      where: {
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+    })) as CourseRecord[];
+
+    if (courses.length === 0) {
+      return [];
+    }
+
+    const documents = await this.prisma.document.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: { in: courses.map((course) => course.id) },
+      },
+      select: {
+        courseId: true,
+        status: true,
+      },
+    });
+
+    const statsByCourseId = new Map<string, CourseDocumentStats>();
+
+    for (const course of courses) {
+      statsByCourseId.set(course.id, emptySourceStats());
+    }
+
+    for (const document of documents) {
+      if (!document.courseId) {
+        continue;
+      }
+
+      const stats = statsByCourseId.get(document.courseId);
+      if (!stats) {
+        continue;
+      }
+
+      applyDocumentStatus(stats, document.status);
+    }
+
+    return courses.map((course) =>
+      toCourseWithStatsDto(course, statsByCourseId.get(course.id)),
+    );
+  }
+
+  async findDetailByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDetailDto | null> {
+    const course = await this.prisma.course.findFirst({
+      where: {
+        id: input.courseId,
+        studentId: input.studentId,
+      },
+      include: {
+        subject: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+        documents: {
+          where: {
+            studentId: input.studentId,
+          },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            courseId: true,
+            fileName: true,
+            kind: true,
+            status: true,
+            errorCode: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+      },
+    });
+
+    if (!course) {
+      return null;
+    }
+
+    const stats = emptySourceStats();
+    const sources = course.documents.map((document) => {
+      applyDocumentStatus(stats, document.status);
+      return toCourseDocumentDto(document);
+    });
+
+    return {
+      course: toCourseWithStatsDto(course, stats),
+      subject: {
+        id: course.subject.id,
+        name: course.subject.name,
+      },
+      sources,
+    };
+  }
+
+  async deleteIfEmpty(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<boolean> {
+    return this.prisma.$transaction(async (tx) => {
+      const course = await tx.course.findFirst({
+        where: {
+          id: input.courseId,
+          studentId: input.studentId,
+        },
+      });
+
+      if (!course) {
+        return false;
+      }
+
+      const documentCount = await tx.document.count({
+        where: {
+          courseId: course.id,
+          studentId: input.studentId,
+        },
+      });
+
+      if (documentCount > 0) {
+        throw new CourseContainsDocumentsError();
+      }
+
+      await tx.course.delete({
+        where: { id: course.id },
+      });
+
+      return true;
+    });
+  }
+
+  async findCourseOwnershipContext(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseOwnershipContext | null> {
+    const course = await this.prisma.course.findFirst({
+      where: {
+        id: input.courseId,
+        studentId: input.studentId,
+      },
+      select: {
+        id: true,
+        studentId: true,
+        subjectId: true,
+      },
+    });
+
+    return course
+      ? {
+          courseId: course.id,
+          studentId: course.studentId,
+          subjectId: course.subjectId,
+        }
+      : null;
+  }
+
+  async attachDocumentToCourse(input: {
+    studentId: string;
+    courseId: string;
+    documentId: string;
+  }): Promise<CourseDocumentAttachment> {
+    return this.prisma.$transaction(async (tx) => {
+      const course = await tx.course.findFirst({
+        where: {
+          id: input.courseId,
+          studentId: input.studentId,
+        },
+      });
+
+      if (!course) {
+        throw new Error('Course not found');
+      }
+
+      const document = await tx.document.findFirst({
+        where: {
+          id: input.documentId,
+          studentId: input.studentId,
+        },
+        select: {
+          id: true,
+          studentId: true,
+          subjectId: true,
+          courseId: true,
+          fileName: true,
+        },
+      });
+
+      if (!document) {
+        throw new Error('Document not found');
+      }
+
+      // The database relation is intentionally simple (`courseId -> Course.id`).
+      // Course/document subject coherence is therefore enforced here before any
+      // attachment write can happen.
+      if (document.subjectId !== course.subjectId) {
+        throw new Error('Document subject does not match course');
+      }
+
+      const updated = (await tx.document.update({
+        where: { id: document.id },
+        data: { courseId: course.id },
+      })) as DocumentAttachmentRecord;
+
+      return toDocumentAttachment(updated);
+    });
+  }
+
+  async backfillFromExistingDocumentsDryRun(): Promise<CourseBackfillDryRunResult> {
+    const documents = (await this.prisma.document.findMany({
+      where: {
+        kind: DocumentKind.COURSE_PDF,
+        courseId: null,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        studentId: true,
+        subjectId: true,
+        fileName: true,
+      },
+    })) as Array<{
+      id: string;
+      studentId: string;
+      subjectId: string;
+      fileName: string;
+    }>;
+
+    const items = documents.map((document) => ({
+      documentId: document.id,
+      studentId: document.studentId,
+      subjectId: document.subjectId,
+      proposedTitle: titleFromFileName(document.fileName),
+    }));
+
+    return {
+      documentsWithoutCourseCount: items.length,
+      coursesToCreateCount: items.length,
+      documentsToAttachCount: items.length,
+      items,
+    };
+  }
+
+  backfillFromExistingDocuments(): Promise<CourseBackfillDryRunResult> {
+    return Promise.reject(
+      new Error('Backfill apply is disabled in CORE-01; use dry-run only'),
+    );
+  }
+}
+
+type SubjectOwnershipClient = {
+  subject: {
+    findFirst(input: {
+      where: { id: string; studentId: string };
+      select: { id: true };
+    }): Promise<{ id: string } | null>;
+  };
+};
+
+async function ensureSubjectForStudent(
+  client: SubjectOwnershipClient,
+  input: { studentId: string; subjectId: string },
+) {
+  const subject = await client.subject.findFirst({
+    where: {
+      id: input.subjectId,
+      studentId: input.studentId,
+    },
+    select: { id: true },
+  });
+
+  if (!subject) {
+    throw new Error('Course subject not found');
+  }
+}
+
+function toCourseDto(course: CourseRecord): CourseDto {
+  return {
+    id: course.id,
+    studentId: course.studentId,
+    subjectId: course.subjectId,
+    title: course.title,
+    description: course.description,
+    chapterLabel: course.chapterLabel,
+    estimatedMinutes: course.estimatedMinutes,
+    displayOrder: course.displayOrder,
+    createdAt: course.createdAt,
+    updatedAt: course.updatedAt,
+  };
+}
+
+type CourseDocumentStats = {
+  sourceCount: number;
+  readySourceCount: number;
+  processingSourceCount: number;
+  failedSourceCount: number;
+};
+
+function emptySourceStats(): CourseDocumentStats {
+  return {
+    sourceCount: 0,
+    readySourceCount: 0,
+    processingSourceCount: 0,
+    failedSourceCount: 0,
+  };
+}
+
+function applyDocumentStatus(
+  stats: CourseDocumentStats,
+  status: CourseDocumentStatus,
+) {
+  stats.sourceCount += 1;
+
+  if (status === 'READY') {
+    stats.readySourceCount += 1;
+  } else if (status === 'PROCESSING') {
+    stats.processingSourceCount += 1;
+  } else if (status === 'FAILED') {
+    stats.failedSourceCount += 1;
+  }
+}
+
+function toCourseWithStatsDto(
+  course: CourseRecord,
+  stats: CourseDocumentStats = emptySourceStats(),
+): CourseWithSourceStatsDto {
+  return {
+    ...toCourseDto(course),
+    sourceCount: stats.sourceCount,
+    readySourceCount: stats.readySourceCount,
+    processingSourceCount: stats.processingSourceCount,
+    failedSourceCount: stats.failedSourceCount,
+  };
+}
+
+function toCourseDocumentDto(
+  document: CourseDetailRecord['documents'][number],
+): CourseDocumentDto {
+  return {
+    id: document.id,
+    courseId: document.courseId ?? '',
+    documentId: document.id,
+    fileName: document.fileName,
+    kind: document.kind,
+    status: document.status,
+    errorCode: document.errorCode,
+    createdAt: document.createdAt,
+    updatedAt: document.updatedAt,
+  };
+}
+
+function toDocumentAttachment(
+  document: DocumentAttachmentRecord,
+): CourseDocumentAttachment {
+  return {
+    id: document.id,
+    studentId: document.studentId,
+    subjectId: document.subjectId,
+    courseId: document.courseId,
+    fileName: document.fileName,
+  };
+}
+
+function titleFromFileName(fileName: string) {
+  const withoutExtension = fileName.replace(/\.[^.]+$/, '');
+  const normalized = withoutExtension
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return normalized || 'Cours sans titre';
+}
+
+```
+
+### Créé `src/modules/courses/interfaces/course-response.dto.ts`
+
+```ts
+import type {
+  CourseDetailDto,
+  CourseDocumentDto,
+  CourseWithSourceStatsDto,
+} from '../application/courses.repository';
+
+export type CourseListItemResponse = {
+  id: string;
+  subjectId: string;
+  title: string;
+  description: string | null;
+  chapterLabel: string | null;
+  estimatedMinutes: number | null;
+  displayOrder: number;
+  createdAt: string;
+  updatedAt: string;
+  sourceCount: number;
+  readySourceCount: number;
+  processingSourceCount: number;
+  failedSourceCount: number;
+};
+
+export type CourseDocumentResponse = {
+  id: string;
+  courseId: string;
+  documentId: string;
+  fileName: string;
+  kind: string;
+  status: string;
+  errorCode: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CourseDetailResponse = {
+  course: CourseListItemResponse;
+  subject: {
+    id: string;
+    name: string;
+  };
+  sources: CourseDocumentResponse[];
+};
+
+export function toCourseListItemResponse(
+  course: CourseWithSourceStatsDto,
+): CourseListItemResponse {
+  return {
+    id: course.id,
+    subjectId: course.subjectId,
+    title: course.title,
+    description: course.description,
+    chapterLabel: course.chapterLabel,
+    estimatedMinutes: course.estimatedMinutes,
+    displayOrder: course.displayOrder,
+    createdAt: course.createdAt.toISOString(),
+    updatedAt: course.updatedAt.toISOString(),
+    sourceCount: course.sourceCount,
+    readySourceCount: course.readySourceCount,
+    processingSourceCount: course.processingSourceCount,
+    failedSourceCount: course.failedSourceCount,
+  };
+}
+
+export function toCourseDocumentResponse(
+  source: CourseDocumentDto,
+): CourseDocumentResponse {
+  return {
+    id: source.id,
+    courseId: source.courseId,
+    documentId: source.documentId,
+    fileName: source.fileName,
+    kind: source.kind,
+    status: source.status,
+    errorCode: source.errorCode,
+    createdAt: source.createdAt.toISOString(),
+    updatedAt: source.updatedAt.toISOString(),
+  };
+}
+
+export function toCourseDetailResponse(
+  detail: CourseDetailDto,
+): CourseDetailResponse {
+  return {
+    course: toCourseListItemResponse(detail.course),
+    subject: detail.subject,
+    sources: detail.sources.map(toCourseDocumentResponse),
+  };
+}
+
+```
+
+### Créé `src/modules/courses/interfaces/create-course.request.ts`
+
+```ts
+export class CreateCourseRequest {
+  title!: string;
+  description?: string | null;
+  chapterLabel?: string | null;
+  estimatedMinutes?: number | null;
+}
+
+```
+
+### Créé `src/modules/courses/interfaces/courses.controller.ts`
+
+```ts
+import {
+  BadRequestException,
+  Body,
+  ConflictException,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  NotFoundException,
+  Param,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
+import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
+import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
+import type { AuthenticatedStudent } from '../../auth/interfaces/authenticated-student';
+import { CreateCourseUseCase } from '../application/create-course.use-case';
+import { DeleteCourseUseCase } from '../application/delete-course.use-case';
+import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
+import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
+import { CourseContainsDocumentsError } from '../domain/course.entity';
+import type { CreateCourseRequest } from './create-course.request';
+import {
+  toCourseDetailResponse,
+  toCourseListItemResponse,
+} from './course-response.dto';
+
+const MAX_COURSE_TITLE_LENGTH = 140;
+const MAX_COURSE_DESCRIPTION_LENGTH = 1000;
+const MAX_COURSE_CHAPTER_LABEL_LENGTH = 120;
+const MAX_COURSE_ESTIMATED_MINUTES = 1440;
+
+@Controller()
+@UseGuards(FirebaseAuthGuard)
+export class CoursesController {
+  constructor(
+    private readonly createCourse: CreateCourseUseCase,
+    private readonly listCourses: ListSubjectCoursesWithStatsUseCase,
+    private readonly getCourseDetail: GetCourseDetailUseCase,
+    private readonly deleteCourseUseCase: DeleteCourseUseCase,
+  ) {}
+
+  @Get('subjects/:subjectId/courses')
+  listForSubject(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('subjectId') subjectId: string,
+  ) {
+    return this.listCourses
+      .execute({
+        studentId: student.id,
+        subjectId: trimRequiredString(
+          subjectId,
+          'Course subjectId is required',
+        ),
+      })
+      .then((courses) => courses.map(toCourseListItemResponse))
+      .catch(normalizeCourseError);
+  }
+
+  @Post('subjects/:subjectId/courses')
+  createForSubject(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('subjectId') subjectId: string,
+    @Body() body: CreateCourseRequest,
+  ) {
+    const validatedBody = validateCreateCourseBody(body);
+
+    return this.createCourse
+      .execute({
+        studentId: student.id,
+        subjectId: trimRequiredString(
+          subjectId,
+          'Course subjectId is required',
+        ),
+        title: validatedBody.title,
+        description: validatedBody.description,
+        chapterLabel: validatedBody.chapterLabel,
+        estimatedMinutes: validatedBody.estimatedMinutes,
+      })
+      .then((course) =>
+        toCourseListItemResponse({
+          ...course,
+          sourceCount: 0,
+          readySourceCount: 0,
+          processingSourceCount: 0,
+          failedSourceCount: 0,
+        }),
+      )
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId')
+  getCourse(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getCourseDetail
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .then(toCourseDetailResponse)
+      .catch(normalizeCourseError);
+  }
+
+  @Delete('courses/:courseId')
+  @HttpCode(204)
+  async deleteCourse(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ): Promise<void> {
+    await this.deleteCourseUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+}
+
+function validateCreateCourseBody(body: CreateCourseRequest) {
+  const title = trimRequiredString(
+    body?.title,
+    'Course title must contain at least 2 characters',
+    MAX_COURSE_TITLE_LENGTH,
+  );
+
+  if (title.length < 2) {
+    throw new BadRequestException(
+      'Course title must contain at least 2 characters',
+    );
+  }
+
+  return {
+    title,
+    description: trimOptionalString(
+      body.description,
+      'Course description is too long',
+      MAX_COURSE_DESCRIPTION_LENGTH,
+    ),
+    chapterLabel: trimOptionalString(
+      body.chapterLabel,
+      'Course chapterLabel is too long',
+      MAX_COURSE_CHAPTER_LABEL_LENGTH,
+    ),
+    estimatedMinutes: normalizeEstimatedMinutes(body.estimatedMinutes),
+  };
+}
+
+function trimRequiredString(value: unknown, message: string, maxLength = 255) {
+  if (typeof value !== 'string') {
+    throw new BadRequestException(message);
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed || trimmed.length > maxLength) {
+    throw new BadRequestException(message);
+  }
+
+  return trimmed;
+}
+
+function trimOptionalString(
+  value: unknown,
+  message: string,
+  maxLength: number,
+) {
+  if (value == null) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new BadRequestException(message);
+  }
+
+  const trimmed = value.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.length > maxLength) {
+    throw new BadRequestException(message);
+  }
+
+  return trimmed;
+}
+
+function normalizeEstimatedMinutes(value: unknown) {
+  if (value == null) {
+    return null;
+  }
+
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > MAX_COURSE_ESTIMATED_MINUTES
+  ) {
+    throw new BadRequestException(
+      'Course estimatedMinutes must be an integer between 1 and 1440',
+    );
+  }
+
+  return value;
+}
+
+function normalizeCourseError(error: unknown): never {
+  if (error instanceof BadRequestException) {
+    throw error;
+  }
+
+  if (error instanceof CourseContainsDocumentsError) {
+    throw new ConflictException('Course contains documents');
+  }
+
+  if (
+    error instanceof Error &&
+    (error.message === 'Course not found' ||
+      error.message === 'Course subject not found')
+  ) {
+    throw new NotFoundException(error.message);
+  }
+
+  if (
+    error instanceof Error &&
+    (error.message === 'Course title must contain at least 2 characters' ||
+      error.message ===
+        'Course estimatedMinutes must be an integer between 1 and 1440' ||
+      error.message === 'subjectId is required' ||
+      error.message === 'courseId is required')
+  ) {
+    throw new BadRequestException(error.message);
+  }
+
+  throw error;
+}
+
+```
+
+### Créé `src/modules/courses/interfaces/courses.controller.spec.ts`
+
+```ts
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
+import { CourseContainsDocumentsError } from '../domain/course.entity';
+import { CreateCourseUseCase } from '../application/create-course.use-case';
+import { DeleteCourseUseCase } from '../application/delete-course.use-case';
+import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
+import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
+import { CoursesController } from './courses.controller';
+
+describe('CoursesController', () => {
+  it('lists courses for the current student and subject', async () => {
+    const { controller, listCourses } = createController();
+    listCourses.execute.mockResolvedValue([courseWithStats()]);
+
+    await expect(
+      controller.listForSubject(currentStudent, 'subject-1'),
+    ).resolves.toEqual([publicCourse()]);
+
+    expect(listCourses.execute.mock.calls[0]).toEqual([
+      { studentId: 'student-1', subjectId: 'subject-1' },
+    ]);
+  });
+
+  it('creates a course with validated trimmed input', async () => {
+    const { controller, createCourse } = createController();
+    createCourse.execute.mockResolvedValue(courseWithStats());
+
+    await expect(
+      controller.createForSubject(currentStudent, ' subject-1 ', {
+        title: ' Droit constitutionnel ',
+        description: ' Institutions ',
+        chapterLabel: ' Chapitre 1 ',
+        estimatedMinutes: 30,
+      }),
+    ).resolves.toEqual(publicCourse());
+
+    expect(createCourse.execute.mock.calls[0]).toEqual([
+      {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        title: 'Droit constitutionnel',
+        description: 'Institutions',
+        chapterLabel: 'Chapitre 1',
+        estimatedMinutes: 30,
+      },
+    ]);
+  });
+
+  it('rejects invalid course creation body as 400', () => {
+    const { controller, createCourse } = createController();
+
+    expect(() =>
+      controller.createForSubject(currentStudent, 'subject-1', {
+        title: 'x',
+      }),
+    ).toThrow(BadRequestException);
+    expect(createCourse.execute.mock.calls).toHaveLength(0);
+  });
+
+  it('returns detail with subject and sources', async () => {
+    const { controller, getCourseDetail } = createController();
+    getCourseDetail.execute.mockResolvedValue({
+      course: courseWithStats({ sourceCount: 1, readySourceCount: 1 }),
+      subject: { id: 'subject-1', name: 'Droit constitutionnel' },
+      sources: [
+        {
+          id: 'document-1',
+          courseId: 'course-1',
+          documentId: 'document-1',
+          fileName: 'cours.pdf',
+          kind: 'COURSE_PDF',
+          status: 'READY',
+          errorCode: null,
+          createdAt: new Date('2026-06-18T10:00:00.000Z'),
+          updatedAt: new Date('2026-06-18T10:00:00.000Z'),
+        },
+      ],
+    });
+
+    await expect(
+      controller.getCourse(currentStudent, 'course-1'),
+    ).resolves.toEqual({
+      course: publicCourse({ sourceCount: 1, readySourceCount: 1 }),
+      subject: { id: 'subject-1', name: 'Droit constitutionnel' },
+      sources: [
+        {
+          id: 'document-1',
+          courseId: 'course-1',
+          documentId: 'document-1',
+          fileName: 'cours.pdf',
+          kind: 'COURSE_PDF',
+          status: 'READY',
+          errorCode: null,
+          createdAt: '2026-06-18T10:00:00.000Z',
+          updatedAt: '2026-06-18T10:00:00.000Z',
+        },
+      ],
+    });
+  });
+
+  it('maps course not found to 404', async () => {
+    const { controller, getCourseDetail } = createController();
+    getCourseDetail.execute.mockRejectedValue(new Error('Course not found'));
+
+    await expect(
+      controller.getCourse(currentStudent, 'other-student-course'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('deletes empty courses and maps document conflicts to 409', async () => {
+    const { controller, deleteCourse } = createController();
+    deleteCourse.execute.mockResolvedValueOnce({ deleted: true });
+
+    await expect(
+      controller.deleteCourse(currentStudent, 'course-1'),
+    ).resolves.toEqual(undefined);
+
+    deleteCourse.execute.mockRejectedValueOnce(
+      new CourseContainsDocumentsError(),
+    );
+
+    await expect(
+      controller.deleteCourse(currentStudent, 'course-1'),
+    ).rejects.toThrow(ConflictException);
+  });
+});
+
+const currentStudent = {
+  id: 'student-1',
+  firebaseUid: 'firebase-1',
+  email: 'student@example.test',
+  displayName: 'Student',
+};
+
+function createController() {
+  const createCourse = { execute: jest.fn() };
+  const listCourses = { execute: jest.fn() };
+  const getCourseDetail = { execute: jest.fn() };
+  const deleteCourse = { execute: jest.fn() };
+
+  return {
+    controller: new CoursesController(
+      createCourse as unknown as CreateCourseUseCase,
+      listCourses as unknown as ListSubjectCoursesWithStatsUseCase,
+      getCourseDetail as unknown as GetCourseDetailUseCase,
+      deleteCourse as unknown as DeleteCourseUseCase,
+    ),
+    createCourse,
+    listCourses,
+    getCourseDetail,
+    deleteCourse,
+  };
+}
+
+function courseWithStats(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'course-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    title: 'Droit constitutionnel',
+    description: 'Institutions',
+    chapterLabel: 'Chapitre 1',
+    estimatedMinutes: 30,
+    displayOrder: 0,
+    createdAt: new Date('2026-06-18T10:00:00.000Z'),
+    updatedAt: new Date('2026-06-18T10:00:00.000Z'),
+    sourceCount: 0,
+    readySourceCount: 0,
+    processingSourceCount: 0,
+    failedSourceCount: 0,
+    ...overrides,
+  };
+}
+
+function publicCourse(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'course-1',
+    subjectId: 'subject-1',
+    title: 'Droit constitutionnel',
+    description: 'Institutions',
+    chapterLabel: 'Chapitre 1',
+    estimatedMinutes: 30,
+    displayOrder: 0,
+    createdAt: '2026-06-18T10:00:00.000Z',
+    updatedAt: '2026-06-18T10:00:00.000Z',
+    sourceCount: 0,
+    readySourceCount: 0,
+    processingSourceCount: 0,
+    failedSourceCount: 0,
+    ...overrides,
+  };
+}
+
+```
+
+### Modifié `test/critical-paths.e2e-spec.ts`
+
+```ts
 import { INestApplication, NotFoundException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -2806,3 +4633,5 @@ function collectSensitivePreSubmitFields(
     ];
   });
 }
+
+```
