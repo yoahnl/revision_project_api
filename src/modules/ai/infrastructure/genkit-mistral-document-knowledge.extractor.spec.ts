@@ -316,6 +316,9 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
       durationMs: observation.durationMs,
       status: 'error',
       errorCode: 'GENKIT_GENERATION_FAILED',
+      errorCategory: 'UNKNOWN',
+      errorName: 'Error',
+      errorSummary: 'AI provider generation failed',
       documentId: 'document-1',
     });
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
@@ -324,6 +327,50 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
     expect(observedPayload).not.toContain(
       'SENTINEL_PROVIDER_ERROR_WITH_COURSE_TEXT',
     );
+  });
+
+  it('classifies provider schema failures without exposing raw provider text', async () => {
+    process.env.MISTRAL_API_KEY = 'secret-test-key';
+    delete process.env.MISTRAL_MODEL;
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    const providerError = new Error(
+      'Zod validation failed for SENTINEL_FULL_CHUNK_TEXT',
+    ) as Error & { status?: number; code?: string };
+    providerError.status = 400;
+    providerError.code = 'invalid_schema';
+    mockGenerate.mockRejectedValue(providerError);
+    const observer = createObserver();
+
+    await expect(
+      new GenkitMistralDocumentKnowledgeExtractor(observer).extract({
+        documentId: 'document-1',
+        chunks: [
+          {
+            id: 'chunk-1',
+            index: 0,
+            text: 'SENTINEL_FULL_CHUNK_TEXT',
+          },
+        ],
+      }),
+    ).rejects.toThrow('Zod validation failed');
+
+    const observation = getObservedObservation(observer);
+    expect(observation).toEqual(
+      expect.objectContaining({
+        status: 'error',
+        errorCode: 'GENKIT_GENERATION_FAILED',
+        errorCategory: 'SCHEMA_VALIDATION',
+        errorName: 'Error',
+        errorStatus: 400,
+        errorProviderCode: 'invalid_schema',
+        errorSummary: 'AI provider output failed schema validation',
+      }),
+    );
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('SENTINEL_FULL_CHUNK_TEXT');
+    expect(observedPayload).not.toContain('secret-test-key');
   });
 });
 

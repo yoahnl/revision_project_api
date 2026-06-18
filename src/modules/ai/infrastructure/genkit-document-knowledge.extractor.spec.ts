@@ -364,6 +364,9 @@ describe('GenkitDocumentKnowledgeExtractor', () => {
       durationMs: observation.durationMs,
       status: 'error',
       errorCode: 'GENKIT_GENERATION_FAILED',
+      errorCategory: 'UNKNOWN',
+      errorName: 'Error',
+      errorSummary: 'AI provider generation failed',
       documentId: 'document-1',
     });
     const observedPayload = JSON.stringify(observer.observe.mock.calls);

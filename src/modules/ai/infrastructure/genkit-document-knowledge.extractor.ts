@@ -18,6 +18,7 @@ import {
   normalizeExtractedKnowledgeOutput,
   selectDocumentKnowledgeChunks,
 } from './document-knowledge-chunk-input';
+import { buildAiErrorDiagnostics } from './ai-error-diagnostics';
 
 const DEFAULT_GENKIT_MODEL = 'googleai/gemini-2.5-flash';
 const FLOW_NAME = 'documentKnowledgeExtraction';
@@ -78,6 +79,7 @@ export class GenkitDocumentKnowledgeExtractor implements DocumentKnowledgeExtrac
         durationMs: Date.now() - startedAt,
         status: 'error',
         errorCode: GENERATION_FAILED_ERROR_CODE,
+        ...buildAiErrorDiagnostics(error),
         documentId: input.documentId,
       });
       throw error;

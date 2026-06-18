@@ -57,6 +57,11 @@ describe('StructuredLogAiGenerationObserver', () => {
       durationMs: 31,
       status: 'error',
       errorCode: 'Error',
+      errorCategory: 'SCHEMA_VALIDATION',
+      errorName: 'ZodError',
+      errorStatus: 400,
+      errorProviderCode: 'invalid_schema',
+      errorSummary: 'AI provider output failed schema validation',
       knowledgeUnitId: 'unit-1',
       subjectId: 'subject-1',
       prompt: 'TEXTE COMPLET DU PROMPT',
@@ -71,6 +76,13 @@ describe('StructuredLogAiGenerationObserver', () => {
     const message = String(messageInput);
     expect(message).toContain('"event":"ai.generation"');
     expect(message).toContain('"errorCode":"Error"');
+    expect(message).toContain('"errorCategory":"SCHEMA_VALIDATION"');
+    expect(message).toContain('"errorName":"ZodError"');
+    expect(message).toContain('"errorStatus":400');
+    expect(message).toContain('"errorProviderCode":"invalid_schema"');
+    expect(message).toContain(
+      '"errorSummary":"AI provider output failed schema validation"',
+    );
     expect(message).not.toContain('TEXTE COMPLET DU PROMPT');
     expect(message).not.toContain('COMPLETION COMPLETE');
     expect(message).not.toContain('TEXTE COMPLET DU COURS');

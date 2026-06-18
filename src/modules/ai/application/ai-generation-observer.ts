@@ -1,6 +1,16 @@
 export const AI_GENERATION_OBSERVER = Symbol('AI_GENERATION_OBSERVER');
 
 export type AiGenerationStatus = 'success' | 'error';
+export type AiGenerationErrorCategory =
+  | 'AUTHENTICATION'
+  | 'RATE_LIMIT'
+  | 'TIMEOUT'
+  | 'NETWORK'
+  | 'BAD_REQUEST'
+  | 'SCHEMA_VALIDATION'
+  | 'PROVIDER_SERVER_ERROR'
+  | 'CONFIGURATION'
+  | 'UNKNOWN';
 
 // This DTO is intentionally metadata-only: no prompt, completion, course text,
 // user answer, generated question, or source excerpt should cross this port.
@@ -14,6 +24,11 @@ export interface AiGenerationObservation {
   durationMs: number;
   status: AiGenerationStatus;
   errorCode?: string;
+  errorCategory?: AiGenerationErrorCategory;
+  errorName?: string;
+  errorStatus?: number;
+  errorProviderCode?: string;
+  errorSummary?: string;
   documentId?: string;
   knowledgeUnitId?: string;
   subjectId?: string;

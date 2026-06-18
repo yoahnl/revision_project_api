@@ -18,6 +18,7 @@ import {
   normalizeExtractedKnowledgeOutput,
   selectDocumentKnowledgeChunks,
 } from './document-knowledge-chunk-input';
+import { buildAiErrorDiagnostics } from './ai-error-diagnostics';
 
 const MISTRAL_PLUGIN_NAME = 'mistral';
 const MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
@@ -80,6 +81,7 @@ export class GenkitMistralDocumentKnowledgeExtractor implements DocumentKnowledg
         durationMs: Date.now() - startedAt,
         status: 'error',
         errorCode: GENERATION_FAILED_ERROR_CODE,
+        ...buildAiErrorDiagnostics(error),
         documentId: input.documentId,
       });
       throw error;
