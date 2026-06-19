@@ -1,3 +1,4 @@
+import type { RevisionSessionResultDto } from '../domain/revision-session-result.entity';
 import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionStatusValue,
@@ -89,4 +90,15 @@ export interface RevisionSessionsRepository {
       knowledgeUnitId: string | null;
     };
   }): Promise<RevisionSessionResponseDto>;
+
+  completeQuickSession(input: {
+    studentId: string;
+    sessionId: string;
+    completedAt: Date;
+  }): Promise<RevisionSessionResultDto>;
+
+  findResultByIdForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RevisionSessionResultDto>;
 }

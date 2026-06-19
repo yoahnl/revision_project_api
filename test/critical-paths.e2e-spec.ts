@@ -53,7 +53,9 @@ import { SubmitRichClosedExerciseUseCase } from '../src/modules/activities/appli
 import { GetDocumentUseCase } from '../src/modules/documents/application/get-document.use-case';
 import { ListDocumentKnowledgeUnitsUseCase } from '../src/modules/documents/application/list-document-knowledge-units.use-case';
 import { GetTodayPlanUseCase } from '../src/modules/revision/application/get-today-plan.use-case';
+import { CompleteQuickRevisionSessionUseCase } from '../src/modules/revision-sessions/application/complete-quick-revision-session.use-case';
 import { GetRevisionSessionUseCase } from '../src/modules/revision-sessions/application/get-revision-session.use-case';
+import { GetRevisionSessionResultUseCase } from '../src/modules/revision-sessions/application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../src/modules/revision-sessions/application/request-next-revision-session-action.use-case';
 import { StartRevisionSessionUseCase } from '../src/modules/revision-sessions/application/start-revision-session.use-case';
 import { GenerateDocumentSummaryUseCase } from '../src/modules/study-artifacts/application/generate-document-summary.use-case';
@@ -126,6 +128,13 @@ describe('Critical demo paths (e2e)', () => {
       await request(server)
         .post('/revision-sessions')
         .send({ subjectId: 'subject-1' })
+        .expect(401);
+      await request(server)
+        .post('/revision-sessions/revision-session-1/complete')
+        .send({})
+        .expect(401);
+      await request(server)
+        .get('/revision-sessions/revision-session-1/result')
         .expect(401);
       await request(server).get('/subjects/subject-1/courses').expect(401);
       await request(server)
@@ -2091,6 +2100,39 @@ describe('Critical demo paths (e2e)', () => {
       expect(
         JSON.stringify(mocks.requestNextAction.execute.mock.calls),
       ).not.toContain('ignore this free text');
+
+      await request(server)
+        .post('/revision-sessions/revision-session-1/complete')
+        .send({ score: 1 })
+        .expect(400);
+
+      const completeResponse = await request(server)
+        .post('/revision-sessions/revision-session-1/complete')
+        .send({})
+        .expect(201);
+
+      expect(mocks.completeQuickRevisionSession.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'revision-session-1',
+      });
+      expect(JSON.stringify(completeResponse.body)).not.toContain(
+        'correctChoiceId',
+      );
+      expect(JSON.stringify(completeResponse.body)).not.toContain(
+        'selectedChoiceId',
+      );
+
+      const resultResponse = await request(server)
+        .get('/revision-sessions/revision-session-1/result')
+        .expect(200);
+
+      expect(mocks.getRevisionSessionResult.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'revision-session-1',
+      });
+      expect(JSON.stringify(resultResponse.body)).not.toContain(
+        'correctChoiceId',
+      );
     });
 
     it('routes rich closed revision sessions as bounded launchers', async () => {
@@ -2256,6 +2298,10 @@ async function createAuthenticatedApp(
     .useValue(mocks.startRevisionSession)
     .overrideProvider(GetRevisionSessionUseCase)
     .useValue(mocks.getRevisionSession)
+    .overrideProvider(CompleteQuickRevisionSessionUseCase)
+    .useValue(mocks.completeQuickRevisionSession)
+    .overrideProvider(GetRevisionSessionResultUseCase)
+    .useValue(mocks.getRevisionSessionResult)
     .overrideProvider(RequestNextRevisionSessionActionUseCase)
     .useValue(mocks.requestNextAction)
     .compile();
@@ -2357,6 +2403,12 @@ function createCriticalPathMocks() {
     },
     getRevisionSession: {
       execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
+    },
+    completeQuickRevisionSession: {
+      execute: jest.fn().mockResolvedValue(revisionSessionResultResponse()),
+    },
+    getRevisionSessionResult: {
+      execute: jest.fn().mockResolvedValue(revisionSessionResultResponse()),
     },
     requestNextAction: {
       execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
@@ -3125,6 +3177,36 @@ function courseQuickRevisionSessionResponse() {
         activitySessionId: 'quiz-session-1',
         documentId: 'document-1',
         knowledgeUnitId: 'unit-1',
+      },
+    ],
+  };
+}
+
+function revisionSessionResultResponse() {
+  return {
+    session: {
+      id: 'revision-session-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      mode: 'QUICK',
+      status: 'COMPLETED',
+      createdAt: new Date('2026-06-15T12:00:00.000Z'),
+      completedAt: new Date('2026-06-15T12:05:00.000Z'),
+    },
+    summary: {
+      correctAnswers: 1,
+      totalQuestions: 2,
+      score: 0.5,
+      durationSeconds: 300,
+    },
+    knowledgeUnits: [
+      {
+        knowledgeUnitId: 'unit-1',
+        title: 'Séparation des pouvoirs',
+        correctAnswers: 1,
+        totalQuestions: 2,
+        score: 0.5,
+        state: 'TO_REVIEW',
       },
     ],
   };

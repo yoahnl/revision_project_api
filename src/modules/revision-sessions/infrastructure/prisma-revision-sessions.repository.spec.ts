@@ -203,6 +203,42 @@ describe('PrismaRevisionSessionsRepository', () => {
       include: {
         actions: {
           orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          include: {
+            activitySession: {
+              select: {
+                id: true,
+                subjectId: true,
+                documentId: true,
+                knowledgeUnitId: true,
+                type: true,
+                version: true,
+                questions: {
+                  orderBy: { displayOrder: 'asc' },
+                  select: {
+                    id: true,
+                    knowledgeUnitId: true,
+                    prompt: true,
+                    difficulty: true,
+                    displayOrder: true,
+                    choices: true,
+                    selectionMode: true,
+                    minSelections: true,
+                    maxSelections: true,
+                    sources: {
+                      include: {
+                        chunk: {
+                          select: {
+                            pageNumber: true,
+                            index: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     });

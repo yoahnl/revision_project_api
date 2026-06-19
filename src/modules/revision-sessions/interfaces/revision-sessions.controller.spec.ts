@@ -6,7 +6,9 @@ import { App } from 'supertest/types';
 import { AppModule } from '../../../app.module';
 import { TOKEN_VERIFIER } from '../../auth/application/token-verifier';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
+import { CompleteQuickRevisionSessionUseCase } from '../application/complete-quick-revision-session.use-case';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
+import { GetRevisionSessionResultUseCase } from '../application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
 import { StartRevisionSessionUseCase } from '../application/start-revision-session.use-case';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
@@ -28,6 +30,8 @@ describe('RevisionSessionsController', () => {
   let startRevisionSession: { execute: jest.Mock };
   let getRevisionSession: { execute: jest.Mock };
   let requestNextAction: { execute: jest.Mock };
+  let completeQuickRevisionSession: { execute: jest.Mock };
+  let getRevisionSessionResult: { execute: jest.Mock };
 
   beforeEach(async () => {
     startRevisionSession = {
@@ -38,6 +42,12 @@ describe('RevisionSessionsController', () => {
     };
     requestNextAction = {
       execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
+    };
+    completeQuickRevisionSession = {
+      execute: jest.fn().mockResolvedValue(revisionSessionResult()),
+    };
+    getRevisionSessionResult = {
+      execute: jest.fn().mockResolvedValue(revisionSessionResult()),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -61,6 +71,10 @@ describe('RevisionSessionsController', () => {
       .useValue(getRevisionSession)
       .overrideProvider(RequestNextRevisionSessionActionUseCase)
       .useValue(requestNextAction)
+      .overrideProvider(CompleteQuickRevisionSessionUseCase)
+      .useValue(completeQuickRevisionSession)
+      .overrideProvider(GetRevisionSessionResultUseCase)
+      .useValue(getRevisionSessionResult)
       .overrideProvider(PrismaService)
       .useValue({})
       .compile();
@@ -228,6 +242,92 @@ describe('RevisionSessionsController', () => {
       .post('/revision-sessions/revision-session-1/next-action')
       .expect(422);
   });
+
+  it('completes a quick session without accepting client result fields', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/revision-sessions/revision-session-1/complete')
+      .send({})
+      .expect(201);
+    const body = response.body as ReturnType<typeof revisionSessionResult>;
+
+    expect(completeQuickRevisionSession.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+    expect(body.summary.score).toBeCloseTo(0.6666666667);
+    expect(JSON.stringify(body)).not.toContain('correctChoiceId');
+    expect(JSON.stringify(body)).not.toContain('selectedChoiceId');
+    expect(JSON.stringify(body)).not.toContain('storagePath');
+  });
+
+  it('rejects non-empty complete bodies', async () => {
+    await request(app.getHttpServer())
+      .post('/revision-sessions/revision-session-1/complete')
+      .send({ score: 1, activitySessionId: 'fake' })
+      .expect(400);
+
+    expect(completeQuickRevisionSession.execute).not.toHaveBeenCalled();
+  });
+
+  it('maps complete lifecycle conflicts', async () => {
+    completeQuickRevisionSession.execute.mockRejectedValueOnce(
+      new Error('Revision session activity not submitted'),
+    );
+
+    await request(app.getHttpServer())
+      .post('/revision-sessions/revision-session-1/complete')
+      .send({})
+      .expect(409);
+
+    completeQuickRevisionSession.execute.mockRejectedValueOnce(
+      new Error('Revision session completion unsupported'),
+    );
+
+    await request(app.getHttpServer())
+      .post('/revision-sessions/revision-session-1/complete')
+      .send({})
+      .expect(422);
+  });
+
+  it('returns a completed quick session result', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/revision-sessions/revision-session-1/result')
+      .expect(200);
+    const body = response.body as ReturnType<typeof revisionSessionResult>;
+
+    expect(getRevisionSessionResult.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+    expect(body.knowledgeUnits).toEqual([
+      {
+        knowledgeUnitId: 'unit-1',
+        title: 'Séparation des pouvoirs',
+        correctAnswers: 4,
+        totalQuestions: 6,
+        score: 0.6666666667,
+        state: 'TO_REVIEW',
+      },
+    ]);
+  });
+
+  it('maps result errors', async () => {
+    getRevisionSessionResult.execute.mockRejectedValueOnce(
+      new Error('Revision session not found'),
+    );
+
+    await request(app.getHttpServer())
+      .get('/revision-sessions/missing-session/result')
+      .expect(404);
+
+    getRevisionSessionResult.execute.mockRejectedValueOnce(
+      new Error('Revision session not completed'),
+    );
+
+    await request(app.getHttpServer())
+      .get('/revision-sessions/revision-session-1/result')
+      .expect(409);
+  });
 });
 
 function revisionSessionResponse() {
@@ -306,6 +406,36 @@ function richClosedRevisionSessionResponse() {
         activitySessionId: null,
         documentId: 'document-1',
         knowledgeUnitId: 'unit-1',
+      },
+    ],
+  };
+}
+
+function revisionSessionResult() {
+  return {
+    session: {
+      id: 'revision-session-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      mode: 'QUICK',
+      status: 'COMPLETED',
+      createdAt: new Date('2026-06-15T10:00:00.000Z'),
+      completedAt: new Date('2026-06-15T10:04:12.000Z'),
+    },
+    summary: {
+      correctAnswers: 4,
+      totalQuestions: 6,
+      score: 0.6666666667,
+      durationSeconds: 252,
+    },
+    knowledgeUnits: [
+      {
+        knowledgeUnitId: 'unit-1',
+        title: 'Séparation des pouvoirs',
+        correctAnswers: 4,
+        totalQuestions: 6,
+        score: 0.6666666667,
+        state: 'TO_REVIEW',
       },
     ],
   };

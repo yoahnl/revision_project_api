@@ -1,5 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import {
+  ActivityStatus,
+  ActivityType,
   RevisionSessionActionKind,
   RevisionSessionActionStatus,
   RevisionSessionMode,
@@ -9,10 +11,15 @@ import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.serv
 import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionStatusValue,
+  RevisionSessionActionPayload,
   RevisionSessionModeValue,
   RevisionSessionResponseDto,
   RevisionSessionStatusValue,
 } from '../domain/revision-session.entity';
+import {
+  revisionSessionResultStateForScore,
+  type RevisionSessionResultDto,
+} from '../domain/revision-session-result.entity';
 import type {
   RevisionSessionsRepository,
   RevisionSessionPlanningContext,
@@ -47,9 +54,69 @@ type RevisionSessionActionRecord = {
   createdAt: Date;
   completedAt: Date | null;
   activitySession?: {
+    id?: string;
+    subjectId?: string;
+    documentId?: string | null;
     knowledgeUnitId: string;
+    type?: string;
+    version?: number;
+    questions?: RevisionSessionActivityQuestionRecord[];
   } | null;
 };
+
+type RevisionSessionActivityQuestionRecord = {
+  id: string;
+  knowledgeUnitId: string;
+  prompt: string;
+  difficulty: 'LOW' | 'MEDIUM' | 'HIGH' | null;
+  displayOrder: number;
+  choices: unknown;
+  selectionMode: 'SINGLE' | 'MULTIPLE';
+  minSelections: number | null;
+  maxSelections: number | null;
+  sources?: Array<{
+    chunkId: string;
+    chunk: {
+      pageNumber: number | null;
+      index: number;
+    };
+  }>;
+};
+
+type RevisionSessionActivityResultRecord = {
+  correctAnswers: number;
+  totalQuestions: number;
+  score: number | null;
+};
+
+type RevisionSessionAnswerRecord = {
+  isCorrect: boolean;
+  question: {
+    knowledgeUnitId: string;
+    knowledgeUnit: {
+      title: string;
+    };
+  };
+};
+
+type RevisionSessionActivityForResultRecord = {
+  id: string;
+  studentId: string;
+  status: string;
+  type: string;
+  result: RevisionSessionActivityResultRecord | null;
+  answers: RevisionSessionAnswerRecord[];
+};
+
+type CompletedRevisionSessionRecord = RevisionSessionRecord & {
+  status: 'COMPLETED';
+  completedAt: Date;
+};
+
+type RevisionSessionActivityWithResultRecord =
+  RevisionSessionActivityForResultRecord & {
+    result: RevisionSessionActivityResultRecord;
+  };
 
 @Injectable()
 export class PrismaRevisionSessionsRepository implements RevisionSessionsRepository {
@@ -190,6 +257,42 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       include: {
         actions: {
           orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          include: {
+            activitySession: {
+              select: {
+                id: true,
+                subjectId: true,
+                documentId: true,
+                knowledgeUnitId: true,
+                type: true,
+                version: true,
+                questions: {
+                  orderBy: { displayOrder: 'asc' },
+                  select: {
+                    id: true,
+                    knowledgeUnitId: true,
+                    prompt: true,
+                    difficulty: true,
+                    displayOrder: true,
+                    choices: true,
+                    selectionMode: true,
+                    minSelections: true,
+                    maxSelections: true,
+                    sources: {
+                      include: {
+                        chunk: {
+                          select: {
+                            pageNumber: true,
+                            index: true,
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
         },
       },
     })) as RevisionSessionRecord | null;
@@ -199,6 +302,192 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     }
 
     return toRevisionSessionResponse(session, session.actions ?? []);
+  }
+
+  async completeQuickSession(input: {
+    studentId: string;
+    sessionId: string;
+    completedAt: Date;
+  }): Promise<RevisionSessionResultDto> {
+    return this.prisma.$transaction(async (tx) => {
+      const session = (await tx.revisionSession.findFirst({
+        where: {
+          id: input.sessionId,
+          studentId: input.studentId,
+        },
+        include: {
+          actions: {
+            orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          },
+        },
+      })) as RevisionSessionRecord | null;
+
+      if (!session) {
+        throw new Error('Revision session not found');
+      }
+
+      if (session.mode !== RevisionSessionMode.QUICK) {
+        throw new Error('Revision session completion unsupported');
+      }
+
+      const action = selectCurrentAction(session.actions ?? []);
+
+      if (
+        !action ||
+        action.kind !== RevisionSessionActionKind.DIAGNOSTIC_QUIZ ||
+        !action.activitySessionId
+      ) {
+        throw new Error('Revision session not ready to complete');
+      }
+
+      const activity = (await tx.activitySession.findFirst({
+        where: {
+          id: action.activitySessionId,
+          studentId: input.studentId,
+          type: ActivityType.DIAGNOSTIC_QUIZ,
+        },
+        include: {
+          result: true,
+          answers: {
+            include: {
+              question: {
+                select: {
+                  knowledgeUnitId: true,
+                  knowledgeUnit: {
+                    select: {
+                      title: true,
+                    },
+                  },
+                },
+              },
+            },
+            orderBy: { createdAt: 'asc' },
+          },
+        },
+      })) as RevisionSessionActivityForResultRecord | null;
+
+      if (!activity) {
+        throw new Error('Revision session activity not found');
+      }
+
+      if (activity.status !== ActivityStatus.COMPLETED) {
+        throw new Error('Revision session activity not submitted');
+      }
+
+      if (!activity.result) {
+        throw new Error('Revision session result not found');
+      }
+
+      const completedAt = session.completedAt ?? input.completedAt;
+      const activityWithResult: RevisionSessionActivityWithResultRecord = {
+        ...activity,
+        result: activity.result,
+      };
+      const completedSession: CompletedRevisionSessionRecord = {
+        ...session,
+        status: RevisionSessionStatus.COMPLETED,
+        completedAt,
+      };
+
+      if (session.status !== RevisionSessionStatus.COMPLETED) {
+        await tx.revisionSessionAction.update({
+          where: { id: action.id },
+          data: {
+            status: RevisionSessionActionStatus.COMPLETED,
+            completedAt,
+          },
+        });
+        await tx.revisionSession.update({
+          where: { id: session.id },
+          data: {
+            status: RevisionSessionStatus.COMPLETED,
+            completedAt,
+          },
+        });
+      }
+
+      return toRevisionSessionResult(completedSession, activityWithResult);
+    });
+  }
+
+  async findResultByIdForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<RevisionSessionResultDto> {
+    const session = (await this.prisma.revisionSession.findFirst({
+      where: {
+        id: input.sessionId,
+        studentId: input.studentId,
+      },
+      include: {
+        actions: {
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+    })) as RevisionSessionRecord | null;
+
+    if (!session) {
+      throw new Error('Revision session not found');
+    }
+
+    if (
+      session.status !== RevisionSessionStatus.COMPLETED ||
+      !session.completedAt
+    ) {
+      throw new Error('Revision session not completed');
+    }
+
+    const action = selectCurrentAction(session.actions ?? []);
+
+    if (
+      !action ||
+      action.kind !== RevisionSessionActionKind.DIAGNOSTIC_QUIZ ||
+      !action.activitySessionId
+    ) {
+      throw new Error('Revision session result not found');
+    }
+
+    const activity = (await this.prisma.activitySession.findFirst({
+      where: {
+        id: action.activitySessionId,
+        studentId: input.studentId,
+        type: ActivityType.DIAGNOSTIC_QUIZ,
+      },
+      include: {
+        result: true,
+        answers: {
+          include: {
+            question: {
+              select: {
+                knowledgeUnitId: true,
+                knowledgeUnit: {
+                  select: {
+                    title: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    })) as RevisionSessionActivityForResultRecord | null;
+
+    if (!activity?.result) {
+      throw new Error('Revision session result not found');
+    }
+
+    const completedSession: CompletedRevisionSessionRecord = {
+      ...session,
+      status: RevisionSessionStatus.COMPLETED,
+      completedAt: session.completedAt,
+    };
+    const activityWithResult: RevisionSessionActivityWithResultRecord = {
+      ...activity,
+      result: activity.result,
+    };
+
+    return toRevisionSessionResult(completedSession, activityWithResult);
   }
 
   async findPlanningContextByIdForStudent(input: {
@@ -367,7 +656,7 @@ function toRevisionSessionResponse(
         activitySessionId: currentActionRecord.activitySessionId,
         documentId: currentActionRecord.documentId,
         knowledgeUnitId: currentActionRecord.knowledgeUnitId,
-        payload: toMinimalActionPayload(currentActionRecord),
+        payload: toActionPayload(currentActionRecord),
       }
     : null;
 
@@ -388,7 +677,23 @@ function toRevisionSessionResponse(
   };
 }
 
-function toMinimalActionPayload(action: RevisionSessionActionRecord) {
+function toActionPayload(
+  action: RevisionSessionActionRecord,
+): RevisionSessionActionPayload {
+  if (
+    action.kind === 'DIAGNOSTIC_QUIZ' &&
+    action.activitySession?.type === ActivityType.DIAGNOSTIC_QUIZ &&
+    Array.isArray(action.activitySession.questions)
+  ) {
+    return toDiagnosticQuizPayload(action.activitySession);
+  }
+
+  return toMinimalActionPayload(action);
+}
+
+function toMinimalActionPayload(
+  action: RevisionSessionActionRecord,
+): RevisionSessionActionPayload {
   if (action.kind === 'RICH_CLOSED_EXERCISE') {
     return {
       type: 'rich_closed_exercise' as const,
@@ -408,6 +713,190 @@ function toMinimalActionPayload(action: RevisionSessionActionRecord) {
         : ('diagnostic_quiz' as const),
     sessionId: action.activitySessionId,
   };
+}
+
+function toDiagnosticQuizPayload(
+  activity: NonNullable<RevisionSessionActionRecord['activitySession']>,
+) {
+  const payload = {
+    sessionId: activity.id ?? '',
+    type: 'diagnostic_quiz' as const,
+    title: 'Quiz de diagnostic',
+    questions: (activity.questions ?? []).map(toPublicDiagnosticQuestion),
+  };
+
+  if ((activity.version ?? 1) > 1) {
+    return {
+      ...payload,
+      version: activity.version,
+      documentId: activity.documentId ?? null,
+      subjectId: activity.subjectId,
+    };
+  }
+
+  return payload;
+}
+
+function toPublicDiagnosticQuestion(
+  question: RevisionSessionActivityQuestionRecord,
+) {
+  const sources = (question.sources ?? [])
+    .map((source) => ({
+      chunkId: source.chunkId,
+      pageNumber: source.chunk.pageNumber,
+      index: source.chunk.index,
+    }))
+    .sort((left, right) => left.index - right.index);
+
+  return {
+    id: question.id,
+    knowledgeUnitId: question.knowledgeUnitId,
+    prompt: question.prompt,
+    difficulty: question.difficulty,
+    ...(question.selectionMode === 'MULTIPLE'
+      ? { selectionMode: 'multiple' as const }
+      : {}),
+    ...(question.minSelections === null
+      ? {}
+      : { minSelections: question.minSelections }),
+    ...(question.maxSelections === null
+      ? {}
+      : { maxSelections: question.maxSelections }),
+    choices: parsePublicQuestionChoices(question.choices),
+    ...(sources.length > 0 ? { sources } : {}),
+  };
+}
+
+function parsePublicQuestionChoices(input: unknown) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((choice) => {
+      if (typeof choice === 'object' && choice !== null) {
+        const record = choice as { id?: unknown; label?: unknown };
+        if (typeof record.id !== 'string' || typeof record.label !== 'string') {
+          return null;
+        }
+
+        return {
+          id: record.id,
+          label: record.label,
+        };
+      }
+
+      return null;
+    })
+    .filter((choice): choice is { id: string; label: string } =>
+      Boolean(choice),
+    );
+}
+
+function selectCurrentAction(
+  actions: RevisionSessionActionRecord[],
+): RevisionSessionActionRecord | undefined {
+  return actions.length ? actions[actions.length - 1] : undefined;
+}
+
+function toRevisionSessionResult(
+  session: CompletedRevisionSessionRecord,
+  activity: RevisionSessionActivityWithResultRecord,
+): RevisionSessionResultDto {
+  const score = normalizeScore(
+    activity.result.score,
+    activity.result.correctAnswers,
+    activity.result.totalQuestions,
+  );
+  const durationSeconds = Math.max(
+    0,
+    Math.floor(
+      (session.completedAt.getTime() - session.createdAt.getTime()) / 1000,
+    ),
+  );
+
+  return {
+    session: {
+      id: session.id,
+      subjectId: session.subjectId,
+      courseId: session.courseId,
+      mode: session.mode,
+      status: 'COMPLETED',
+      createdAt: session.createdAt,
+      completedAt: session.completedAt,
+    },
+    summary: {
+      correctAnswers: activity.result.correctAnswers,
+      totalQuestions: activity.result.totalQuestions,
+      score,
+      durationSeconds,
+    },
+    knowledgeUnits: aggregateKnowledgeUnitResults(activity.answers),
+  };
+}
+
+function aggregateKnowledgeUnitResults(
+  answers: RevisionSessionAnswerRecord[],
+): RevisionSessionResultDto['knowledgeUnits'] {
+  const buckets = new Map<
+    string,
+    {
+      title: string;
+      correctAnswers: number;
+      totalQuestions: number;
+    }
+  >();
+
+  for (const answer of answers) {
+    const knowledgeUnitId = answer.question.knowledgeUnitId;
+    const current = buckets.get(knowledgeUnitId) ?? {
+      title: answer.question.knowledgeUnit.title,
+      correctAnswers: 0,
+      totalQuestions: 0,
+    };
+    buckets.set(knowledgeUnitId, {
+      title: current.title,
+      correctAnswers: current.correctAnswers + (answer.isCorrect ? 1 : 0),
+      totalQuestions: current.totalQuestions + 1,
+    });
+  }
+
+  return [...buckets.entries()].map(([knowledgeUnitId, bucket]) => {
+    const score = safeDivide(bucket.correctAnswers, bucket.totalQuestions);
+
+    return {
+      knowledgeUnitId,
+      title: bucket.title,
+      correctAnswers: bucket.correctAnswers,
+      totalQuestions: bucket.totalQuestions,
+      score,
+      state: revisionSessionResultStateForScore(score),
+    };
+  });
+}
+
+function normalizeScore(
+  score: number | null,
+  correctAnswers: number,
+  totalQuestions: number,
+): number {
+  if (typeof score === 'number' && Number.isFinite(score)) {
+    return clampScore(score);
+  }
+
+  return safeDivide(correctAnswers, totalQuestions);
+}
+
+function safeDivide(numerator: number, denominator: number): number {
+  if (denominator <= 0) {
+    return 0;
+  }
+
+  return clampScore(numerator / denominator);
+}
+
+function clampScore(score: number): number {
+  return Math.max(0, Math.min(1, score));
 }
 
 function toPrismaActionKind(kind: RevisionSessionActionKindValue) {

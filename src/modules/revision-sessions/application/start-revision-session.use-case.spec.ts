@@ -292,6 +292,8 @@ function createRevisionSessionsRepository(): jest.Mocked<RevisionSessionsReposit
       ),
     findPlanningContextByIdForStudent: jest.fn(),
     appendAction: jest.fn(),
+    completeQuickSession: jest.fn(),
+    findResultByIdForStudent: jest.fn(),
   };
 }
 

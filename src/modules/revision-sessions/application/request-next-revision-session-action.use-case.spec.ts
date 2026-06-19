@@ -334,6 +334,8 @@ function createRepository(): jest.Mocked<RevisionSessionsRepository> {
       .mockImplementation((input: AppendActionInput) =>
         Promise.resolve(revisionSessionResponse(input)),
       ),
+    completeQuickSession: jest.fn(),
+    findResultByIdForStudent: jest.fn(),
   };
 }
 

@@ -13,7 +13,9 @@ import {
 import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import type { RevisionSessionPreferredAction } from '../domain/revision-session.entity';
+import { CompleteQuickRevisionSessionUseCase } from '../application/complete-quick-revision-session.use-case';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
+import { GetRevisionSessionResultUseCase } from '../application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
 import { StartRevisionSessionUseCase } from '../application/start-revision-session.use-case';
 
@@ -38,6 +40,8 @@ export class RevisionSessionsController {
     private readonly startRevisionSession: StartRevisionSessionUseCase,
     private readonly getRevisionSession: GetRevisionSessionUseCase,
     private readonly requestNextAction: RequestNextRevisionSessionActionUseCase,
+    private readonly completeQuickRevisionSession: CompleteQuickRevisionSessionUseCase,
+    private readonly getRevisionSessionResult: GetRevisionSessionResultUseCase,
   ) {}
 
   @Post()
@@ -91,6 +95,48 @@ export class RevisionSessionsController {
     );
 
     return this.requestNextAction
+      .execute({
+        studentId: student.id,
+        sessionId: validatedSessionId,
+      })
+      .catch((error: unknown) => {
+        normalizeRevisionSessionError(error);
+      });
+  }
+
+  @Post(':sessionId/complete')
+  complete(
+    @CurrentStudent() student: { id: string },
+    @Param('sessionId') sessionId: string,
+    @Body() body: Record<string, unknown> | undefined,
+  ) {
+    const validatedSessionId = validateRequiredId(
+      sessionId,
+      'Revision session id',
+    );
+    validateEmptyBody(body);
+
+    return this.completeQuickRevisionSession
+      .execute({
+        studentId: student.id,
+        sessionId: validatedSessionId,
+      })
+      .catch((error: unknown) => {
+        normalizeRevisionSessionError(error);
+      });
+  }
+
+  @Get(':sessionId/result')
+  result(
+    @CurrentStudent() student: { id: string },
+    @Param('sessionId') sessionId: string,
+  ) {
+    const validatedSessionId = validateRequiredId(
+      sessionId,
+      'Revision session id',
+    );
+
+    return this.getRevisionSessionResult
       .execute({
         studentId: student.id,
         sessionId: validatedSessionId,
@@ -155,6 +201,14 @@ function validatePreferredAction(
   return normalized;
 }
 
+function validateEmptyBody(input: Record<string, unknown> | undefined): void {
+  if (input && Object.keys(input).length > 0) {
+    throw new BadRequestException(
+      'Revision session complete body must be empty',
+    );
+  }
+}
+
 function normalizeRevisionSessionError(error: unknown): never {
   if (error instanceof Error) {
     if (
@@ -180,6 +234,20 @@ function normalizeRevisionSessionError(error: unknown): never {
 
     if (error.message === 'Revision session is not started') {
       throw new ConflictException(error.message);
+    }
+
+    if (
+      error.message === 'Revision session not ready to complete' ||
+      error.message === 'Revision session activity not found' ||
+      error.message === 'Revision session activity not submitted' ||
+      error.message === 'Revision session result not found' ||
+      error.message === 'Revision session not completed'
+    ) {
+      throw new ConflictException(error.message);
+    }
+
+    if (error.message === 'Revision session completion unsupported') {
+      throw new UnprocessableEntityException(error.message);
     }
   }
 
