@@ -402,6 +402,33 @@ describe('PrismaDocumentsRepository', () => {
     });
   });
 
+  it('does not delete a course document when the document is outside the requested course', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.deleteCourseDocumentForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        documentId: 'document-2',
+      }),
+    ).resolves.toBe(false);
+
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-2',
+        studentId: 'student-1',
+        courseId: 'course-1',
+      },
+      select: {
+        id: true,
+        subjectId: true,
+      },
+    });
+    expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+  });
+
   it('marks uploaded documents as processing and records the running job', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.updateMany.mockResolvedValue({ count: 1 });

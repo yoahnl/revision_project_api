@@ -1,3 +1,1297 @@
+# CORE-06C — Backend 06B alignment + source deletion contract hardening
+
+## 1. Résumé
+
+CORE-06C côté backend aligne le code, les tests et la documentation avec l'état réel du MVP Core. Aucun endpoint nouveau n'a été ajouté : `POST /courses/:courseId/revision-sessions/quick` avait déjà son test `401` dans les critical paths via CORE-06B, et `DELETE /courses/:courseId/sources/:documentId` existait déjà. Le lot ajoute un test repository ciblé pour verrouiller que la suppression d'une source de cours ne supprime rien si le document n'appartient pas au cours demandé, puis documente officiellement cette capacité dans le runbook.
+
+## 2. Audit initial
+
+- `docs/core/CORE_06B_PROGRESS_REFRESH_AND_ACCEPTANCE_HARDENING_REPORT.md` existait, mais contenait encore un statut obsolète sur `git diff --check` après génération du rapport final.
+- `docs/core/MVP_CORE_ACCEPTANCE_RUNBOOK.md` existait et listait déjà `DELETE /courses/:courseId/sources/:documentId`, mais le smoke manuel ne demandait pas explicitement de tester la suppression.
+- `test/critical-paths.e2e-spec.ts` contient déjà `POST /courses/course-1/revision-sessions/quick` en `401` dans le bloc protected routes.
+- `test/critical-paths.e2e-spec.ts` contient déjà `DELETE /courses/course-1/sources/document-1` en `401`, un happy path `204`, et un mapping `404` source introuvable.
+- `CoursesController` prend `studentId` depuis `CurrentStudent`, et `courseId`/`documentId` depuis le path pour le delete source.
+- La suppression réelle est portée par `DeleteCourseDocumentUseCase`, puis `DocumentsRepository.deleteCourseDocumentForStudent`.
+- Les tests controller/use case existaient déjà ; le gap résiduel était le cas repository direct `findFirst(null)` pour `deleteCourseDocumentForStudent`.
+- Aucun `CourseSource` n'existe dans `src` ou `test`; les occurrences sont documentaires.
+
+## 3. Sub-agents/passes utilisées
+
+- Backend Contract Agent : audit read-only des endpoints course/source/progress/quick, des tests `401`, et du contrat delete source.
+- Frontend Contract Agent : audit read-only côté app ; ses conclusions sont intégrées dans le rapport frontend.
+- Docs Agent : passe manuelle de correction runbook/rapports, suppression des formulations obsolètes sur les validations.
+- QA Agent : validations locales listées en section 7.
+- Reviewer Agent : auto-review finale en section 13.
+
+## 4. Modifications backend
+
+- Ajout d'un test repository dans `PrismaDocumentsRepository` : `deleteCourseDocumentForStudent` retourne `false` et ne supprime ni `KnowledgeUnit` ni `Document` si le document n'est pas trouvé pour le triplet `studentId` + `courseId` + `documentId`.
+- Runbook backend mis à jour pour inclure une étape smoke optionnelle de suppression de source de cours.
+- Rapport CORE-06B corrigé pour remplacer l'ancien statut `git diff --check` et clarifier que le commit CORE-06B a été réalisé après autorisation explicite, pas pendant l'exécution initiale du lot.
+- Aucun controller, endpoint, use case, modèle Prisma, migration, prompt IA ou Genkit modifié.
+
+## 5. Modifications frontend
+
+Non applicable dans ce repo. Les changements frontend sont documentés dans le rapport app `docs/core/CORE_06C_BACKEND_ALIGNMENT_AND_SOURCE_DELETE_HARDENING_REPORT.md`.
+
+## 6. Tests ajoutés
+
+- `src/modules/documents/infrastructure/prisma-documents.repository.spec.ts` : ajoute le cas `does not delete a course document when the document is outside the requested course`.
+- Tests déjà existants confirmés sans duplication : quick `401`, delete source `401`, delete source `204`, delete source `404`, controller delete, use case delete.
+
+## 7. Commandes exécutées et résultats exacts
+
+- `npm test -- prisma-documents.repository --runInBand` : OK, 1 suite, 35 tests.
+- `npx prisma validate` : OK, schema valide.
+- `npx prisma generate` : OK, Prisma Client 7.8.0 généré.
+- `npm run build` : OK.
+- `npm run lint:check` : OK.
+- `npm test -- modules/courses --runInBand` : OK, 9 suites, 76 tests.
+- `npm test -- revision-sessions --runInBand` : OK, 6 suites, 44 tests.
+- `npm test -- --runInBand` : OK, 78 suites passées, 1 skipped, 685 tests passés, 1 skipped.
+- `npm run test:e2e -- --runInBand` : OK, 2 suites, 33 tests.
+- `rg -n "CourseSource" src test docs/core || true` : aucune occurrence dans `src` ou `test`; occurrences documentaires uniquement dans `docs/core`.
+- `git diff --check` : OK, relancé après génération du rapport CORE-06C.
+
+## 8. Preuve anti-fixtures
+
+Côté backend, aucune fixture MVP front (`Loi normale`, `78%`, `870`, `7 jours`) n'est concernée par les modules modifiés. Aucun changement backend n'ajoute de fixture de production.
+
+## 9. Preuve anti-CourseSource
+
+Commande exécutée : `rg -n "CourseSource" src test docs/core || true`.
+
+Résultat : pas d'occurrence dans `src` ni `test`; uniquement des mentions documentaires dans les rapports/runbooks.
+
+## 10. Runbook créé ou mis à jour
+
+- `docs/core/MVP_CORE_ACCEPTANCE_RUNBOOK.md` mis à jour pour documenter officiellement `DELETE /courses/:courseId/sources/:documentId` comme vérification optionnelle locale/dev, avec rappel que `courseId` et `documentId` viennent du path.
+
+## 11. Limites
+
+- La suppression de source reste une capacité course-level simple : pas de corbeille, pas de restauration, pas de gestion multi-source avancée.
+- Le test repository verrouille le non-delete hors cours, mais ne transforme pas la suppression en transaction applicative plus large que l'existant.
+- Aucun endpoint nouveau n'a été ajouté dans ce lot.
+
+## 12. Risques restants
+
+- La suppression supprime les notions liées au document côté repository documents ; c'est cohérent avec le comportement actuel, mais une stratégie de récupération serait MVP+.
+- Les rapports CORE précédents contiennent des mentions documentaires de `CourseSource`, ce qui est normal tant qu'elles restent hors `src`/`test`.
+
+## 13. Auto-review
+
+- `POST /courses/:courseId/revision-sessions/quick` a un test `401` : oui, déjà présent.
+- `DELETE /courses/:courseId/sources/:documentId` est documenté : oui.
+- Delete source a un contrat backend testé : oui, controller/use case/e2e existants + repository renforcé.
+- Aucun nouvel endpoint inutile : oui.
+- Aucun deep/exam : oui.
+- Aucun résultat session final : oui.
+- Aucun `CourseSource` : oui côté code.
+- Aucune fixture production : oui.
+- `git diff --check` relancé après rapport : oui.
+- Pas de commit pendant CORE-06C : oui.
+
+## 14. Points discutables du prompt
+
+- CORE-06C est très petit, mais utile pour faire coïncider code, tests et documentation après les commits CORE-06B/source-delete.
+- Le prompt demande de vérifier beaucoup de choses déjà couvertes ; j'ai évité de dupliquer les tests existants et ajouté seulement le garde-fou repository manquant.
+- La suppression source est une capacité produit pratique, mais elle méritera plus tard une UX de récupération si des utilisateurs suppriment par erreur.
+
+## 15. Fichiers créés/modifiés/supprimés
+
+Créés :
+- `docs/core/CORE_06C_BACKEND_ALIGNMENT_AND_SOURCE_DELETE_HARDENING_REPORT.md`
+
+Modifiés :
+- `src/modules/documents/infrastructure/prisma-documents.repository.spec.ts`
+- `docs/core/MVP_CORE_ACCEPTANCE_RUNBOOK.md`
+- `docs/core/CORE_06B_PROGRESS_REFRESH_AND_ACCEPTANCE_HARDENING_REPORT.md`
+
+Supprimés : aucun.
+
+## 16. Contenu complet des fichiers créés/modifiés/supprimés
+
+Le rapport courant ne s'inclut pas lui-même pour éviter une récursion infinie.
+
+### src/modules/documents/infrastructure/prisma-documents.repository.spec.ts
+
+````````ts
+import { PrismaDocumentsRepository } from './prisma-documents.repository';
+
+type DocumentRecord = {
+  id: string;
+  studentId: string;
+  subjectId: string;
+  courseId: string | null;
+  kind: 'COURSE_PDF' | 'EXAM_PDF' | 'EXAM_IMAGE';
+  fileName: string;
+  storagePath: string;
+  mimeType: string;
+  status: 'UPLOADED' | 'PROCESSING' | 'READY' | 'FAILED';
+  errorCode?: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type PrismaDocumentsMock = {
+  subject: {
+    findFirst: jest.Mock;
+  };
+  document: {
+    create: jest.Mock;
+    findFirst: jest.Mock;
+    findMany: jest.Mock;
+    findUnique: jest.Mock;
+    update: jest.Mock;
+    updateMany: jest.Mock;
+    deleteMany: jest.Mock;
+  };
+  documentProcessingJob: {
+    create: jest.Mock;
+    updateMany: jest.Mock;
+  };
+  knowledgeUnit: {
+    findUnique: jest.Mock;
+    findMany: jest.Mock;
+    create: jest.Mock;
+    createMany: jest.Mock;
+    deleteMany: jest.Mock;
+  };
+  documentChunk: {
+    deleteMany: jest.Mock;
+    createMany: jest.Mock;
+    findMany: jest.Mock;
+  };
+  knowledgeUnitSource: {
+    deleteMany: jest.Mock;
+    createMany: jest.Mock;
+  };
+  $transaction: jest.Mock<Promise<unknown>, [TransactionCallback]>;
+};
+
+type TransactionCallback = (tx: PrismaDocumentsMock) => unknown;
+
+describe('PrismaDocumentsRepository', () => {
+  const createRepository = () => {
+    const prisma: PrismaDocumentsMock = {
+      subject: {
+        findFirst: jest.fn(),
+      },
+      document: {
+        create: jest.fn(),
+        findFirst: jest.fn(),
+        findMany: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      documentProcessingJob: {
+        create: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      knowledgeUnit: {
+        findUnique: jest.fn(),
+        findMany: jest.fn(),
+        create: jest.fn(),
+        createMany: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      documentChunk: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+        findMany: jest.fn(),
+      },
+      knowledgeUnitSource: {
+        deleteMany: jest.fn(),
+        createMany: jest.fn(),
+      },
+      $transaction: jest.fn<Promise<unknown>, [TransactionCallback]>(),
+    };
+    prisma.$transaction.mockImplementation((callback) =>
+      Promise.resolve(callback(prisma)),
+    );
+
+    return {
+      prisma,
+      repository: new PrismaDocumentsRepository(prisma as never),
+    };
+  };
+
+  const record = (input: Partial<DocumentRecord> = {}): DocumentRecord => ({
+    id: 'document-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    courseId: null,
+    kind: 'COURSE_PDF',
+    fileName: 'cours.pdf',
+    storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+    mimeType: 'application/pdf',
+    status: 'UPLOADED',
+    errorCode: null,
+    createdAt: new Date('2026-06-18T12:00:00.000Z'),
+    updatedAt: new Date('2026-06-18T12:00:00.000Z'),
+    ...input,
+  });
+
+  it('creates a document and pending processing job in one transaction', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue({ id: 'subject-1' });
+    prisma.document.create.mockResolvedValue(record());
+
+    const document = await repository.create({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      kind: 'COURSE_PDF',
+      fileName: ' cours.pdf ',
+      storagePath: ' students/student-1/subjects/subject-1/cours.pdf ',
+      mimeType: ' application/pdf ',
+    });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.subject.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'subject-1',
+        studentId: 'student-1',
+      },
+    });
+    expect(prisma.document.create).toHaveBeenCalledWith({
+      data: {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: null,
+        kind: 'COURSE_PDF',
+        fileName: 'cours.pdf',
+        storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+        mimeType: 'application/pdf',
+      },
+    });
+    expect(prisma.documentProcessingJob.create).toHaveBeenCalledWith({
+      data: {
+        documentId: 'document-1',
+        status: 'PENDING',
+      },
+    });
+    expect(document).toMatchObject({
+      id: 'document-1',
+      status: 'UPLOADED',
+    });
+  });
+
+  it('creates a course-attached document when courseId is provided', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue({ id: 'subject-1' });
+    prisma.document.create.mockResolvedValue(record({ courseId: 'course-1' }));
+
+    const document = await repository.create({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      kind: 'COURSE_PDF',
+      fileName: 'cours.pdf',
+      storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+      mimeType: 'application/pdf',
+    });
+
+    expect(prisma.document.create).toHaveBeenCalledWith({
+      data: {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        kind: 'COURSE_PDF',
+        fileName: 'cours.pdf',
+        storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+        mimeType: 'application/pdf',
+      },
+    });
+    expect(document.courseId).toBe('course-1');
+  });
+
+  it('does not create a document when the subject is not owned by the student', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.create({
+        studentId: 'student-1',
+        subjectId: 'subject-2',
+        kind: 'COURSE_PDF',
+        fileName: 'cours.pdf',
+        storagePath: 'students/student-1/subjects/subject-2/cours.pdf',
+        mimeType: 'application/pdf',
+      }),
+    ).rejects.toThrow('Subject does not belong to student');
+
+    expect(prisma.document.create).not.toHaveBeenCalled();
+    expect(prisma.documentProcessingJob.create).not.toHaveBeenCalled();
+  });
+
+  it('lists documents for a subject owned by the student', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue({ id: 'subject-1' });
+    prisma.document.findMany.mockResolvedValue([
+      record({ id: 'document-1' }),
+      record({ id: 'document-2', status: 'READY' }),
+    ]);
+
+    const documents = await repository.findBySubjectForStudent({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+    });
+
+    expect(prisma.subject.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'subject-1',
+        studentId: 'student-1',
+      },
+    });
+    expect(prisma.document.findMany).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    expect(documents.map((document) => document.id)).toEqual([
+      'document-1',
+      'document-2',
+    ]);
+  });
+
+  it('rejects document listing for subjects not owned by the student', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.findBySubjectForStudent({
+        studentId: 'student-1',
+        subjectId: 'subject-2',
+      }),
+    ).rejects.toThrow('Subject does not belong to student');
+
+    expect(prisma.document.findMany).not.toHaveBeenCalled();
+  });
+
+  it('finds a document by id for its student owner', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record());
+
+    const document = await repository.findByIdForStudent({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+      },
+    });
+    expect(document?.id).toBe('document-1');
+  });
+
+  it('finds a document by id for internal worker processing', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(record());
+
+    const document = await repository.findById('document-1');
+
+    expect(prisma.document.findUnique).toHaveBeenCalledWith({
+      where: { id: 'document-1' },
+    });
+    expect(document?.storagePath).toBe(
+      'students/student-1/subjects/subject-1/cours.pdf',
+    );
+  });
+
+  it('returns the stored processing error code for failed documents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(
+      record({
+        status: 'FAILED',
+        errorCode: 'KNOWLEDGE_EXTRACTION_FAILED',
+      }),
+    );
+
+    const document = await repository.findByIdForStudent({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+
+    expect(document).toMatchObject({
+      id: 'document-1',
+      status: 'FAILED',
+      errorCode: 'KNOWLEDGE_EXTRACTION_FAILED',
+    });
+  });
+
+  it('deletes a document owned by a student after deleting document knowledge units', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record());
+    prisma.knowledgeUnit.deleteMany.mockResolvedValue({ count: 2 });
+    prisma.document.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      repository.deleteForStudent({
+        studentId: 'student-1',
+        documentId: 'document-1',
+      }),
+    ).resolves.toBe(true);
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+      },
+      select: {
+        id: true,
+        subjectId: true,
+      },
+    });
+    expect(prisma.knowledgeUnit.deleteMany).toHaveBeenCalledWith({
+      where: {
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+      },
+    });
+    expect(prisma.document.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+      },
+    });
+  });
+
+  it('returns false without deleting dependents for unknown or cross-student documents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.deleteForStudent({
+        studentId: 'student-1',
+        documentId: 'document-2',
+      }),
+    ).resolves.toBe(false);
+
+    expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('deletes a course document only when it belongs to the requested course', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(
+      record({ courseId: 'course-1' }),
+    );
+    prisma.knowledgeUnit.deleteMany.mockResolvedValue({ count: 2 });
+    prisma.document.deleteMany.mockResolvedValue({ count: 1 });
+
+    await expect(
+      repository.deleteCourseDocumentForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+      }),
+    ).resolves.toBe(true);
+
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+        courseId: 'course-1',
+      },
+      select: {
+        id: true,
+        subjectId: true,
+      },
+    });
+    expect(prisma.knowledgeUnit.deleteMany).toHaveBeenCalledWith({
+      where: {
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+      },
+    });
+    expect(prisma.document.deleteMany).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+        courseId: 'course-1',
+      },
+    });
+  });
+
+  it('does not delete a course document when the document is outside the requested course', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.deleteCourseDocumentForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        documentId: 'document-2',
+      }),
+    ).resolves.toBe(false);
+
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-2',
+        studentId: 'student-1',
+        courseId: 'course-1',
+      },
+      select: {
+        id: true,
+        subjectId: true,
+      },
+    });
+    expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('marks uploaded documents as processing and records the running job', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markProcessing('document-1');
+
+    expect(prisma.document.updateMany).toHaveBeenCalledWith({
+      where: { id: 'document-1', status: 'UPLOADED' },
+      data: { status: 'PROCESSING', errorCode: null },
+    });
+    expect(prisma.documentProcessingJob.updateMany).toHaveBeenCalledWith({
+      where: { documentId: 'document-1', status: 'PENDING' },
+      data: { status: 'RUNNING' },
+    });
+  });
+
+  it('rejects processing transitions from non-uploaded documents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(repository.markProcessing('document-1')).rejects.toThrow(
+      'Document is not uploaded',
+    );
+
+    expect(prisma.documentProcessingJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects processing transitions when no pending job exists', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(repository.markProcessing('document-1')).rejects.toThrow(
+      'Document processing job is not pending',
+    );
+  });
+
+  it('marks processing documents ready with extracted knowledge units', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markReadyWithKnowledgeUnits({
+      documentId: 'document-1',
+      units: [{ title: ' Cellules ', summary: ' Bases ' }],
+    });
+
+    expect(prisma.document.findUnique).toHaveBeenCalledWith({
+      where: { id: 'document-1' },
+    });
+    expect(prisma.knowledgeUnit.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          documentId: 'document-1',
+          subjectId: 'subject-1',
+          title: 'Cellules',
+          summary: 'Bases',
+        },
+      ],
+    });
+    expect(prisma.document.updateMany).toHaveBeenCalledWith({
+      where: { id: 'document-1', status: 'PROCESSING' },
+      data: { status: 'READY', errorCode: null },
+    });
+    expect(prisma.documentProcessingJob.updateMany).toHaveBeenCalledWith({
+      where: { documentId: 'document-1', status: 'RUNNING' },
+      data: { status: 'COMPLETED' },
+    });
+  });
+
+  it('persists optional enrichment fields when marking knowledge units ready', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markReadyWithKnowledgeUnits({
+      documentId: 'document-1',
+      units: [
+        {
+          title: 'Séparation des pouvoirs',
+          summary: 'Principe structurant les institutions.',
+          difficulty: 'MEDIUM',
+          displayOrder: 2,
+          confidence: 0.84,
+          extractionPromptVersion: 'document-knowledge-v1',
+          extractionSchemaVersion: 'extracted-knowledge-v1',
+        },
+      ],
+    });
+
+    expect(prisma.knowledgeUnit.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          documentId: 'document-1',
+          subjectId: 'subject-1',
+          title: 'Séparation des pouvoirs',
+          summary: 'Principe structurant les institutions.',
+          difficulty: 'MEDIUM',
+          displayOrder: 2,
+          confidence: 0.84,
+          extractionPromptVersion: 'document-knowledge-v1',
+          extractionSchemaVersion: 'extracted-knowledge-v1',
+        },
+      ],
+    });
+  });
+
+  it('creates knowledge unit sources when marking sourced units ready', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.documentChunk.findMany.mockResolvedValue([
+      { id: 'chunk-1' },
+      { id: 'chunk-2' },
+    ]);
+    prisma.knowledgeUnit.create.mockResolvedValue({
+      id: 'knowledge-unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markReadyWithKnowledgeUnits({
+      documentId: 'document-1',
+      units: [
+        {
+          title: 'Séparation des pouvoirs',
+          summary: 'Principe structurant les institutions.',
+          sourceChunkIds: ['chunk-2', 'chunk-1', 'chunk-2'],
+          difficulty: 'MEDIUM',
+          displayOrder: 2,
+          confidence: 0.84,
+          extractionPromptVersion: 'document-knowledge-v2',
+          extractionSchemaVersion: 'extracted-knowledge-v2',
+        },
+      ],
+    });
+
+    expect(prisma.documentChunk.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['chunk-2', 'chunk-1'] },
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+      },
+      select: { id: true },
+    });
+    expect(prisma.knowledgeUnit.create).toHaveBeenCalledWith({
+      data: {
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        title: 'Séparation des pouvoirs',
+        summary: 'Principe structurant les institutions.',
+        difficulty: 'MEDIUM',
+        displayOrder: 2,
+        confidence: 0.84,
+        extractionPromptVersion: 'document-knowledge-v2',
+        extractionSchemaVersion: 'extracted-knowledge-v2',
+      },
+    });
+    expect(prisma.knowledgeUnitSource.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          knowledgeUnitId: 'knowledge-unit-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-2',
+          relevanceScore: null,
+        },
+        {
+          knowledgeUnitId: 'knowledge-unit-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-1',
+          relevanceScore: null,
+        },
+      ],
+    });
+    expect(prisma.knowledgeUnit.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects sourced ready transitions when a source chunk belongs to another document', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.documentChunk.findMany.mockResolvedValue([{ id: 'chunk-1' }]);
+
+    await expect(
+      repository.markReadyWithKnowledgeUnits({
+        documentId: 'document-1',
+        units: [
+          {
+            title: 'Constitution',
+            summary: 'Norme fondamentale.',
+            sourceChunkIds: ['chunk-1', 'chunk-other-document'],
+          },
+        ],
+      }),
+    ).rejects.toThrow('Knowledge unit source chunk not found');
+
+    expect(prisma.knowledgeUnit.create).not.toHaveBeenCalled();
+    expect(prisma.knowledgeUnitSource.createMany).not.toHaveBeenCalled();
+    expect(prisma.document.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('does not duplicate knowledge units when a document is already ready', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(record({ status: 'READY' }));
+
+    await repository.markReadyWithKnowledgeUnits({
+      documentId: 'document-1',
+      units: [{ title: 'Cellules', summary: 'Bases' }],
+    });
+
+    expect(prisma.knowledgeUnit.createMany).not.toHaveBeenCalled();
+    expect(prisma.document.updateMany).not.toHaveBeenCalled();
+    expect(prisma.documentProcessingJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects ready transitions from documents that are not processing', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'UPLOADED' }),
+    );
+
+    await expect(
+      repository.markReadyWithKnowledgeUnits({
+        documentId: 'document-1',
+        units: [{ title: 'Cellules', summary: 'Bases' }],
+      }),
+    ).rejects.toThrow('Document is not processing');
+
+    expect(prisma.knowledgeUnit.createMany).not.toHaveBeenCalled();
+    expect(prisma.document.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects ready transitions when no running job exists', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      repository.markReadyWithKnowledgeUnits({
+        documentId: 'document-1',
+        units: [],
+      }),
+    ).rejects.toThrow('Document processing job is not running');
+  });
+
+  it('marks uploaded or processing documents failed', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markFailed({
+      documentId: 'document-1',
+      errorCode: 'EXTRACTION_FAILED',
+    });
+
+    expect(prisma.document.updateMany).toHaveBeenCalledWith({
+      where: { id: 'document-1', status: { in: ['UPLOADED', 'PROCESSING'] } },
+      data: { status: 'FAILED', errorCode: 'EXTRACTION_FAILED' },
+    });
+    expect(prisma.documentProcessingJob.updateMany).toHaveBeenCalledWith({
+      where: {
+        documentId: 'document-1',
+        status: { in: ['PENDING', 'RUNNING'] },
+      },
+      data: { status: 'FAILED' },
+    });
+  });
+
+  it('does not fail completed documents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(record({ status: 'READY' }));
+
+    await expect(
+      repository.markFailed({
+        documentId: 'document-1',
+        errorCode: 'EXTRACTION_FAILED',
+      }),
+    ).rejects.toThrow('Document is already ready');
+
+    expect(prisma.document.updateMany).not.toHaveBeenCalled();
+    expect(prisma.documentProcessingJob.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects failure transitions when no active job exists', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      repository.markFailed({
+        documentId: 'document-1',
+        errorCode: 'EXTRACTION_FAILED',
+      }),
+    ).rejects.toThrow('Document processing job is not active');
+  });
+
+  it('replaces chunks for a processing document in index order', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+
+    await repository.replaceChunks({
+      documentId: 'document-1',
+      chunks: [
+        {
+          index: 1,
+          text: 'Deuxieme bloc',
+          charStart: 15,
+          charEnd: 28,
+          pageNumber: null,
+        },
+        {
+          index: 0,
+          text: 'Premier bloc',
+          charStart: 0,
+          charEnd: 13,
+        },
+      ],
+    });
+
+    expect(prisma.documentChunk.deleteMany).toHaveBeenCalledWith({
+      where: { documentId: 'document-1' },
+    });
+    expect(prisma.documentChunk.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          documentId: 'document-1',
+          subjectId: 'subject-1',
+          index: 0,
+          text: 'Premier bloc',
+          charStart: 0,
+          charEnd: 13,
+          pageNumber: null,
+        },
+        {
+          documentId: 'document-1',
+          subjectId: 'subject-1',
+          index: 1,
+          text: 'Deuxieme bloc',
+          charStart: 15,
+          charEnd: 28,
+          pageNumber: null,
+        },
+      ],
+    });
+  });
+
+  it('replaces existing chunks with an empty list without creating rows', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+
+    await repository.replaceChunks({
+      documentId: 'document-1',
+      chunks: [],
+    });
+
+    expect(prisma.documentChunk.deleteMany).toHaveBeenCalledWith({
+      where: { documentId: 'document-1' },
+    });
+    expect(prisma.documentChunk.createMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects chunk replacement when the document is not processing', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(record({ status: 'READY' }));
+
+    await expect(
+      repository.replaceChunks({
+        documentId: 'document-1',
+        chunks: [{ index: 0, text: 'Bloc', charStart: 0, charEnd: 4 }],
+      }),
+    ).rejects.toThrow('Document is not processing');
+
+    expect(prisma.documentChunk.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.documentChunk.createMany).not.toHaveBeenCalled();
+  });
+
+  it('lists document chunks by ascending index', async () => {
+    const { prisma, repository } = createRepository();
+    const createdAt = new Date('2026-06-14T12:00:00.000Z');
+    prisma.documentChunk.findMany.mockResolvedValue([
+      {
+        id: 'chunk-1',
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        index: 0,
+        text: 'Premier bloc',
+        charStart: 0,
+        charEnd: 13,
+        pageNumber: null,
+        createdAt,
+      },
+    ]);
+
+    const chunks = await repository.findChunksByDocumentId('document-1');
+
+    expect(prisma.documentChunk.findMany).toHaveBeenCalledWith({
+      where: { documentId: 'document-1' },
+      orderBy: { index: 'asc' },
+    });
+    expect(chunks).toEqual([
+      {
+        id: 'chunk-1',
+        documentId: 'document-1',
+        subjectId: 'subject-1',
+        index: 0,
+        text: 'Premier bloc',
+        charStart: 0,
+        charEnd: 13,
+        pageNumber: null,
+        createdAt,
+      },
+    ]);
+  });
+
+  it('lists sourced knowledge units for a student document in stable order', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record({ status: 'READY' }));
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      {
+        id: 'unit-1',
+        title: 'Séparation des pouvoirs',
+        summary: 'Principe structurant les institutions.',
+        difficulty: 'MEDIUM',
+        displayOrder: 1,
+        confidence: 0.84,
+        sources: [
+          {
+            chunkId: 'chunk-2',
+            chunk: {
+              text: 'Second extrait.',
+              pageNumber: null,
+              index: 1,
+            },
+          },
+          {
+            chunkId: 'chunk-1',
+            chunk: {
+              text: 'Premier extrait.',
+              pageNumber: null,
+              index: 0,
+            },
+          },
+        ],
+      },
+    ]);
+
+    const response = await repository.findKnowledgeUnitsByDocumentForStudent({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+
+    expect(prisma.document.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'document-1',
+        studentId: 'student-1',
+      },
+    });
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        documentId: 'document-1',
+        subject: {
+          studentId: 'student-1',
+        },
+      },
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+      include: {
+        sources: {
+          include: {
+            chunk: true,
+          },
+        },
+      },
+    });
+    expect(response).toEqual({
+      documentId: 'document-1',
+      documentStatus: 'READY',
+      items: [
+        {
+          id: 'unit-1',
+          title: 'Séparation des pouvoirs',
+          summary: 'Principe structurant les institutions.',
+          difficulty: 'MEDIUM',
+          displayOrder: 1,
+          confidence: 0.84,
+          sources: [
+            {
+              chunkId: 'chunk-1',
+              text: 'Premier extrait.',
+              pageNumber: null,
+              index: 0,
+            },
+            {
+              chunkId: 'chunk-2',
+              text: 'Second extrait.',
+              pageNumber: null,
+              index: 1,
+            },
+          ],
+        },
+      ],
+    });
+    expect(JSON.stringify(response)).not.toContain('storagePath');
+  });
+
+  it('returns null when listing knowledge units for another student document', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(null);
+
+    const response = await repository.findKnowledgeUnitsByDocumentForStudent({
+      studentId: 'student-2',
+      documentId: 'document-1',
+    });
+
+    expect(response).toBeNull();
+    expect(prisma.knowledgeUnit.findMany).not.toHaveBeenCalled();
+  });
+
+  it('does not return chunks that are not linked as sources', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record({ status: 'READY' }));
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      {
+        id: 'unit-1',
+        title: 'Constitution',
+        summary: 'Norme fondamentale.',
+        difficulty: null,
+        displayOrder: null,
+        confidence: null,
+        sources: [],
+      },
+    ]);
+
+    const response = await repository.findKnowledgeUnitsByDocumentForStudent({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+
+    expect(response?.items[0]?.sources).toEqual([]);
+  });
+
+  it('persists knowledge unit sources only for chunks in the same subject', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findUnique.mockResolvedValue({
+      id: 'knowledge-unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.documentChunk.findMany.mockResolvedValue([
+      { id: 'chunk-1' },
+      { id: 'chunk-2' },
+    ]);
+
+    await repository.replaceKnowledgeUnitSources({
+      knowledgeUnitId: 'knowledge-unit-1',
+      subjectId: 'subject-1',
+      sources: [
+        { chunkId: 'chunk-2', relevanceScore: 0.7 },
+        { chunkId: 'chunk-1', relevanceScore: null },
+      ],
+    });
+
+    expect(prisma.documentChunk.findMany).toHaveBeenCalledWith({
+      where: {
+        id: { in: ['chunk-2', 'chunk-1'] },
+        subjectId: 'subject-1',
+      },
+      select: { id: true },
+    });
+    expect(prisma.knowledgeUnitSource.deleteMany).toHaveBeenCalledWith({
+      where: {
+        knowledgeUnitId: 'knowledge-unit-1',
+        subjectId: 'subject-1',
+      },
+    });
+    expect(prisma.knowledgeUnitSource.createMany).toHaveBeenCalledWith({
+      data: [
+        {
+          knowledgeUnitId: 'knowledge-unit-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-2',
+          relevanceScore: 0.7,
+        },
+        {
+          knowledgeUnitId: 'knowledge-unit-1',
+          subjectId: 'subject-1',
+          chunkId: 'chunk-1',
+          relevanceScore: null,
+        },
+      ],
+    });
+  });
+
+  it('rejects knowledge unit sources pointing to unknown chunks', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findUnique.mockResolvedValue({
+      id: 'knowledge-unit-1',
+      subjectId: 'subject-1',
+    });
+    prisma.documentChunk.findMany.mockResolvedValue([{ id: 'chunk-1' }]);
+
+    await expect(
+      repository.replaceKnowledgeUnitSources({
+        knowledgeUnitId: 'knowledge-unit-1',
+        subjectId: 'subject-1',
+        sources: [
+          { chunkId: 'chunk-1', relevanceScore: 0.9 },
+          { chunkId: 'chunk-unknown', relevanceScore: 0.5 },
+        ],
+      }),
+    ).rejects.toThrow('Knowledge unit source chunk not found');
+
+    expect(prisma.knowledgeUnitSource.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.knowledgeUnitSource.createMany).not.toHaveBeenCalled();
+  });
+
+  it('does not create knowledge unit sources while marking ready without source ids', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findUnique.mockResolvedValue(
+      record({ status: 'PROCESSING' }),
+    );
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+    prisma.documentProcessingJob.updateMany.mockResolvedValue({ count: 1 });
+
+    await repository.markReadyWithKnowledgeUnits({
+      documentId: 'document-1',
+      units: [{ title: 'Constitution', summary: 'Norme fondamentale.' }],
+    });
+
+    expect(prisma.knowledgeUnitSource.createMany).not.toHaveBeenCalled();
+  });
+});
+
+````````
+
+### docs/core/MVP_CORE_ACCEPTANCE_RUNBOOK.md
+
+````````md
+# MVP Core acceptance runbook
+
+Ce runbook vérifie le parcours MVP Core réel côté backend, sans mode démo durable et sans `CourseSource`.
+
+## Périmètre
+
+Le parcours attendu est :
+
+1. Utilisateur authentifié.
+2. Matières réelles accessibles.
+3. Création d'un cours réel.
+4. Ouverture du détail du cours.
+5. Upload d'une source PDF via le cours.
+6. Traitement documentaire jusqu'au statut `READY`.
+7. Fiche de cours course-level.
+8. Révision rapide course-level.
+9. Réponse au QCM.
+10. Progression réelle course/subject.
+11. Suppression optionnelle d'une source attachée au cours, en local/dev uniquement.
+
+## Endpoints critiques
+
+- `GET /subjects`
+- `GET /subjects/:subjectId/courses`
+- `POST /subjects/:subjectId/courses`
+- `GET /courses/:courseId`
+- `POST /courses/:courseId/source/course-pdf`
+- `DELETE /courses/:courseId/sources/:documentId`
+- `GET /courses/:courseId/revision-sheet`
+- `POST /courses/:courseId/revision-sheet`
+- `POST /courses/:courseId/revision-sessions/quick`
+- `GET /courses/:courseId/progress`
+- `GET /subjects/:subjectId/progress`
+
+## Vérifications API
+
+```bash
+npx prisma validate
+npx prisma generate
+npm run build
+npm run lint:check
+npm test -- modules/courses --runInBand
+npm test -- revision-sessions --runInBand
+npm test -- --runInBand
+npm run test:e2e -- --runInBand
+git diff --check
+```
+
+## Smoke manuel local
+
+1. Démarrer l'API en environnement local/dev.
+2. S'authentifier avec un utilisateur de test.
+3. Créer une matière réelle si nécessaire.
+4. Créer un cours sous cette matière.
+5. Uploader un PDF avec `POST /courses/:courseId/source/course-pdf`.
+6. Vérifier que le document passe de `UPLOADED`/`PROCESSING` à `READY`.
+7. Appeler `GET /courses/:courseId/progress` et vérifier un état cohérent.
+8. Vérifier optionnellement la suppression de source avec `DELETE /courses/:courseId/sources/:documentId` sur un document de test, puis confirmer que le cours et la progression se recalculent sans fuite cross-student.
+9. Appeler `POST /courses/:courseId/revision-sessions/quick` quand une source `READY` existe.
+10. Soumettre l'activité générée par la session.
+11. Recharger `GET /courses/:courseId/progress` et `GET /subjects/:subjectId/progress`.
+
+## Hors MVP Core
+
+- Révision approfondie.
+- Préparation examen.
+- Résultat final dédié de session.
+- Gamification durable.
+- Multi-source avancé.
+- Table ou modèle `CourseSource`.
+- SSE/WebSocket de processing.
+
+## Garde-fous
+
+- Le client ne fournit pas `studentId`.
+- L'upload sous cours dérive `subjectId` depuis le cours.
+- La révision rapide choisit la source et la notion côté backend.
+- La suppression de source prend `courseId` et `documentId` depuis le path, jamais depuis un body client.
+- Les endpoints protégés doivent répondre `401` sans bearer token.
+- Les documents sans `courseId` ne polluent pas la progression course-level.
+
+````````
+
+### docs/core/CORE_06B_PROGRESS_REFRESH_AND_ACCEPTANCE_HARDENING_REPORT.md
+
+````````md
 # CORE-06B — Progress refresh coherence + MVP Core acceptance hardening
 
 ## 1. Résumé
@@ -3453,3 +4747,5 @@ git diff --check
 - Les documents sans `courseId` ne polluent pas la progression course-level.
 
 ```
+
+````````

@@ -16,6 +16,7 @@ Le parcours attendu est :
 8. Révision rapide course-level.
 9. Réponse au QCM.
 10. Progression réelle course/subject.
+11. Suppression optionnelle d'une source attachée au cours, en local/dev uniquement.
 
 ## Endpoints critiques
 
@@ -54,9 +55,10 @@ git diff --check
 5. Uploader un PDF avec `POST /courses/:courseId/source/course-pdf`.
 6. Vérifier que le document passe de `UPLOADED`/`PROCESSING` à `READY`.
 7. Appeler `GET /courses/:courseId/progress` et vérifier un état cohérent.
-8. Appeler `POST /courses/:courseId/revision-sessions/quick` quand une source `READY` existe.
-9. Soumettre l'activité générée par la session.
-10. Recharger `GET /courses/:courseId/progress` et `GET /subjects/:subjectId/progress`.
+8. Vérifier optionnellement la suppression de source avec `DELETE /courses/:courseId/sources/:documentId` sur un document de test, puis confirmer que le cours et la progression se recalculent sans fuite cross-student.
+9. Appeler `POST /courses/:courseId/revision-sessions/quick` quand une source `READY` existe.
+10. Soumettre l'activité générée par la session.
+11. Recharger `GET /courses/:courseId/progress` et `GET /subjects/:subjectId/progress`.
 
 ## Hors MVP Core
 
@@ -73,5 +75,6 @@ git diff --check
 - Le client ne fournit pas `studentId`.
 - L'upload sous cours dérive `subjectId` depuis le cours.
 - La révision rapide choisit la source et la notion côté backend.
+- La suppression de source prend `courseId` et `documentId` depuis le path, jamais depuis un body client.
 - Les endpoints protégés doivent répondre `401` sans bearer token.
 - Les documents sans `courseId` ne polluent pas la progression course-level.
