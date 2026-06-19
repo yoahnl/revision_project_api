@@ -200,13 +200,13 @@ describe('GenkitRevisionSheetGenerator', () => {
     });
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockPlugin],
-      model: 'mistral/mistral-small-latest',
+      model: 'mistral/mistral-medium-latest',
     });
     expect(sheet.metadata.provider).toBe('mistral');
-    expect(sheet.metadata.model).toBe('mistral/mistral-small-latest');
+    expect(sheet.metadata.model).toBe('mistral/mistral-medium-latest');
     const observation = getObservedObservation(observer);
     expect(observation.provider).toBe('mistral');
-    expect(observation.model).toBe('mistral/mistral-small-latest');
+    expect(observation.model).toBe('mistral/mistral-medium-latest');
     expect(JSON.stringify(observer.observe.mock.calls)).not.toContain(
       'SENTINEL_FULL_CHUNK_TEXT',
     );

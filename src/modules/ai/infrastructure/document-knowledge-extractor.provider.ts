@@ -4,12 +4,17 @@ import {
 } from '../application/ai-generation-observer';
 import type { DocumentKnowledgeExtractor } from '../application/document-knowledge-extractor';
 import { GenkitDocumentKnowledgeExtractor } from './genkit-document-knowledge.extractor';
-import { GenkitMistralDocumentKnowledgeExtractor } from './genkit-mistral-document-knowledge.extractor';
+import { GenkitOpenAiCompatibleDocumentKnowledgeExtractor } from './genkit-openai-compatible-document-knowledge.extractor';
+import {
+  MIMO_PROVIDER,
+  MISTRAL_PROVIDER,
+} from './openai-compatible-ai-provider';
 
 type AiProviderEnv = {
   AI_PROVIDER?: string;
   GOOGLE_GENAI_API_KEY?: string;
   MISTRAL_API_KEY?: string;
+  MIMO_API_KEY?: string;
 };
 
 export function createDocumentKnowledgeExtractor(
@@ -18,8 +23,18 @@ export function createDocumentKnowledgeExtractor(
 ): DocumentKnowledgeExtractor {
   const configuredProvider = env.AI_PROVIDER?.trim().toLowerCase();
 
-  if (configuredProvider === 'mistral') {
-    return new GenkitMistralDocumentKnowledgeExtractor(observer);
+  if (configuredProvider === MISTRAL_PROVIDER) {
+    return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
+      observer,
+      MISTRAL_PROVIDER,
+    );
+  }
+
+  if (configuredProvider === MIMO_PROVIDER) {
+    return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
+      observer,
+      MIMO_PROVIDER,
+    );
   }
 
   if (configuredProvider === 'genkit' || configuredProvider === 'google') {
@@ -27,7 +42,21 @@ export function createDocumentKnowledgeExtractor(
   }
 
   if (!hasValue(env.GOOGLE_GENAI_API_KEY) && hasValue(env.MISTRAL_API_KEY)) {
-    return new GenkitMistralDocumentKnowledgeExtractor(observer);
+    return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
+      observer,
+      MISTRAL_PROVIDER,
+    );
+  }
+
+  if (
+    !hasValue(env.GOOGLE_GENAI_API_KEY) &&
+    !hasValue(env.MISTRAL_API_KEY) &&
+    hasValue(env.MIMO_API_KEY)
+  ) {
+    return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
+      observer,
+      MIMO_PROVIDER,
+    );
   }
 
   return new GenkitDocumentKnowledgeExtractor(observer);

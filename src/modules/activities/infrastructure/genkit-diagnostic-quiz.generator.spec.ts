@@ -98,6 +98,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
   const originalMistralFallbackModel = process.env.MISTRAL_FALLBACK_MODEL;
   const originalMistralDiagnosticQuizFallbackModel =
     process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL;
+  const originalMimoApiKey = process.env.MIMO_API_KEY;
+  const originalMimoModel = process.env.MIMO_MODEL;
+  const originalMimoBaseUrl = process.env.MIMO_BASE_URL;
   const originalGoogleGenaiApiKey = process.env.GOOGLE_GENAI_API_KEY;
   const originalGeminiApiKey = process.env.GEMINI_API_KEY;
   const originalGoogleApiKey = process.env.GOOGLE_API_KEY;
@@ -129,6 +132,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       'MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL',
       originalMistralDiagnosticQuizFallbackModel,
     );
+    restoreEnv('MIMO_API_KEY', originalMimoApiKey);
+    restoreEnv('MIMO_MODEL', originalMimoModel);
+    restoreEnv('MIMO_BASE_URL', originalMimoBaseUrl);
     restoreEnv('GOOGLE_GENAI_API_KEY', originalGoogleGenaiApiKey);
     restoreEnv('GEMINI_API_KEY', originalGeminiApiKey);
     restoreEnv('GOOGLE_API_KEY', originalGoogleApiKey);
@@ -182,7 +188,7 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     });
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockMistralPlugin],
-      model: 'mistral/mistral-small-latest',
+      model: 'mistral/mistral-medium-latest',
     });
     const [generateInput] = mockGenerate.mock.calls[0] ?? [];
     expect(generateInput?.prompt).toContain('Revision constitutionnelle');
@@ -191,6 +197,36 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(generateInput?.prompt).toContain('correctChoiceId');
     expect(generateInput?.prompt).toContain('exactement 10 questions');
     expect(generateInput?.output.schema).toBeDefined();
+    expect(quiz).toEqual(generatedQuiz());
+  });
+
+  it('generates a MiMo-backed quiz when AI_PROVIDER is mimo', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    delete process.env.MIMO_MODEL;
+    mockGenerate.mockResolvedValue({
+      output: generatedQuiz(),
+    });
+
+    const quiz = await new GenkitDiagnosticQuizGenerator().generate({
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-constitution',
+        subjectId: 'subject-constitutional-law',
+        title: 'Revision constitutionnelle',
+        summary:
+          'La Constitution de 1958 encadre la procedure de revision et protege la forme republicaine du gouvernement.',
+      }),
+    });
+
+    expect(mockOpenAICompatible).toHaveBeenCalledWith({
+      name: 'mimo',
+      apiKey: 'test-mimo-key',
+      baseURL: 'https://api.xiaomimimo.com/v1',
+    });
+    expect(mockGenkit).toHaveBeenCalledWith({
+      plugins: [mockMistralPlugin],
+      model: 'mimo/mimo-v2.5',
+    });
     expect(quiz).toEqual(generatedQuiz());
   });
 
@@ -1105,7 +1141,7 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(observation).toEqual({
       flowName: 'diagnosticQuizGeneration',
       provider: 'mistral',
-      model: 'mistral/mistral-small-latest',
+      model: 'mistral/mistral-medium-latest',
       promptVersion: 'diagnostic-quiz-v2',
       schemaVersion: 'diagnostic-quiz-v2',
       inputSize: observation.inputSize,
@@ -1117,6 +1153,7 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       errorSummary: 'AI provider generation failed',
       knowledgeUnitId: 'unit-1',
       subjectId: 'subject-1',
+      documentId: undefined,
     });
     expect(observation.inputSize).toBeGreaterThan(
       'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
@@ -1151,7 +1188,7 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(observation).toEqual({
       flowName: 'diagnosticQuizGeneration',
       provider: 'mistral',
-      model: 'mistral/mistral-small-latest',
+      model: 'mistral/mistral-medium-latest',
       promptVersion: 'diagnostic-quiz-v2',
       schemaVersion: 'diagnostic-quiz-v2',
       inputSize: observation.inputSize,
@@ -1163,6 +1200,7 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       errorSummary: 'AI provider configuration is invalid or incomplete',
       knowledgeUnitId: 'unit-1',
       subjectId: 'subject-1',
+      documentId: undefined,
     });
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
     expect(observedPayload).not.toContain('SENTINEL_UNIT_TITLE');

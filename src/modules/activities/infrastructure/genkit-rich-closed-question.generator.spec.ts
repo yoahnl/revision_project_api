@@ -135,7 +135,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
     });
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockMistralPlugin],
-      model: 'mistral/mistral-small-latest',
+      model: 'mistral/mistral-medium-latest',
     });
     const [generateInput] = mockGenerate.mock.calls[0] ?? [];
     expect(generateInput?.prompt).toContain('rich-closed-question-v1');
@@ -171,7 +171,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
       metadata: {
         flowName: 'richClosedQuestionGeneration',
         provider: 'mistral',
-        model: 'mistral/mistral-small-latest',
+        model: 'mistral/mistral-medium-latest',
         promptVersion: RICH_CLOSED_PROMPT_VERSION,
         schemaVersion: 'rich-closed-question-v1',
       },
@@ -997,7 +997,7 @@ describe('GenkitRichClosedQuestionGenerator', () => {
       expect.objectContaining({
         status: 'error',
         errorCode: RICH_CLOSED_GENERATION_CONTRACT_INVALID,
-        model: 'mistral/mistral-small-latest',
+        model: 'mistral/mistral-medium-latest',
       }),
       expect.objectContaining({
         status: 'success',

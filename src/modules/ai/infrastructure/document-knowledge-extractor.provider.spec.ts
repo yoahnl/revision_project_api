@@ -1,5 +1,5 @@
 import { GenkitDocumentKnowledgeExtractor } from './genkit-document-knowledge.extractor';
-import { GenkitMistralDocumentKnowledgeExtractor } from './genkit-mistral-document-knowledge.extractor';
+import { GenkitOpenAiCompatibleDocumentKnowledgeExtractor } from './genkit-openai-compatible-document-knowledge.extractor';
 import { createDocumentKnowledgeExtractor } from './document-knowledge-extractor.provider';
 
 describe('createDocumentKnowledgeExtractor', () => {
@@ -15,7 +15,7 @@ describe('createDocumentKnowledgeExtractor', () => {
         AI_PROVIDER: 'mistral',
         MISTRAL_API_KEY: 'test-mistral-key',
       }),
-    ).toBeInstanceOf(GenkitMistralDocumentKnowledgeExtractor);
+    ).toBeInstanceOf(GenkitOpenAiCompatibleDocumentKnowledgeExtractor);
   });
 
   it('uses Mistral automatically when only a Mistral key is configured', () => {
@@ -23,6 +23,15 @@ describe('createDocumentKnowledgeExtractor', () => {
       createDocumentKnowledgeExtractor({
         MISTRAL_API_KEY: 'test-mistral-key',
       }),
-    ).toBeInstanceOf(GenkitMistralDocumentKnowledgeExtractor);
+    ).toBeInstanceOf(GenkitOpenAiCompatibleDocumentKnowledgeExtractor);
+  });
+
+  it('uses MiMo when AI_PROVIDER is mimo', () => {
+    expect(
+      createDocumentKnowledgeExtractor({
+        AI_PROVIDER: 'mimo',
+        MIMO_API_KEY: 'test-mimo-key',
+      }),
+    ).toBeInstanceOf(GenkitOpenAiCompatibleDocumentKnowledgeExtractor);
   });
 });

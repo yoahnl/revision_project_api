@@ -105,7 +105,7 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
     });
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockPlugin],
-      model: 'mistral/mistral-small-latest',
+      model: 'mistral/mistral-medium-latest',
     });
     expect(mockGenerate).toHaveBeenCalledTimes(1);
     expect(units).toEqual([
@@ -190,7 +190,7 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
     expect(observation).toEqual({
       flowName: 'documentKnowledgeExtraction',
       provider: 'mistral',
-      model: 'mistral/mistral-small-latest',
+      model: 'mistral/mistral-medium-latest',
       promptVersion: 'document-knowledge-v2',
       schemaVersion: 'extracted-knowledge-v2',
       inputSize: observation.inputSize,
@@ -309,7 +309,7 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
     expect(observation).toEqual({
       flowName: 'documentKnowledgeExtraction',
       provider: 'mistral',
-      model: 'mistral/mistral-small-latest',
+      model: 'mistral/mistral-medium-latest',
       promptVersion: 'document-knowledge-v2',
       schemaVersion: 'extracted-knowledge-v2',
       inputSize: observation.inputSize,
