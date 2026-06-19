@@ -1,3 +1,111 @@
+# CORE-06B — Progress refresh coherence + MVP Core acceptance hardening
+
+## 1. Résumé
+
+CORE-06B côté backend consolide le MVP Core sans ajouter d'endpoint : le contrat d'authentification de `POST /courses/:courseId/revision-sessions/quick` est maintenant verrouillé dans les critical paths e2e. Un runbook MVP Core backend a aussi été ajouté pour vérifier le parcours réel de bout en bout.
+
+## 2. Audit initial
+
+- Les endpoints course/progress/quick existaient déjà.
+- `POST /courses/:courseId/revision-sessions/quick` avait des tests happy path, rejet des ids client et readiness `409`, mais pas d'assertion `401` explicite dans le bloc protected routes.
+- Les endpoints progression `GET /courses/:courseId/progress` et `GET /subjects/:subjectId/progress` étaient déjà couverts dans le happy path e2e.
+- Aucun besoin de modifier controller/use case/repository backend.
+- `CourseSource` n'existe pas dans `src` ni `test`; les occurrences restantes sont documentaires.
+
+## 3. Sub-agents/passes utilisées
+
+- Audit Agent : inspection read-only backend/frontend, confirmation des écarts d'invalidation et du manque `401`.
+- Backend Contract Agent : inspection read-only du backend, confirmation qu'aucun endpoint nouveau n'a été ajouté et que le 401 quick est bien dans `critical-paths.e2e-spec.ts`.
+- QA Agent : validations locales exécutées par Codex dans ce thread.
+- Reviewer Agent : review manuelle finale incluse en section 13.
+
+## 4. Modifications backend
+
+- Ajout d'une assertion e2e `401` pour `POST /courses/:courseId/revision-sessions/quick` dans le bloc des routes protégées.
+- Ajout du runbook `docs/core/MVP_CORE_ACCEPTANCE_RUNBOOK.md`.
+- Aucun controller, use case, repository, Prisma, migration, prompt IA ou Genkit modifié.
+
+## 5. Modifications frontend
+
+Non applicable dans ce repo. Les modifications frontend sont documentées dans le rapport app.
+
+## 6. Tests ajoutés
+
+- `test/critical-paths.e2e-spec.ts` : route quick course-level protégée sans bearer token.
+
+## 7. Commandes exécutées
+
+- `npx prisma validate` : OK, schema valide.
+- `npx prisma generate` : OK, Prisma Client généré.
+- `npm run build` : OK.
+- `npm run lint:check` : OK.
+- `npm test -- modules/courses --runInBand` : OK, 9 suites, 76 tests.
+- `npm test -- revision-sessions --runInBand` : OK, 6 suites, 44 tests.
+- `npm test -- --runInBand` : OK, 78 suites passées, 1 skipped, 684 tests passés, 1 skipped.
+- Première commande chaînée incluant `npm run test:e2e -- --runInBand` : échec transitoire e2e sur deux assertions historiques non liées au lot après la suite Jest complète.
+- `npm run test:e2e -- --runInBand` relancé isolément : OK, 2 suites, 33 tests.
+- `git diff --check` : à relancer après génération du rapport final.
+
+## 8. Preuve anti-fixtures
+
+Non applicable côté backend pour les valeurs Flutter. Aucun changement backend ne réintroduit de fixture MVP.
+
+## 9. Preuve anti-CourseSource
+
+Commande : `rg -n "CourseSource" src test docs/core || true`.
+
+Résultat : aucune occurrence dans `src` ou `test`; occurrences documentaires uniquement dans `docs/core`, incluant ce runbook et anciens rapports.
+
+## 10. Runbook créé
+
+- `docs/core/MVP_CORE_ACCEPTANCE_RUNBOOK.md` : endpoints critiques, smoke local, hors MVP Core, garde-fous.
+
+## 11. Limites
+
+- Pas de nouveau smoke applicatif réel avec auth externe : les tests gardent les mocks existants.
+- Le runbook reste local/dev et ne décrit pas un déploiement production.
+
+## 12. Risques restants
+
+- L'échec transitoire observé lorsque `npm run test:e2e` est chaîné juste après la suite Jest complète mérite une surveillance, même si le rerun e2e isolé est vert.
+- Le résultat final de session reste hors périmètre.
+
+## 13. Auto-review
+
+- Upload PDF invalide bien la progression : traité côté app.
+- Polling source pending invalide aussi la progression : traité côté app.
+- Backend quick route a un test `401` : oui.
+- Aucun nouvel endpoint : oui.
+- Aucun deep/exam : oui.
+- Aucun résultat session final : oui.
+- Aucun `CourseSource` : oui côté code.
+- Aucune fixture production : oui.
+- Aucun commit réalisé : oui.
+
+## 14. Points discutables du prompt
+
+- CORE-06B est petit, mais il corrige une incohérence visible de produit : le lot dédié est raisonnable.
+- Le runbook pourrait vivre dans un seul repo, mais le double emplacement rend les vérifications backend/app plus proches de leur contexte.
+- Le polling devrait probablement évoluer vers SSE/WebSocket plus tard, mais le MVP Core reste cohérent avec un polling borné.
+
+## 15. Fichiers créés/modifiés/supprimés
+
+Créés :
+- `docs/core/MVP_CORE_ACCEPTANCE_RUNBOOK.md`
+- `docs/core/CORE_06B_PROGRESS_REFRESH_AND_ACCEPTANCE_HARDENING_REPORT.md`
+
+Modifiés :
+- `test/critical-paths.e2e-spec.ts`
+
+Supprimés : aucun.
+
+## 16. Contenu complet des fichiers créés/modifiés/supprimés
+
+Le rapport courant n'inclut pas son propre contenu pour éviter une récursion infinie.
+
+### test/critical-paths.e2e-spec.ts
+
+```ts
 import { INestApplication, NotFoundException } from '@nestjs/common';
 import type { ExecutionContext } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
@@ -3261,3 +3369,88 @@ function collectSensitivePreSubmitFields(
     ];
   });
 }
+
+```
+### docs/core/MVP_CORE_ACCEPTANCE_RUNBOOK.md
+
+```md
+# MVP Core acceptance runbook
+
+Ce runbook vérifie le parcours MVP Core réel côté backend, sans mode démo durable et sans `CourseSource`.
+
+## Périmètre
+
+Le parcours attendu est :
+
+1. Utilisateur authentifié.
+2. Matières réelles accessibles.
+3. Création d'un cours réel.
+4. Ouverture du détail du cours.
+5. Upload d'une source PDF via le cours.
+6. Traitement documentaire jusqu'au statut `READY`.
+7. Fiche de cours course-level.
+8. Révision rapide course-level.
+9. Réponse au QCM.
+10. Progression réelle course/subject.
+
+## Endpoints critiques
+
+- `GET /subjects`
+- `GET /subjects/:subjectId/courses`
+- `POST /subjects/:subjectId/courses`
+- `GET /courses/:courseId`
+- `POST /courses/:courseId/source/course-pdf`
+- `DELETE /courses/:courseId/sources/:documentId`
+- `GET /courses/:courseId/revision-sheet`
+- `POST /courses/:courseId/revision-sheet`
+- `POST /courses/:courseId/revision-sessions/quick`
+- `GET /courses/:courseId/progress`
+- `GET /subjects/:subjectId/progress`
+
+## Vérifications API
+
+```bash
+npx prisma validate
+npx prisma generate
+npm run build
+npm run lint:check
+npm test -- modules/courses --runInBand
+npm test -- revision-sessions --runInBand
+npm test -- --runInBand
+npm run test:e2e -- --runInBand
+git diff --check
+```
+
+## Smoke manuel local
+
+1. Démarrer l'API en environnement local/dev.
+2. S'authentifier avec un utilisateur de test.
+3. Créer une matière réelle si nécessaire.
+4. Créer un cours sous cette matière.
+5. Uploader un PDF avec `POST /courses/:courseId/source/course-pdf`.
+6. Vérifier que le document passe de `UPLOADED`/`PROCESSING` à `READY`.
+7. Appeler `GET /courses/:courseId/progress` et vérifier un état cohérent.
+8. Appeler `POST /courses/:courseId/revision-sessions/quick` quand une source `READY` existe.
+9. Soumettre l'activité générée par la session.
+10. Recharger `GET /courses/:courseId/progress` et `GET /subjects/:subjectId/progress`.
+
+## Hors MVP Core
+
+- Révision approfondie.
+- Préparation examen.
+- Résultat final dédié de session.
+- Gamification durable.
+- Multi-source avancé.
+- Table ou modèle `CourseSource`.
+- SSE/WebSocket de processing.
+
+## Garde-fous
+
+- Le client ne fournit pas `studentId`.
+- L'upload sous cours dérive `subjectId` depuis le cours.
+- La révision rapide choisit la source et la notion côté backend.
+- Les endpoints protégés doivent répondre `401` sans bearer token.
+- Les documents sans `courseId` ne polluent pas la progression course-level.
+
+```
+
