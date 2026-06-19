@@ -232,7 +232,11 @@ function normalizeRevisionSessionError(error: unknown): never {
       throw new UnprocessableEntityException(error.message);
     }
 
-    if (error.message === 'Revision session is not started') {
+    if (
+      error.message === 'Revision session is not started' ||
+      error.message ===
+        'Quick course revision sessions do not support next actions'
+    ) {
       throw new ConflictException(error.message);
     }
 

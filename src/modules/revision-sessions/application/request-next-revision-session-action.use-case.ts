@@ -45,6 +45,12 @@ export class RequestNextRevisionSessionActionUseCase {
       throw new Error('Revision session is not started');
     }
 
+    if (context.session.mode === 'QUICK' && context.session.courseId !== null) {
+      throw new Error(
+        'Quick course revision sessions do not support next actions',
+      );
+    }
+
     const coachInput = toCoachInput(input.studentId, context);
     const decision = await this.resolveDecision(coachInput);
     const actionPayload = await this.createActionPayload({

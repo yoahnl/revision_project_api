@@ -85,7 +85,7 @@ describe('RequestNextRevisionSessionActionUseCase', () => {
     expect(JSON.stringify(result)).not.toContain('correctChoiceId');
   });
 
-  it('keeps diagnostic next actions inside course knowledge units', async () => {
+  it('rejects next actions for course-level quick sessions before creating activities', async () => {
     const repository = createRepository();
     repository.findPlanningContextByIdForStudent.mockResolvedValueOnce({
       session: {
@@ -113,27 +113,26 @@ describe('RequestNextRevisionSessionActionUseCase', () => {
       reasonCode: 'CHECK_UNDERSTANDING',
     });
     const startNextActivity = createStartNextActivityUseCase();
+    const startOpenQuestionActivity = createStartOpenQuestionActivityUseCase();
 
-    await new RequestNextRevisionSessionActionUseCase(
-      repository,
-      generator,
-      startNextActivity,
-      createStartOpenQuestionActivityUseCase(),
-    ).execute({
-      studentId: 'student-1',
-      sessionId: 'revision-session-1',
-    });
+    await expect(
+      new RequestNextRevisionSessionActionUseCase(
+        repository,
+        generator,
+        startNextActivity,
+        startOpenQuestionActivity,
+      ).execute({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+      }),
+    ).rejects.toThrow(
+      'Quick course revision sessions do not support next actions',
+    );
 
-    expect(startNextActivity.execute.mock.calls[0]?.[0]).toEqual({
-      studentId: 'student-1',
-      subjectId: 'subject-1',
-      knowledgeUnitId: 'unit-course-1',
-    });
-    const appendedAction = repository.appendAction.mock.calls[0]?.[0] as
-      | AppendActionInput
-      | undefined;
-    expect(appendedAction?.action.kind).toBe('DIAGNOSTIC_QUIZ');
-    expect(appendedAction?.action.knowledgeUnitId).toBe('unit-course-1');
+    expect(generator.generate.mock.calls).toHaveLength(0);
+    expect(startNextActivity.execute.mock.calls).toHaveLength(0);
+    expect(startOpenQuestionActivity.execute.mock.calls).toHaveLength(0);
+    expect(repository.appendAction.mock.calls).toHaveLength(0);
   });
 
   it('creates an open question from a coach decision', async () => {

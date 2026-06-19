@@ -241,6 +241,14 @@ describe('RevisionSessionsController', () => {
     await request(app.getHttpServer())
       .post('/revision-sessions/revision-session-1/next-action')
       .expect(422);
+
+    requestNextAction.execute.mockRejectedValueOnce(
+      new Error('Quick course revision sessions do not support next actions'),
+    );
+
+    await request(app.getHttpServer())
+      .post('/revision-sessions/revision-session-1/next-action')
+      .expect(409);
   });
 
   it('completes a quick session without accepting client result fields', async () => {

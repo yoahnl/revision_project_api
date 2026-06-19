@@ -81,6 +81,19 @@ type RevisionSessionActivityQuestionRecord = {
       index: number;
     };
   }>;
+  visuals?: Array<{
+    id: string;
+    type: 'IMAGE' | 'CHART' | 'DIAGRAM';
+    displayOrder: number;
+    payload: unknown;
+    sources?: Array<{
+      chunkId: string;
+      chunk: {
+        pageNumber: number | null;
+        index: number;
+      };
+    }>;
+  }>;
 };
 
 type RevisionSessionActivityResultRecord = {
@@ -284,6 +297,25 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
                           select: {
                             pageNumber: true,
                             index: true,
+                          },
+                        },
+                      },
+                    },
+                    visuals: {
+                      orderBy: { displayOrder: 'asc' },
+                      select: {
+                        id: true,
+                        type: true,
+                        displayOrder: true,
+                        payload: true,
+                        sources: {
+                          include: {
+                            chunk: {
+                              select: {
+                                pageNumber: true,
+                                index: true,
+                              },
+                            },
                           },
                         },
                       },
@@ -587,6 +619,12 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
         throw new Error('Revision session not found');
       }
 
+      if (session.mode === 'QUICK' && session.courseId !== null) {
+        throw new Error(
+          'Quick course revision sessions do not support next actions',
+        );
+      }
+
       const maxOrder = await tx.revisionSessionAction.aggregate({
         where: { sessionId: input.sessionId },
         _max: { displayOrder: true },
@@ -764,6 +802,112 @@ function toPublicDiagnosticQuestion(
       : { maxSelections: question.maxSelections }),
     choices: parsePublicQuestionChoices(question.choices),
     ...(sources.length > 0 ? { sources } : {}),
+    ...toPublicQuestionVisuals(question.visuals),
+  };
+}
+
+function toPublicQuestionVisuals(
+  visuals: RevisionSessionActivityQuestionRecord['visuals'],
+) {
+  const publicVisuals = (visuals ?? [])
+    .map(toPublicQuestionVisual)
+    .filter(
+      (
+        visual,
+      ): visual is NonNullable<ReturnType<typeof toPublicQuestionVisual>> =>
+        Boolean(visual),
+    )
+    .sort((left, right) => left.displayOrder - right.displayOrder);
+
+  return publicVisuals.length > 0 ? { visuals: publicVisuals } : {};
+}
+
+function toPublicQuestionVisual(
+  visual: NonNullable<RevisionSessionActivityQuestionRecord['visuals']>[number],
+) {
+  const sources = (visual.sources ?? [])
+    .map((source) => ({
+      chunkId: source.chunkId,
+      pageNumber: source.chunk.pageNumber,
+      index: source.chunk.index,
+    }))
+    .sort((left, right) => left.index - right.index);
+
+  if (visual.type === 'IMAGE') {
+    const payload = parseRecord(visual.payload);
+    const imageUrl =
+      typeof payload.imageUrl === 'string' ? payload.imageUrl : '';
+    const altText = typeof payload.altText === 'string' ? payload.altText : '';
+
+    if (!imageUrl || !altText) {
+      return null;
+    }
+
+    return {
+      id: visual.id,
+      type: 'IMAGE' as const,
+      displayOrder: visual.displayOrder,
+      imageUrl,
+      altText,
+      caption:
+        typeof payload.caption === 'string' || payload.caption === null
+          ? payload.caption
+          : undefined,
+      sources,
+    };
+  }
+
+  if (visual.type === 'CHART') {
+    const payload = parseRecord(visual.payload);
+    const chartType = parseChartType(payload.chartType);
+    const title = typeof payload.title === 'string' ? payload.title : '';
+    const data = parseChartData(payload.data);
+
+    if (!chartType || !title || data.length === 0) {
+      return null;
+    }
+
+    return {
+      id: visual.id,
+      type: 'CHART' as const,
+      displayOrder: visual.displayOrder,
+      chartType,
+      title,
+      description:
+        typeof payload.description === 'string' || payload.description === null
+          ? payload.description
+          : undefined,
+      data,
+      xKey:
+        typeof payload.xKey === 'string' || payload.xKey === null
+          ? payload.xKey
+          : undefined,
+      yKeys: parseOptionalStringArray(payload.yKeys),
+      sources,
+    };
+  }
+
+  const payload = parseRecord(visual.payload);
+  const title = typeof payload.title === 'string' ? payload.title : '';
+  const nodes = parseDiagramNodes(payload.nodes);
+  const edges = parseDiagramEdges(payload.edges);
+
+  if (!title || nodes.length === 0) {
+    return null;
+  }
+
+  return {
+    id: visual.id,
+    type: 'DIAGRAM' as const,
+    displayOrder: visual.displayOrder,
+    title,
+    description:
+      typeof payload.description === 'string' || payload.description === null
+        ? payload.description
+        : undefined,
+    nodes,
+    ...(edges === undefined ? {} : { edges }),
+    sources,
   };
 }
 
@@ -791,6 +935,103 @@ function parsePublicQuestionChoices(input: unknown) {
     .filter((choice): choice is { id: string; label: string } =>
       Boolean(choice),
     );
+}
+
+function parseRecord(input: unknown): Record<string, unknown> {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) {
+    return {};
+  }
+
+  return input as Record<string, unknown>;
+}
+
+function parseChartType(
+  input: unknown,
+): 'bar' | 'line' | 'pie' | 'scatter' | null {
+  return input === 'bar' ||
+    input === 'line' ||
+    input === 'pie' ||
+    input === 'scatter'
+    ? input
+    : null;
+}
+
+function parseChartData(
+  input: unknown,
+): Array<Record<string, string | number | null>> {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map(parseRecord)
+    .map((row) =>
+      Object.fromEntries(
+        Object.entries(row).filter(
+          (entry): entry is [string, string | number | null] =>
+            typeof entry[1] === 'string' ||
+            typeof entry[1] === 'number' ||
+            entry[1] === null,
+        ),
+      ),
+    )
+    .filter((row) => Object.keys(row).length > 0);
+}
+
+function parseOptionalStringArray(input: unknown): string[] | null | undefined {
+  if (input === null) {
+    return null;
+  }
+
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+
+  const values = input.filter(
+    (value): value is string => typeof value === 'string',
+  );
+
+  return values.length === input.length ? values : undefined;
+}
+
+function parseDiagramNodes(input: unknown) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map(parseRecord)
+    .map((node) => ({
+      id: typeof node.id === 'string' ? node.id : '',
+      label: typeof node.label === 'string' ? node.label : '',
+    }))
+    .filter((node) => node.id.length > 0 && node.label.length > 0);
+}
+
+function parseDiagramEdges(input: unknown) {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(input)) {
+    return undefined;
+  }
+
+  return input
+    .map(parseRecord)
+    .map((edge) => ({
+      from: typeof edge.from === 'string' ? edge.from : '',
+      to: typeof edge.to === 'string' ? edge.to : '',
+      label:
+        typeof edge.label === 'string' || edge.label === null
+          ? edge.label
+          : undefined,
+    }))
+    .filter((edge) => edge.from.length > 0 && edge.to.length > 0);
 }
 
 function selectCurrentAction(

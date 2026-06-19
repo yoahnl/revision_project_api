@@ -234,6 +234,25 @@ describe('PrismaRevisionSessionsRepository', () => {
                         },
                       },
                     },
+                    visuals: {
+                      orderBy: { displayOrder: 'asc' },
+                      select: {
+                        id: true,
+                        type: true,
+                        displayOrder: true,
+                        payload: true,
+                        sources: {
+                          include: {
+                            chunk: {
+                              select: {
+                                pageNumber: true,
+                                index: true,
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -246,6 +265,74 @@ describe('PrismaRevisionSessionsRepository', () => {
       type: 'open_question',
       sessionId: 'activity-session-1',
     });
+  });
+
+  it('preserves public diagnostic visuals when loading a quick revision session', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findFirst.mockResolvedValue({
+      ...revisionSessionRecord({ courseId: 'course-1' }),
+      actions: [
+        actionRecord({
+          kind: 'DIAGNOSTIC_QUIZ',
+          activitySession: {
+            id: 'activity-session-1',
+            subjectId: 'subject-1',
+            documentId: 'document-1',
+            knowledgeUnitId: 'unit-1',
+            type: 'DIAGNOSTIC_QUIZ',
+            version: 3,
+            questions: [
+              diagnosticQuestionRecord({
+                visuals: [
+                  {
+                    id: 'visual-1',
+                    type: 'CHART',
+                    displayOrder: 0,
+                    payload: {
+                      chartType: 'bar',
+                      title: 'Répartition des pouvoirs',
+                      data: [{ label: 'Exécutif', value: 2 }],
+                    },
+                    sources: [
+                      {
+                        chunkId: 'chunk-1',
+                        chunk: { pageNumber: 4, index: 2 },
+                      },
+                    ],
+                  },
+                ],
+              }),
+            ],
+          },
+        }),
+      ],
+    });
+
+    const result = await repository.findByIdForStudent({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+
+    const payload = result.currentAction?.payload as {
+      questions: Array<{ visuals?: unknown[] }>;
+    };
+    const serializedPayload = JSON.stringify(payload);
+
+    expect(payload.questions[0]?.visuals).toEqual([
+      {
+        id: 'visual-1',
+        type: 'CHART',
+        displayOrder: 0,
+        chartType: 'bar',
+        title: 'Répartition des pouvoirs',
+        data: [{ label: 'Exécutif', value: 2 }],
+        sources: [{ chunkId: 'chunk-1', pageNumber: 4, index: 2 }],
+      },
+    ]);
+    expect(serializedPayload).not.toContain('correctChoiceId');
+    expect(serializedPayload).not.toContain('storagePath');
+    expect(serializedPayload).not.toContain('promptVersion');
+    expect(serializedPayload).not.toContain('provider');
   });
 
   it('loads a planning context with action activity knowledge units and candidates', async () => {
@@ -403,6 +490,401 @@ describe('PrismaRevisionSessionsRepository', () => {
     expect(result.history).toHaveLength(2);
     expect(result.currentAction?.displayOrder).toBe(1);
   });
+
+  it('refuses to append an action to a course-level quick session', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({ courseId: 'course-1', mode: 'QUICK' }),
+    );
+
+    await expect(
+      repository.appendAction({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+        action: {
+          kind: 'DIAGNOSTIC_QUIZ',
+          status: 'READY',
+          activitySessionId: 'quiz-session-2',
+          documentId: 'document-1',
+          knowledgeUnitId: 'unit-1',
+        },
+      }),
+    ).rejects.toThrow(
+      'Quick course revision sessions do not support next actions',
+    );
+
+    expect(prisma.revisionSessionAction.aggregate).not.toHaveBeenCalled();
+    expect(prisma.revisionSessionAction.create).not.toHaveBeenCalled();
+  });
+
+  it('completes a submitted quick diagnostic session and returns the backend result', async () => {
+    const { prisma, repository } = createRepository();
+    const completedAt = new Date('2026-06-15T10:05:00.000Z');
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        actions: [diagnosticActionRecord()],
+      }),
+    );
+    prisma.activitySession.findFirst.mockResolvedValue(
+      diagnosticActivityRecord({
+        result: {
+          correctAnswers: 3,
+          totalQuestions: 4,
+          score: 0.75,
+        },
+        answers: [
+          answerRecord({ knowledgeUnitId: 'unit-a', title: 'Unit A' }),
+          answerRecord({
+            knowledgeUnitId: 'unit-a',
+            title: 'Unit A',
+            isCorrect: false,
+          }),
+          answerRecord({ knowledgeUnitId: 'unit-b', title: 'Unit B' }),
+        ],
+      }),
+    );
+
+    const result = await repository.completeQuickSession({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+      completedAt,
+    });
+
+    expect(prisma.revisionSessionAction.update).toHaveBeenCalledWith({
+      where: { id: 'action-1' },
+      data: { status: 'COMPLETED', completedAt },
+    });
+    expect(prisma.revisionSession.update).toHaveBeenCalledWith({
+      where: { id: 'revision-session-1' },
+      data: { status: 'COMPLETED', completedAt },
+    });
+    expect(result.summary).toEqual({
+      correctAnswers: 3,
+      totalQuestions: 4,
+      score: 0.75,
+      durationSeconds: 300,
+    });
+    expect(result.knowledgeUnits).toEqual([
+      {
+        knowledgeUnitId: 'unit-a',
+        title: 'Unit A',
+        correctAnswers: 1,
+        totalQuestions: 2,
+        score: 0.5,
+        state: 'TO_REVIEW',
+      },
+      {
+        knowledgeUnitId: 'unit-b',
+        title: 'Unit B',
+        correctAnswers: 1,
+        totalQuestions: 1,
+        score: 1,
+        state: 'MASTERED',
+      },
+    ]);
+  });
+
+  it('keeps quick completion idempotent for an already completed session', async () => {
+    const { prisma, repository } = createRepository();
+    const existingCompletedAt = new Date('2026-06-15T10:03:00.000Z');
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        status: 'COMPLETED',
+        completedAt: existingCompletedAt,
+        actions: [
+          diagnosticActionRecord({
+            status: 'COMPLETED',
+            completedAt: existingCompletedAt,
+          }),
+        ],
+      }),
+    );
+    prisma.activitySession.findFirst.mockResolvedValue(
+      diagnosticActivityRecord(),
+    );
+
+    const result = await repository.completeQuickSession({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+      completedAt: new Date('2026-06-15T10:05:00.000Z'),
+    });
+
+    expect(prisma.revisionSessionAction.update).not.toHaveBeenCalled();
+    expect(prisma.revisionSession.update).not.toHaveBeenCalled();
+    expect(result.session.completedAt).toBe(existingCompletedAt);
+  });
+
+  it('refuses to complete a quick session when the diagnostic activity is not submitted', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        actions: [diagnosticActionRecord()],
+      }),
+    );
+    prisma.activitySession.findFirst.mockResolvedValue(
+      diagnosticActivityRecord({ status: 'STARTED' }),
+    );
+
+    await expect(
+      repository.completeQuickSession({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+        completedAt: new Date('2026-06-15T10:05:00.000Z'),
+      }),
+    ).rejects.toThrow('Revision session activity not submitted');
+
+    expect(prisma.revisionSessionAction.update).not.toHaveBeenCalled();
+    expect(prisma.revisionSession.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to complete a quick session without an activity result', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        actions: [diagnosticActionRecord()],
+      }),
+    );
+    prisma.activitySession.findFirst.mockResolvedValue(
+      diagnosticActivityRecord({ result: null }),
+    );
+
+    await expect(
+      repository.completeQuickSession({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+        completedAt: new Date('2026-06-15T10:05:00.000Z'),
+      }),
+    ).rejects.toThrow('Revision session result not found');
+
+    expect(prisma.revisionSessionAction.update).not.toHaveBeenCalled();
+    expect(prisma.revisionSession.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses to complete when the current action is not a diagnostic quiz', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        actions: [actionRecord({ kind: 'OPEN_QUESTION' })],
+      }),
+    );
+
+    await expect(
+      repository.completeQuickSession({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+        completedAt: new Date('2026-06-15T10:05:00.000Z'),
+      }),
+    ).rejects.toThrow('Revision session not ready to complete');
+
+    expect(prisma.activitySession.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('refuses to complete unsupported revision session modes', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        mode: 'DEEP',
+        actions: [diagnosticActionRecord()],
+      }),
+    );
+
+    await expect(
+      repository.completeQuickSession({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+        completedAt: new Date('2026-06-15T10:05:00.000Z'),
+      }),
+    ).rejects.toThrow('Revision session completion unsupported');
+  });
+
+  it('returns not found when completing a session outside the student ownership', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.completeQuickSession({
+        studentId: 'student-2',
+        sessionId: 'revision-session-1',
+        completedAt: new Date('2026-06-15T10:05:00.000Z'),
+      }),
+    ).rejects.toThrow('Revision session not found');
+  });
+
+  it('loads a completed result without mutating the session', async () => {
+    const { prisma, repository } = createRepository();
+    const completedAt = new Date('2026-06-15T10:05:00.000Z');
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        status: 'COMPLETED',
+        completedAt,
+        actions: [
+          diagnosticActionRecord({
+            status: 'COMPLETED',
+            completedAt,
+          }),
+        ],
+      }),
+    );
+    prisma.activitySession.findFirst.mockResolvedValue(
+      diagnosticActivityRecord({
+        result: {
+          correctAnswers: 3,
+          totalQuestions: 5,
+          score: null,
+        },
+        answers: [
+          answerRecord({ knowledgeUnitId: 'unit-a', title: 'Unit A' }),
+          answerRecord({ knowledgeUnitId: 'unit-a', title: 'Unit A' }),
+          answerRecord({
+            knowledgeUnitId: 'unit-b',
+            title: 'Unit B',
+            isCorrect: false,
+          }),
+        ],
+      }),
+    );
+
+    const result = await repository.findResultByIdForStudent({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+
+    expect(prisma.revisionSessionAction.update).not.toHaveBeenCalled();
+    expect(prisma.revisionSession.update).not.toHaveBeenCalled();
+    expect(result.summary.score).toBe(0.6);
+    expect(result.knowledgeUnits).toEqual([
+      {
+        knowledgeUnitId: 'unit-a',
+        title: 'Unit A',
+        correctAnswers: 2,
+        totalQuestions: 2,
+        score: 1,
+        state: 'MASTERED',
+      },
+      {
+        knowledgeUnitId: 'unit-b',
+        title: 'Unit B',
+        correctAnswers: 0,
+        totalQuestions: 1,
+        score: 0,
+        state: 'TO_REVIEW',
+      },
+    ]);
+  });
+
+  it('refuses to load a result for an incomplete session', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        actions: [diagnosticActionRecord()],
+      }),
+    );
+
+    await expect(
+      repository.findResultByIdForStudent({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+      }),
+    ).rejects.toThrow('Revision session not completed');
+
+    expect(prisma.activitySession.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('refuses to load a completed result when the activity result is missing', async () => {
+    const { prisma, repository } = createRepository();
+    const completedAt = new Date('2026-06-15T10:05:00.000Z');
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        status: 'COMPLETED',
+        completedAt,
+        actions: [
+          diagnosticActionRecord({
+            status: 'COMPLETED',
+            completedAt,
+          }),
+        ],
+      }),
+    );
+    prisma.activitySession.findFirst.mockResolvedValue(
+      diagnosticActivityRecord({ result: null }),
+    );
+
+    await expect(
+      repository.findResultByIdForStudent({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+      }),
+    ).rejects.toThrow('Revision session result not found');
+  });
+
+  it('clamps stored result scores when loading a completed result', async () => {
+    const { prisma, repository } = createRepository();
+    const completedAt = new Date('2026-06-15T10:05:00.000Z');
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        status: 'COMPLETED',
+        completedAt,
+        actions: [
+          diagnosticActionRecord({
+            status: 'COMPLETED',
+            completedAt,
+          }),
+        ],
+      }),
+    );
+    prisma.activitySession.findFirst.mockResolvedValue(
+      diagnosticActivityRecord({
+        result: {
+          correctAnswers: 0,
+          totalQuestions: 0,
+          score: 1.5,
+        },
+        answers: [],
+      }),
+    );
+
+    const result = await repository.findResultByIdForStudent({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+
+    expect(result.summary.score).toBe(1);
+    expect(result.summary.durationSeconds).toBe(300);
+    expect(result.knowledgeUnits).toEqual([]);
+  });
 });
 
 type PrismaRevisionSessionsMock = ReturnType<typeof createPrismaMock>;
@@ -432,10 +914,15 @@ function createPrismaMock() {
     revisionSession: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      update: jest.fn(),
     },
     revisionSessionAction: {
       create: jest.fn(),
       aggregate: jest.fn(),
+      update: jest.fn(),
+    },
+    activitySession: {
+      findFirst: jest.fn(),
     },
     $transaction: jest.fn(),
   };
@@ -485,5 +972,79 @@ function actionRecordShape() {
     knowledgeUnitId: 'unit-1',
     createdAt: new Date('2026-06-15T10:00:00.000Z'),
     completedAt: null,
+  };
+}
+
+function diagnosticActionRecord(
+  overrides: Partial<ReturnType<typeof actionRecordShape>> = {},
+) {
+  return actionRecord({
+    kind: 'DIAGNOSTIC_QUIZ',
+    activitySessionId: 'activity-session-1',
+    ...overrides,
+  });
+}
+
+function diagnosticQuestionRecord(
+  overrides: Partial<ReturnType<typeof diagnosticQuestionRecordShape>> = {},
+) {
+  return { ...diagnosticQuestionRecordShape(), ...overrides };
+}
+
+function diagnosticQuestionRecordShape() {
+  return {
+    id: 'question-1',
+    knowledgeUnitId: 'unit-1',
+    prompt: 'Quel principe organise les pouvoirs ?',
+    difficulty: 'MEDIUM' as const,
+    displayOrder: 0,
+    choices: [
+      { id: 'choice-1', label: 'La séparation des pouvoirs' },
+      { id: 'choice-2', label: 'Le mandat impératif' },
+    ],
+    selectionMode: 'SINGLE' as const,
+    minSelections: null,
+    maxSelections: null,
+    sources: [],
+    visuals: [],
+  };
+}
+
+function diagnosticActivityRecord(
+  overrides: Partial<ReturnType<typeof diagnosticActivityRecordShape>> = {},
+) {
+  return { ...diagnosticActivityRecordShape(), ...overrides };
+}
+
+function diagnosticActivityRecordShape() {
+  return {
+    id: 'activity-session-1',
+    studentId: 'student-1',
+    status: 'COMPLETED',
+    type: 'DIAGNOSTIC_QUIZ',
+    result: {
+      correctAnswers: 1,
+      totalQuestions: 1,
+      score: 1,
+    },
+    answers: [answerRecord()],
+  };
+}
+
+function answerRecord(
+  overrides: {
+    knowledgeUnitId?: string;
+    title?: string;
+    isCorrect?: boolean;
+  } = {},
+) {
+  return {
+    isCorrect: overrides.isCorrect ?? true,
+    question: {
+      knowledgeUnitId: overrides.knowledgeUnitId ?? 'unit-1',
+      knowledgeUnit: {
+        title: overrides.title ?? 'Notion 1',
+      },
+    },
   };
 }

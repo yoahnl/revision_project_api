@@ -130,6 +130,10 @@ describe('Critical demo paths (e2e)', () => {
         .send({ subjectId: 'subject-1' })
         .expect(401);
       await request(server)
+        .post('/revision-sessions/revision-session-1/next-action')
+        .send({})
+        .expect(401);
+      await request(server)
         .post('/revision-sessions/revision-session-1/complete')
         .send({})
         .expect(401);
@@ -2100,6 +2104,14 @@ describe('Critical demo paths (e2e)', () => {
       expect(
         JSON.stringify(mocks.requestNextAction.execute.mock.calls),
       ).not.toContain('ignore this free text');
+
+      mocks.requestNextAction.execute.mockRejectedValueOnce(
+        new Error('Quick course revision sessions do not support next actions'),
+      );
+      await request(server)
+        .post('/revision-sessions/course-quick-session/next-action')
+        .send({})
+        .expect(409);
 
       await request(server)
         .post('/revision-sessions/revision-session-1/complete')
