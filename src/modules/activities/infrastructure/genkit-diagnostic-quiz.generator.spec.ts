@@ -366,6 +366,53 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(observedPayload).not.toContain('Explication sourcee');
   });
 
+  it('uses a compact provider schema for default single-choice quizzes', async () => {
+    process.env.AI_PROVIDER = 'google';
+    mockGenerate.mockImplementation(({ output }) => {
+      const schema = output.schema as { parse(value: unknown): unknown };
+      expect(() => schema.parse(generatedQuiz())).not.toThrow();
+      expect(() =>
+        schema.parse({
+          ...generatedQuiz(),
+          questions: [
+            {
+              ...generatedQuiz().questions[0],
+              selectionMode: 'multiple',
+              correctChoiceId: undefined,
+              correctChoiceIds: ['a'],
+              minSelections: 1,
+              maxSelections: 1,
+            },
+          ],
+        }),
+      ).toThrow();
+      expect(() =>
+        schema.parse({
+          ...generatedQuiz(),
+          questions: [
+            {
+              ...generatedQuiz().questions[0],
+              visuals: generatedMediaMultiQuiz().questions[0].visuals,
+            },
+          ],
+        }),
+      ).toThrow();
+
+      return Promise.resolve({ output: generatedQuiz() });
+    });
+
+    const quiz = await new GenkitDiagnosticQuizGenerator().generate({
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-1',
+        subjectId: 'subject-1',
+        title: 'Controle de constitutionnalite',
+        summary: 'Le Conseil constitutionnel controle certaines normes.',
+      }),
+    });
+
+    expect(quiz).toEqual(generatedQuiz());
+  });
+
   it('generates a sourced v3 quiz with multiple answers and bounded visuals', async () => {
     process.env.AI_PROVIDER = 'google';
     mockGenerate.mockResolvedValue({

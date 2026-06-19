@@ -193,11 +193,33 @@ const GeneratedDiagnosticQuizQuestionSchema = z
     },
   );
 
+const GeneratedDiagnosticQuizSingleChoiceQuestionSchema = z
+  .object({
+    prompt: z.string().min(8),
+    difficulty: DiagnosticQuizDifficultySchema.nullish(),
+    choices: z.array(GeneratedDiagnosticQuizChoiceSchema).min(2).max(4),
+    selectionMode: z.literal('single').optional(),
+    correctChoiceId: NonEmptyStringSchema,
+    explanation: z.string().min(8),
+    sourceChunkIds: z.array(NonEmptyStringSchema).optional(),
+  })
+  .strict();
+
 const GeneratedDiagnosticQuizSchema = z
   .object({
     title: z.string().min(2),
     questions: z
       .array(GeneratedDiagnosticQuizQuestionSchema)
+      .min(1)
+      .max(MAX_QUESTION_COUNT),
+  })
+  .strict();
+
+const GeneratedDiagnosticQuizSingleChoiceSchema = z
+  .object({
+    title: z.string().min(2),
+    questions: z
+      .array(GeneratedDiagnosticQuizSingleChoiceQuestionSchema)
       .min(1)
       .max(MAX_QUESTION_COUNT),
   })
@@ -231,6 +253,10 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
       input.selectionModes,
     );
     const allowedVisualTypes = resolveAllowedVisualTypes(input);
+    const outputSchema = resolveGeneratedDiagnosticQuizSchema({
+      allowedSelectionModes,
+      allowedVisualTypes,
+    });
 
     this.logger.log(
       JSON.stringify(
@@ -253,7 +279,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
         const { output } = await this.getAi(metadata).generate({
           prompt,
           output: {
-            schema: GeneratedDiagnosticQuizSchema,
+            schema: outputSchema,
           },
         });
 
@@ -367,6 +393,26 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     this.resolvedMetadata ??= resolveGenkitMetadata();
     return this.resolvedMetadata;
   }
+}
+
+function resolveGeneratedDiagnosticQuizSchema(input: {
+  allowedSelectionModes: DiagnosticQuizSelectionMode[];
+  allowedVisualTypes: DiagnosticQuizVisualType[];
+}) {
+  const isSingleChoiceOnly =
+    input.allowedSelectionModes.length === 1 &&
+    input.allowedSelectionModes[0] === 'single' &&
+    input.allowedVisualTypes.length === 0;
+
+  if (!isSingleChoiceOnly) {
+    return GeneratedDiagnosticQuizSchema;
+  }
+
+  // Gemini rejects the full V3-capable schema for simple quick sessions because
+  // the visual/multiple-choice union creates too many serving states. The compact
+  // schema is only the provider-facing contract; the full backend parser below
+  // still validates and normalizes the generated quiz before persistence.
+  return GeneratedDiagnosticQuizSingleChoiceSchema;
 }
 
 function shouldRetryDiagnosticQuizGeneration(error: unknown): boolean {
