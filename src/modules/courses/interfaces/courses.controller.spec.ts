@@ -10,6 +10,7 @@ import {
   GetCourseRevisionSheetUseCase,
 } from '../application/course-revision-sheet.use-case';
 import {
+  CourseQuickRevisionGenerationFailedError,
   CourseQuickRevisionKnowledgeUnitNotReadyError,
   CourseQuickRevisionSourceNotReadyError,
   StartCourseQuickRevisionSessionUseCase,
@@ -406,6 +407,20 @@ describe('CoursesController', () => {
 
     startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
       new CourseQuickRevisionKnowledgeUnitNotReadyError(),
+    );
+
+    await expect(
+      controller.startQuickRevisionSession(currentStudent, 'course-1'),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('maps course quick revision generation failures to 409', async () => {
+    const { controller, startCourseQuickRevisionSession } = createController();
+
+    startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
+      new CourseQuickRevisionGenerationFailedError(
+        new Error('provider failed'),
+      ),
     );
 
     await expect(

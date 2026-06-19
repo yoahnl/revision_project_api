@@ -30,6 +30,7 @@ import {
   normalizeMistralModelName,
   resolveMistralFallbackModel,
 } from '../../ai/infrastructure/mistral-model-fallback';
+import { buildAiErrorDiagnostics } from '../../ai/infrastructure/ai-error-diagnostics';
 
 const MISTRAL_PLUGIN_NAME = 'mistral';
 const MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
@@ -218,7 +219,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
   ): Promise<GeneratedDiagnosticQuiz> {
     const primaryMetadata = this.resolveMetadata();
     const fallbackMetadata =
-      resolveDiagnosticQuizMistralFallbackMetadata(primaryMetadata);
+      resolveDiagnosticQuizFallbackMetadata(primaryMetadata);
     const attempts = fallbackMetadata
       ? [primaryMetadata, fallbackMetadata]
       : [primaryMetadata];
@@ -304,6 +305,8 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
       } catch (error) {
         const errorCode = resolveDiagnosticQuizGenerationErrorCode(error);
 
+        const diagnostics = buildAiErrorDiagnostics(error);
+
         this.logger.warn(
           JSON.stringify(
             buildDiagnosticQuizErrorLog({
@@ -311,6 +314,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
               metadata,
               generationVersion,
               errorCode,
+              diagnostics,
             }),
           ),
         );
@@ -325,21 +329,15 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           durationMs: Date.now() - startedAt,
           status: 'error',
           errorCode,
+          ...diagnostics,
           knowledgeUnitId: input.knowledgeUnit.id,
           subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
           documentId: input.documentId ?? undefined,
         });
 
         if (
-          index === 0 &&
-          attempts.length > 1 &&
-          isInvalidAiOutputError(error, [
-            SOURCE_INVALID_ERROR_CODE,
-            VISUAL_INVALID_ERROR_CODE,
-            MULTI_ANSWER_INVALID_ERROR_CODE,
-            QUESTION_COUNT_INVALID_ERROR_CODE,
-            'Generated diagnostic quiz is empty',
-          ])
+          index < attempts.length - 1 &&
+          shouldRetryDiagnosticQuizGeneration(error)
         ) {
           continue;
         }
@@ -369,6 +367,25 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     this.resolvedMetadata ??= resolveGenkitMetadata();
     return this.resolvedMetadata;
   }
+}
+
+function shouldRetryDiagnosticQuizGeneration(error: unknown): boolean {
+  if (
+    isInvalidAiOutputError(error, [
+      SOURCE_INVALID_ERROR_CODE,
+      VISUAL_INVALID_ERROR_CODE,
+      MULTI_ANSWER_INVALID_ERROR_CODE,
+      QUESTION_COUNT_INVALID_ERROR_CODE,
+      'Generated diagnostic quiz is empty',
+    ])
+  ) {
+    return true;
+  }
+
+  // Provider/config/network failures are safe to retry against the configured
+  // fallback model because the retry payload remains metadata-only in logs and
+  // does not change the public quiz contract.
+  return true;
 }
 
 type ResolvedGenkitMetadata = {
@@ -707,6 +724,7 @@ function buildDiagnosticQuizErrorLog(input: {
   metadata: ResolvedGenkitMetadata;
   generationVersion: DiagnosticQuizGenerationVersion;
   errorCode: string;
+  diagnostics: ReturnType<typeof buildAiErrorDiagnostics>;
 }) {
   return {
     event: 'diagnostic.quiz.generation.error',
@@ -715,6 +733,11 @@ function buildDiagnosticQuizErrorLog(input: {
     model: input.metadata.model,
     generationVersion: input.generationVersion,
     errorCode: input.errorCode,
+    errorCategory: input.diagnostics.errorCategory,
+    errorName: input.diagnostics.errorName,
+    errorStatus: input.diagnostics.errorStatus,
+    errorProviderCode: input.diagnostics.errorProviderCode,
+    errorSummary: input.diagnostics.errorSummary,
     documentId: input.input.documentId ?? undefined,
     subjectId: input.input.subjectId ?? input.input.knowledgeUnit.subjectId,
     knowledgeUnitId: input.input.knowledgeUnit.id,
@@ -1044,8 +1067,7 @@ function resolveGenkitMetadata(): ResolvedGenkitMetadata {
 
   if (
     provider === 'mistral' ||
-    (!hasValue(process.env.GOOGLE_GENAI_API_KEY) &&
-      hasValue(process.env.MISTRAL_API_KEY))
+    (!hasGoogleGenaiApiKey() && hasValue(process.env.MISTRAL_API_KEY))
   ) {
     return {
       provider: MISTRAL_PROVIDER,
@@ -1061,11 +1083,25 @@ function resolveGenkitMetadata(): ResolvedGenkitMetadata {
   };
 }
 
-function resolveDiagnosticQuizMistralFallbackMetadata(
+function resolveDiagnosticQuizFallbackMetadata(
   metadata: ResolvedGenkitMetadata,
 ): ResolvedGenkitMetadata | null {
   if (!metadata.useMistral) {
-    return null;
+    if (!hasValue(process.env.MISTRAL_API_KEY)) {
+      return null;
+    }
+
+    const fallbackModel =
+      process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL?.trim() ||
+      process.env.MISTRAL_FALLBACK_MODEL?.trim() ||
+      process.env.MISTRAL_MODEL?.trim() ||
+      DEFAULT_MISTRAL_MODEL;
+
+    return {
+      provider: MISTRAL_PROVIDER,
+      model: normalizeMistralModelName(fallbackModel),
+      useMistral: true,
+    };
   }
 
   const fallbackModel = resolveMistralFallbackModel({
@@ -1081,6 +1117,14 @@ function resolveDiagnosticQuizMistralFallbackMetadata(
     ...metadata,
     model: fallbackModel,
   };
+}
+
+function hasGoogleGenaiApiKey(): boolean {
+  return (
+    hasValue(process.env.GOOGLE_GENAI_API_KEY) ||
+    hasValue(process.env.GEMINI_API_KEY) ||
+    hasValue(process.env.GOOGLE_API_KEY)
+  );
 }
 
 function resolveGenkitConfig(

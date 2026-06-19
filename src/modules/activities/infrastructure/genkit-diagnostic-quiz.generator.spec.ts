@@ -98,6 +98,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
   const originalMistralFallbackModel = process.env.MISTRAL_FALLBACK_MODEL;
   const originalMistralDiagnosticQuizFallbackModel =
     process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL;
+  const originalGoogleGenaiApiKey = process.env.GOOGLE_GENAI_API_KEY;
+  const originalGeminiApiKey = process.env.GEMINI_API_KEY;
+  const originalGoogleApiKey = process.env.GOOGLE_API_KEY;
   const originalGenkitModel = process.env.GENKIT_MODEL;
   const originalMaxChunks = process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS;
   const originalMaxChars = process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS;
@@ -126,6 +129,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       'MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL',
       originalMistralDiagnosticQuizFallbackModel,
     );
+    restoreEnv('GOOGLE_GENAI_API_KEY', originalGoogleGenaiApiKey);
+    restoreEnv('GEMINI_API_KEY', originalGeminiApiKey);
+    restoreEnv('GOOGLE_API_KEY', originalGoogleApiKey);
     restoreEnv('GENKIT_MODEL', originalGenkitModel);
     restoreEnv('DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS', originalMaxChunks);
     restoreEnv('DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS', originalMaxChars);
@@ -917,6 +923,60 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     });
   });
 
+  it('falls back from Google to Mistral when diagnostic quiz generation fails', async () => {
+    process.env.AI_PROVIDER = 'google';
+    process.env.GEMINI_API_KEY = 'test-gemini-key';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL = 'mistral-large-latest';
+    mockGenerate
+      .mockRejectedValueOnce(new Error('provider temporarily unavailable'))
+      .mockResolvedValueOnce({
+        output: generatedQuiz(),
+      });
+    const observer = createObserver();
+
+    const quiz = await new GenkitDiagnosticQuizGenerator(observer).generate({
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-1',
+        subjectId: 'subject-1',
+        title: 'Controle de constitutionnalite',
+        summary: 'Le Conseil constitutionnel controle certaines normes.',
+      }),
+    });
+
+    expect(quiz).toEqual(generatedQuiz());
+    expect(mockGoogleAI).toHaveBeenCalledTimes(1);
+    expect(mockOpenAICompatible).toHaveBeenCalledWith({
+      name: 'mistral',
+      apiKey: 'test-mistral-key',
+      baseURL: 'https://api.mistral.ai/v1',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(1, {
+      plugins: [mockGooglePlugin],
+      model: 'googleai/gemini-2.5-flash',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(2, {
+      plugins: [mockMistralPlugin],
+      model: 'mistral/mistral-large-latest',
+    });
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      provider: 'google-genai',
+      status: 'error',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+      errorCategory: 'UNKNOWN',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      provider: 'mistral',
+      model: 'mistral/mistral-large-latest',
+      status: 'success',
+    });
+    const observedPayload = JSON.stringify(observer.observe.mock.calls);
+    expect(observedPayload).not.toContain('Controle de constitutionnalite');
+    expect(observedPayload).not.toContain('test-gemini-key');
+    expect(observedPayload).not.toContain('test-mistral-key');
+    expect(observedPayload).not.toContain('provider temporarily unavailable');
+  });
+
   it('rejects empty Genkit output', async () => {
     process.env.AI_PROVIDER = 'mistral';
     process.env.MISTRAL_API_KEY = 'test-mistral-key';
@@ -1005,6 +1065,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       durationMs: observation.durationMs,
       status: 'error',
       errorCode: 'GENKIT_GENERATION_FAILED',
+      errorCategory: 'UNKNOWN',
+      errorName: 'Error',
+      errorSummary: 'AI provider generation failed',
       knowledgeUnitId: 'unit-1',
       subjectId: 'subject-1',
     });
@@ -1048,6 +1111,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       durationMs: observation.durationMs,
       status: 'error',
       errorCode: 'GENKIT_GENERATION_FAILED',
+      errorCategory: 'CONFIGURATION',
+      errorName: 'Error',
+      errorSummary: 'AI provider configuration is invalid or incomplete',
       knowledgeUnitId: 'unit-1',
       subjectId: 'subject-1',
     });

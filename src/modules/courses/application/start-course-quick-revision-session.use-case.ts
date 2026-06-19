@@ -24,6 +24,14 @@ export class CourseQuickRevisionKnowledgeUnitNotReadyError extends Error {
   }
 }
 
+export class CourseQuickRevisionGenerationFailedError extends Error {
+  readonly code = 'COURSE_QUICK_REVISION_GENERATION_FAILED';
+
+  constructor(readonly cause?: unknown) {
+    super('Course quick revision generation failed');
+  }
+}
+
 @Injectable()
 export class StartCourseQuickRevisionSessionUseCase {
   constructor(
@@ -68,14 +76,20 @@ export class StartCourseQuickRevisionSessionUseCase {
       throw new CourseQuickRevisionKnowledgeUnitNotReadyError();
     }
 
-    return this.startRevisionSession.execute({
-      studentId: input.studentId,
-      subjectId: course.subjectId,
-      courseId: course.courseId,
-      documentId: readySource.documentId,
-      knowledgeUnitId: knowledgeUnit.id,
-      preferredAction: 'diagnostic_quiz',
-      questionCount: COURSE_QUICK_REVISION_QUESTION_COUNT,
-    });
+    try {
+      return await this.startRevisionSession.execute({
+        studentId: input.studentId,
+        subjectId: course.subjectId,
+        courseId: course.courseId,
+        documentId: readySource.documentId,
+        knowledgeUnitId: knowledgeUnit.id,
+        preferredAction: 'diagnostic_quiz',
+        questionCount: COURSE_QUICK_REVISION_QUESTION_COUNT,
+      });
+    } catch (error) {
+      // The Course API has already verified ownership, READY source and KU.
+      // Any downstream failure here means the quick quiz could not be built.
+      throw new CourseQuickRevisionGenerationFailedError(error);
+    }
   }
 }

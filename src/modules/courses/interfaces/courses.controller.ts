@@ -27,6 +27,7 @@ import {
   GetSubjectProgressUseCase,
 } from '../application/course-progress.use-case';
 import {
+  CourseQuickRevisionGenerationFailedError,
   CourseQuickRevisionKnowledgeUnitNotReadyError,
   CourseQuickRevisionSourceNotReadyError,
   StartCourseQuickRevisionSessionUseCase,
@@ -406,7 +407,8 @@ function normalizeCourseError(error: unknown): never {
 
   if (
     error instanceof CourseQuickRevisionSourceNotReadyError ||
-    error instanceof CourseQuickRevisionKnowledgeUnitNotReadyError
+    error instanceof CourseQuickRevisionKnowledgeUnitNotReadyError ||
+    error instanceof CourseQuickRevisionGenerationFailedError
   ) {
     throw new ConflictException(error.message);
   }
