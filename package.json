@@ -17,6 +17,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "demo:seed": "ts-node -r tsconfig-paths/register prisma/demo-seed.ts",
+    "smoke:diagnostic-quiz-ai": "ts-node -r tsconfig-paths/register scripts/diagnostic-quiz-ai-smoke.ts",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
