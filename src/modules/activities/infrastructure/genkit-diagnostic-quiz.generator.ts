@@ -37,6 +37,7 @@ import {
   MISTRAL_PROVIDER,
   normalizeMistralModelName,
   resolveOpenAiCompatibleProvider,
+  type OpenAiCompatibleProviderName,
   type ResolvedOpenAiCompatibleProvider,
 } from '../../ai/infrastructure/openai-compatible-ai-provider';
 
@@ -60,6 +61,8 @@ const MAX_CHART_ROWS = 12;
 const MAX_CHART_KEYS = 8;
 const MAX_DIAGRAM_NODES = 12;
 const MAX_DIAGRAM_EDGES = 20;
+const OPENAI_COMPAT_DIAGNOSTIC_QUIZ_TRANSPORT_ENV =
+  'DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT';
 
 const NonEmptyStringSchema = z.string().trim().min(1);
 const DiagnosticQuizDifficultySchema = z.enum(['LOW', 'MEDIUM', 'HIGH']);
@@ -280,11 +283,10 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
       const startedAt = Date.now();
 
       try {
-        const { output } = await this.getAi(metadata).generate({
+        const output = await this.generateOutput({
+          metadata,
           prompt,
-          output: {
-            schema: outputSchema,
-          },
+          outputSchema,
         });
 
         if (!output) {
@@ -379,6 +381,28 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     throw new Error(GENERATION_FAILED_ERROR_CODE);
   }
 
+  private async generateOutput(input: {
+    metadata: ResolvedGenkitMetadata;
+    prompt: string;
+    outputSchema: z.ZodTypeAny;
+  }): Promise<unknown> {
+    if (shouldUseDirectOpenAiCompatibleGeneration(input.metadata)) {
+      return generateOpenAiCompatibleDiagnosticQuizJson({
+        metadata: input.metadata.openAiCompatible,
+        prompt: input.prompt,
+      });
+    }
+
+    const result = (await this.getAi(input.metadata).generate({
+      prompt: input.prompt,
+      output: {
+        schema: input.outputSchema,
+      },
+    })) as { output?: unknown };
+
+    return result.output;
+  }
+
   private getAi(metadata: ResolvedGenkitMetadata): ReturnType<typeof genkit> {
     const cacheKey = `${metadata.provider}:${metadata.model}`;
     const existingAi = this.aiByModel.get(cacheKey);
@@ -436,6 +460,218 @@ function shouldRetryDiagnosticQuizGeneration(error: unknown): boolean {
   // fallback model because the retry payload remains metadata-only in logs and
   // does not change the public quiz contract.
   return true;
+}
+
+function shouldUseDirectOpenAiCompatibleGeneration(
+  metadata: ResolvedGenkitMetadata,
+): metadata is ResolvedGenkitMetadata & {
+  openAiCompatible: ResolvedOpenAiCompatibleProvider;
+} {
+  if (!metadata.openAiCompatible) {
+    return false;
+  }
+
+  // The Genkit compat-oai streaming path can close early with MiMo/Mistral on
+  // schema-heavy quiz generations. The direct transport keeps the same public
+  // contract but forces a plain non-streaming chat completion. Tests can opt
+  // back into the legacy transport to keep the older Genkit path covered.
+  return (
+    process.env[
+      OPENAI_COMPAT_DIAGNOSTIC_QUIZ_TRANSPORT_ENV
+    ]?.trim().toLowerCase() !== 'genkit'
+  );
+}
+
+async function generateOpenAiCompatibleDiagnosticQuizJson(input: {
+  metadata: ResolvedOpenAiCompatibleProvider;
+  prompt: string;
+}): Promise<unknown> {
+  if (!input.metadata.apiKey) {
+    throw new Error(`${input.metadata.apiKeyEnv} is required`);
+  }
+
+  const response = await fetch(
+    `${input.metadata.baseURL.replace(/\/+$/, '')}/chat/completions`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${input.metadata.apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(
+        buildOpenAiCompatibleDiagnosticQuizRequestBody(input),
+      ),
+    },
+  );
+
+  const payload = await readOpenAiCompatibleResponsePayload(response);
+
+  if (!response.ok) {
+    throw new OpenAiCompatibleDiagnosticQuizError({
+      status: response.status,
+      code: readProviderErrorCode(payload),
+    });
+  }
+
+  return parseOpenAiCompatibleJsonContent(
+    extractOpenAiCompatibleMessageContent(payload),
+  );
+}
+
+function buildOpenAiCompatibleDiagnosticQuizRequestBody(input: {
+  metadata: ResolvedOpenAiCompatibleProvider;
+  prompt: string;
+}) {
+  const body: Record<string, unknown> = {
+    model: stripOpenAiCompatibleModelNamespace(
+      input.metadata.provider,
+      input.metadata.model,
+    ),
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Tu retournes uniquement un objet JSON strict, sans Markdown et sans texte autour.',
+      },
+      {
+        role: 'user',
+        content: input.prompt,
+      },
+    ],
+    temperature: 0.2,
+    response_format: { type: 'json_object' },
+    stream: false,
+  };
+
+  if (input.metadata.provider === MIMO_PROVIDER) {
+    body.thinking = { type: 'disabled' };
+  }
+
+  return body;
+}
+
+async function readOpenAiCompatibleResponsePayload(
+  response: Response,
+): Promise<unknown> {
+  try {
+    return await response.json();
+  } catch {
+    throw new OpenAiCompatibleDiagnosticQuizError({
+      status: response.status,
+      code: 'NON_JSON_RESPONSE',
+    });
+  }
+}
+
+function extractOpenAiCompatibleMessageContent(payload: unknown): string {
+  if (!isRecord(payload)) {
+    throw new Error('OpenAI-compatible response payload is invalid');
+  }
+
+  const choicesValue = payload.choices;
+  if (!Array.isArray(choicesValue) || choicesValue.length === 0) {
+    throw new Error('OpenAI-compatible response choices are missing');
+  }
+
+  const choices: unknown[] = choicesValue;
+  const firstChoice = choices[0];
+  if (!isRecord(firstChoice)) {
+    throw new Error('OpenAI-compatible response message is missing');
+  }
+
+  const message = firstChoice['message'];
+  if (!isRecord(message)) {
+    throw new Error('OpenAI-compatible response message is missing');
+  }
+
+  const content = message['content'];
+
+  if (typeof content === 'string') {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    const text = content
+      .map((part) => {
+        if (!isRecord(part)) {
+          return '';
+        }
+
+        const textPart = part['text'];
+        return typeof textPart === 'string' ? textPart : '';
+      })
+      .join('');
+
+    if (text.trim().length > 0) {
+      return text;
+    }
+  }
+
+  throw new Error('OpenAI-compatible response content is missing');
+}
+
+function parseOpenAiCompatibleJsonContent(content: string): unknown {
+  const normalized = stripMarkdownJsonFence(content.trim());
+  const start = normalized.indexOf('{');
+  const end = normalized.lastIndexOf('}');
+
+  if (start < 0 || end < start) {
+    throw new Error('OpenAI-compatible JSON response is missing');
+  }
+
+  try {
+    return JSON.parse(normalized.slice(start, end + 1));
+  } catch {
+    throw new Error('OpenAI-compatible JSON response could not be parsed');
+  }
+}
+
+function stripMarkdownJsonFence(content: string): string {
+  return content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+}
+
+function stripOpenAiCompatibleModelNamespace(
+  provider: OpenAiCompatibleProviderName,
+  model: string,
+): string {
+  const prefix = `${provider}/`;
+  return model.startsWith(prefix) ? model.slice(prefix.length) : model;
+}
+
+function readProviderErrorCode(payload: unknown): string | undefined {
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+
+  const error = payload.error;
+  if (!isRecord(error)) {
+    return undefined;
+  }
+
+  for (const key of ['code', 'type']) {
+    const value = error[key];
+    if (typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,80}$/.test(value)) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+class OpenAiCompatibleDiagnosticQuizError extends Error {
+  readonly status?: number;
+  readonly code?: string;
+
+  constructor(input: { status?: number; code?: string }) {
+    super('OpenAI-compatible provider request failed');
+    this.name = 'OpenAiCompatibleDiagnosticQuizError';
+    this.status = input.status;
+    this.code = input.code;
+  }
 }
 
 type ResolvedGenkitMetadata = {

@@ -111,10 +111,13 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     process.env.DIAGNOSTIC_QUIZ_DEFAULT_QUESTION_COUNT;
   const originalMaxQuestionCount =
     process.env.DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
+  const originalOpenAiCompatTransport =
+    process.env.DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT;
   let loggerLogSpy: jest.SpyInstance;
   let loggerWarnSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    process.env.DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT = 'genkit';
     loggerLogSpy = jest
       .spyOn(Logger.prototype, 'log')
       .mockImplementation(() => undefined);
@@ -146,6 +149,10 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       originalDefaultQuestionCount,
     );
     restoreEnv('DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT', originalMaxQuestionCount);
+    restoreEnv(
+      'DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT',
+      originalOpenAiCompatTransport,
+    );
     mockOpenAICompatible.mockClear();
     mockGoogleAI.mockClear();
     mockGenkit.mockClear();
@@ -230,6 +237,145 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       model: 'mimo/mimo-v2.5-pro',
     });
     expect(quiz).toEqual(generatedQuiz());
+  });
+
+  it('uses direct non-streaming chat completions for MiMo outside the legacy Genkit transport', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    delete process.env.MIMO_MODEL;
+    delete process.env.DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT;
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify(generatedQuiz()),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    const quiz = await new GenkitDiagnosticQuizGenerator().generate({
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-constitution',
+        subjectId: 'subject-constitutional-law',
+        title: 'Revision constitutionnelle',
+        summary:
+          'La Constitution de 1958 encadre la procedure de revision et protege la forme republicaine du gouvernement.',
+      }),
+    });
+
+    expect(mockOpenAICompatible).not.toHaveBeenCalled();
+    expect(mockGenkit).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchSpy.mock.calls[0] ?? [];
+    expect(url).toBe('https://api.xiaomimimo.com/v1/chat/completions');
+    expect(typeof init?.body).toBe('string');
+    const body = JSON.parse(init?.body as string) as {
+      model: string;
+      stream: boolean;
+      thinking?: { type?: string };
+      response_format?: { type?: string };
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(body).toMatchObject({
+      model: 'mimo-v2.5-pro',
+      stream: false,
+      thinking: { type: 'disabled' },
+      response_format: { type: 'json_object' },
+    });
+    expect(body.messages[1]?.content).toContain('Revision constitutionnelle');
+    expect(quiz).toEqual(generatedQuiz());
+
+    fetchSpy.mockRestore();
+  });
+
+  it('falls back through direct non-streaming chat completions when MiMo fails in production transport', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL = 'mistral-large-latest';
+    delete process.env.DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT;
+    const fetchSpy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 'ERR_STREAM_PREMATURE_CLOSE',
+            },
+          }),
+          { status: 502, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  content: JSON.stringify(generatedSourcedQuiz()),
+                },
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+    const observer = createObserver();
+
+    const quiz = await new GenkitDiagnosticQuizGenerator(observer).generate({
+      documentId: 'document-1',
+      subjectId: 'subject-1',
+      knowledgeUnit: sourcedKnowledgeUnit(),
+      chunks: [
+        {
+          id: 'chunk-source',
+          index: 1,
+          text: 'Article 89 organise la revision.',
+          pageNumber: 2,
+        },
+      ],
+    });
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(fetchSpy.mock.calls[0]?.[0]).toBe(
+      'https://api.xiaomimimo.com/v1/chat/completions',
+    );
+    expect(fetchSpy.mock.calls[1]?.[0]).toBe(
+      'https://api.mistral.ai/v1/chat/completions',
+    );
+    const fallbackRequestBody = fetchSpy.mock.calls[1]?.[1]?.body;
+    expect(typeof fallbackRequestBody).toBe('string');
+    const fallbackBody = JSON.parse(fallbackRequestBody as string) as {
+      model: string;
+      thinking?: unknown;
+      stream: boolean;
+    };
+    expect(fallbackBody).toMatchObject({
+      model: 'mistral-large-latest',
+      stream: false,
+    });
+    expect(fallbackBody.thinking).toBeUndefined();
+    expect(quiz.metadata).toMatchObject({
+      provider: 'mistral',
+      model: 'mistral/mistral-large-latest',
+    });
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      provider: 'mimo',
+      status: 'error',
+      errorProviderCode: 'ERR_STREAM_PREMATURE_CLOSE',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      provider: 'mistral',
+      status: 'success',
+    });
+
+    fetchSpy.mockRestore();
   });
 
   it('falls back from MiMo to Mistral when MiMo generation fails', async () => {
