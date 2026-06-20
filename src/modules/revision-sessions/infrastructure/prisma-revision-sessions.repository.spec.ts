@@ -800,6 +800,27 @@ describe('PrismaRevisionSessionsRepository', () => {
         state: 'TO_REVIEW',
       },
     ]);
+    expect(result.corrections).toEqual([
+      expect.objectContaining({
+        prompt: 'Quel principe organise les pouvoirs ?',
+        isCorrect: true,
+        selectedAnswers: ['La séparation des pouvoirs'],
+        correctAnswers: ['La séparation des pouvoirs'],
+      }),
+      expect.objectContaining({
+        prompt: 'Quel principe organise les pouvoirs ?',
+        isCorrect: true,
+        selectedAnswers: ['La séparation des pouvoirs'],
+        correctAnswers: ['La séparation des pouvoirs'],
+      }),
+      expect.objectContaining({
+        prompt: 'Quel principe organise les pouvoirs ?',
+        isCorrect: false,
+        selectedAnswers: ['Le mandat impératif'],
+        correctAnswers: ['La séparation des pouvoirs'],
+        explanation: 'La Constitution organise la séparation des pouvoirs.',
+      }),
+    ]);
   });
 
   it('refuses to load a result for an incomplete session', async () => {
@@ -900,7 +921,7 @@ function createRepository() {
 }
 
 function createPrismaMock() {
-  const prisma = {
+  return {
     subject: {
       findFirst: jest.fn().mockResolvedValue(null),
     },
@@ -926,8 +947,6 @@ function createPrismaMock() {
     },
     $transaction: jest.fn(),
   };
-
-  return prisma;
 }
 
 function revisionSessionRecord(
@@ -1036,11 +1055,24 @@ function answerRecord(
     knowledgeUnitId?: string;
     title?: string;
     isCorrect?: boolean;
+    selectedChoiceId?: string;
   } = {},
 ) {
   return {
     isCorrect: overrides.isCorrect ?? true,
+    selectedChoiceId:
+      overrides.selectedChoiceId ??
+      (overrides.isCorrect === false ? 'choice-2' : 'choice-1'),
+    selectedChoices: [],
     question: {
+      prompt: 'Quel principe organise les pouvoirs ?',
+      choices: [
+        { id: 'choice-1', label: 'La séparation des pouvoirs' },
+        { id: 'choice-2', label: 'Le mandat impératif' },
+      ],
+      correctChoiceId: 'choice-1',
+      correctChoiceIds: null,
+      explanation: 'La Constitution organise la séparation des pouvoirs.',
       knowledgeUnitId: overrides.knowledgeUnitId ?? 'unit-1',
       knowledgeUnit: {
         title: overrides.title ?? 'Notion 1',

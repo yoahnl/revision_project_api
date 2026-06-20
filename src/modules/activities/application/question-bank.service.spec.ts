@@ -135,6 +135,62 @@ describe('QuestionBankService', () => {
     expect(findManyCall.take).toBe(5);
   });
 
+  it('does not persist generated questions about PDF structure or metadata', async () => {
+    const { activitiesRepository, generator, mocks, service } = createHarness();
+    activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
+      generationContext(),
+    );
+    mocks.questionBankItemCount.mockResolvedValueOnce(0);
+    mocks.questionBankItemCount.mockResolvedValueOnce(0);
+    mocks.questionBankItemCount.mockResolvedValueOnce(1);
+    mocks.questionBankItemCount.mockResolvedValueOnce(1);
+    mocks.questionBankItemCount.mockResolvedValueOnce(3);
+    mocks.questionBankItemCount.mockResolvedValueOnce(3);
+    mocks.questionBankItemCount.mockResolvedValueOnce(5);
+    mocks.questionBankItemCount.mockResolvedValueOnce(5);
+    generator.generate
+      .mockResolvedValueOnce(
+        generatedQuizWithPrompts('batch-a', [
+          'Selon la table des matières, quelle page ouvre le cours 1 ?',
+          'Quel contrôle limite les rapports entre pouvoir exécutif et législatif ?',
+        ]),
+      )
+      .mockResolvedValueOnce(generatedQuiz('batch-b', 2))
+      .mockResolvedValueOnce(generatedQuiz('batch-c', 2));
+    mocks.questionBankItemFindUnique.mockResolvedValue(null);
+    mocks.questionBankItemCreate
+      .mockResolvedValueOnce({ id: 'bank-a-2' })
+      .mockResolvedValueOnce({ id: 'bank-b-1' })
+      .mockResolvedValueOnce({ id: 'bank-b-2' })
+      .mockResolvedValueOnce({ id: 'bank-c-1' })
+      .mockResolvedValueOnce({ id: 'bank-c-2' });
+    mocks.questionBankItemFindMany.mockResolvedValue(bankItems(5));
+    mocks.questionBankItemUpdateMany.mockResolvedValue({ count: 5 });
+    activitiesRepository.createDiagnosticQuiz.mockResolvedValue({
+      sessionId: 'activity-1',
+      type: 'diagnostic_quiz',
+      title: 'Révision rapide',
+      questions: [],
+    });
+
+    await service.createCourseQuickDiagnosticQuiz({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'ku-1',
+      questionCount: 5,
+    });
+
+    expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(5);
+    const persistedPrompts = mocks.questionBankItemCreate.mock.calls.map(
+      ([input]) => (input as { data: { prompt: string } }).data.prompt,
+    );
+    expect(persistedPrompts).not.toContain(
+      'Selon la table des matières, quelle page ouvre le cours 1 ?',
+    );
+  });
+
   it('refuses to generate above the active cap and does not use flagged questions', async () => {
     const { activitiesRepository, generator, mocks, service } = createHarness();
     activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
@@ -308,6 +364,29 @@ function generatedQuiz(prefix: string, count: number): GeneratedDiagnosticQuiz {
       choices: [
         { id: 'a', label: 'Réponse A' },
         { id: 'b', label: 'Réponse B' },
+      ],
+      correctChoiceId: 'a',
+      explanation: 'Explication.',
+      sourceChunkIds: ['chunk-1'],
+      visuals: [],
+    })),
+  };
+}
+
+function generatedQuizWithPrompts(
+  prefix: string,
+  prompts: string[],
+): GeneratedDiagnosticQuiz {
+  return {
+    title: 'Révision rapide',
+    version: 3,
+    questions: prompts.map((prompt, index) => ({
+      prompt,
+      difficulty: 'MEDIUM',
+      selectionMode: 'single',
+      choices: [
+        { id: 'a', label: `${prefix} réponse A ${index + 1}` },
+        { id: 'b', label: `${prefix} réponse B ${index + 1}` },
       ],
       correctChoiceId: 'a',
       explanation: 'Explication.',

@@ -18,6 +18,7 @@ import type {
 } from '../domain/revision-session.entity';
 import {
   revisionSessionResultStateForScore,
+  type RevisionSessionQuestionCorrectionDto,
   type RevisionSessionResultDto,
 } from '../domain/revision-session-result.entity';
 import type {
@@ -104,7 +105,14 @@ type RevisionSessionActivityResultRecord = {
 
 type RevisionSessionAnswerRecord = {
   isCorrect: boolean;
+  selectedChoiceId?: string | null;
+  selectedChoices?: Array<{ choiceId: string }>;
   question: {
+    prompt?: string;
+    choices?: unknown;
+    correctChoiceId?: string | null;
+    correctChoiceIds?: unknown;
+    explanation?: string | null;
     knowledgeUnitId: string;
     knowledgeUnit: {
       title: string;
@@ -384,12 +392,22 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
             include: {
               question: {
                 select: {
+                  prompt: true,
+                  choices: true,
+                  correctChoiceId: true,
+                  correctChoiceIds: true,
+                  explanation: true,
                   knowledgeUnitId: true,
                   knowledgeUnit: {
                     select: {
                       title: true,
                     },
                   },
+                },
+              },
+              selectedChoices: {
+                select: {
+                  choiceId: true,
                 },
               },
             },
@@ -491,12 +509,22 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
           include: {
             question: {
               select: {
+                prompt: true,
+                choices: true,
+                correctChoiceId: true,
+                correctChoiceIds: true,
+                explanation: true,
                 knowledgeUnitId: true,
                 knowledgeUnit: {
                   select: {
                     title: true,
                   },
                 },
+              },
+            },
+            selectedChoices: {
+              select: {
+                choiceId: true,
               },
             },
           },
@@ -1073,6 +1101,7 @@ function toRevisionSessionResult(
       durationSeconds,
     },
     knowledgeUnits: aggregateKnowledgeUnitResults(activity.answers),
+    corrections: buildQuestionCorrections(activity.answers),
   };
 }
 
@@ -1114,6 +1143,68 @@ function aggregateKnowledgeUnitResults(
       state: revisionSessionResultStateForScore(score),
     };
   });
+}
+
+function buildQuestionCorrections(
+  answers: RevisionSessionAnswerRecord[],
+): RevisionSessionQuestionCorrectionDto[] {
+  return answers.map((answer) => {
+    const choices = parsePublicQuestionChoices(answer.question.choices);
+    const selectedChoiceIds = selectedChoiceIdsForAnswer(answer);
+    const correctChoiceIds = correctChoiceIdsForQuestion(answer.question);
+
+    return {
+      prompt: answer.question.prompt ?? '',
+      isCorrect: answer.isCorrect,
+      selectedAnswers: labelsForChoiceIds(choices, selectedChoiceIds),
+      correctAnswers: labelsForChoiceIds(choices, correctChoiceIds),
+      explanation:
+        typeof answer.question.explanation === 'string'
+          ? answer.question.explanation
+          : null,
+    };
+  });
+}
+
+function selectedChoiceIdsForAnswer(answer: RevisionSessionAnswerRecord) {
+  if (answer.selectedChoices && answer.selectedChoices.length > 0) {
+    return answer.selectedChoices.map((choice) => choice.choiceId);
+  }
+
+  return answer.selectedChoiceId ? [answer.selectedChoiceId] : [];
+}
+
+function correctChoiceIdsForQuestion(
+  question: RevisionSessionAnswerRecord['question'],
+) {
+  const multipleCorrectChoiceIds = parseStringArray(question.correctChoiceIds);
+
+  if (multipleCorrectChoiceIds.length > 0) {
+    return multipleCorrectChoiceIds;
+  }
+
+  return question.correctChoiceId ? [question.correctChoiceId] : [];
+}
+
+function labelsForChoiceIds(
+  choices: Array<{ id: string; label: string }>,
+  choiceIds: string[],
+) {
+  const labelsById = new Map(
+    choices.map((choice) => [choice.id, choice.label]),
+  );
+
+  return choiceIds
+    .map((choiceId) => labelsById.get(choiceId))
+    .filter((label): label is string => Boolean(label));
+}
+
+function parseStringArray(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.filter((value): value is string => typeof value === 'string');
 }
 
 function normalizeScore(

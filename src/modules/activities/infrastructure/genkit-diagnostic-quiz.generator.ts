@@ -281,18 +281,101 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
 
     for (const [index, metadata] of attempts.entries()) {
       const startedAt = Date.now();
+      let output: unknown;
 
       try {
-        const output = await this.generateOutput({
+        output = await this.generateOutput({
           metadata,
           prompt,
           outputSchema,
         });
+      } catch (error) {
+        const errorCode = resolveDiagnosticQuizGenerationErrorCode(error);
 
-        if (!output) {
-          throw new Error('Generated diagnostic quiz is empty');
+        const diagnostics = buildAiErrorDiagnostics(error);
+
+        this.logger.warn(
+          JSON.stringify(
+            buildDiagnosticQuizErrorLog({
+              input,
+              metadata,
+              generationVersion,
+              errorCode,
+              diagnostics,
+            }),
+          ),
+        );
+
+        this.observer.observe({
+          flowName: FLOW_NAME,
+          provider: metadata.provider,
+          model: metadata.model,
+          promptVersion: generationVersion,
+          schemaVersion: generationVersion,
+          inputSize,
+          durationMs: Date.now() - startedAt,
+          status: 'error',
+          errorCode,
+          ...diagnostics,
+          knowledgeUnitId: input.knowledgeUnit.id,
+          subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
+          documentId: input.documentId ?? undefined,
+        });
+
+        if (
+          index < attempts.length - 1 &&
+          shouldRetryDiagnosticQuizGeneration(error)
+        ) {
+          continue;
         }
 
+        throw error;
+      }
+
+      if (!output) {
+        const error = new Error('Generated diagnostic quiz is empty');
+        const errorCode = resolveDiagnosticQuizGenerationErrorCode(error);
+        const diagnostics = buildAiErrorDiagnostics(error);
+
+        this.logger.warn(
+          JSON.stringify(
+            buildDiagnosticQuizErrorLog({
+              input,
+              metadata,
+              generationVersion,
+              errorCode,
+              diagnostics,
+            }),
+          ),
+        );
+
+        this.observer.observe({
+          flowName: FLOW_NAME,
+          provider: metadata.provider,
+          model: metadata.model,
+          promptVersion: generationVersion,
+          schemaVersion: generationVersion,
+          inputSize,
+          durationMs: Date.now() - startedAt,
+          status: 'error',
+          errorCode,
+          ...diagnostics,
+          knowledgeUnitId: input.knowledgeUnit.id,
+          subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
+          documentId: input.documentId ?? undefined,
+        });
+
+        if (
+          index < attempts.length - 1 &&
+          shouldRetryDiagnosticQuizGeneration(error)
+        ) {
+          continue;
+        }
+
+        throw error;
+      }
+
+      try {
         const quiz = normalizeGeneratedQuiz({
           output: GeneratedDiagnosticQuizSchema.parse(output),
           chunks,
@@ -1011,6 +1094,8 @@ function buildPrompt(
     'Au moins 70% des questions doivent evaluer une comparaison, une application a un cas, une consequence, une exception ou un piege conceptuel.',
     'Limite les questions de simple auteur, date, definition ou identification isolee a 30% maximum du QCM.',
     'Les distracteurs doivent representer des confusions plausibles entre notions proches, conditions, exceptions ou consequences.',
+    'Interdit: ne pose jamais de question sur la structure du PDF, la table des matieres, le sommaire, le plan du document, les numeros de page, les contacts, l auteur, l annee universitaire, la bibliographie, les consignes de plagiat ou les metadonnees du support.',
+    'Chaque question doit evaluer une notion de fond utile pour reviser, pas l organisation materielle du fichier source.',
     'Ne classe jamais une simple question de restitution en difficulty=HIGH.',
     'Pour difficulty=HIGH, la question doit exiger comparaison, application, diagnostic d erreur ou raisonnement a partir d une source.',
     'Si les sources ne permettent pas une question avancee fiable, genere une question LOW ou MEDIUM plutot qu une question HIGH artificielle.',
@@ -1570,11 +1655,10 @@ function selectDiagnosticQuizChunks(
     process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHUNKS,
     DEFAULT_MAX_CHUNKS,
   );
-  const maxChars = resolvePositiveInteger(
+  let remainingChars = resolvePositiveInteger(
     process.env.DIAGNOSTIC_QUIZ_GENERATION_MAX_CHARS,
     DEFAULT_MAX_CHARS,
   );
-  let remainingChars = maxChars;
 
   return prioritizedChunks.slice(0, maxChunks).flatMap((chunk) => {
     if (remainingChars <= 0) {

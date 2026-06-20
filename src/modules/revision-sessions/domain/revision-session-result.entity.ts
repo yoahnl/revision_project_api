@@ -19,6 +19,7 @@ export interface RevisionSessionResultDto {
     durationSeconds: number;
   };
   knowledgeUnits: RevisionSessionKnowledgeUnitResultDto[];
+  corrections: RevisionSessionQuestionCorrectionDto[];
 }
 
 export interface RevisionSessionKnowledgeUnitResultDto {
@@ -28,6 +29,14 @@ export interface RevisionSessionKnowledgeUnitResultDto {
   totalQuestions: number;
   score: number;
   state: RevisionSessionResultKnowledgeUnitState;
+}
+
+export interface RevisionSessionQuestionCorrectionDto {
+  prompt: string;
+  isCorrect: boolean;
+  selectedAnswers: string[];
+  correctAnswers: string[];
+  explanation: string | null;
 }
 
 export function revisionSessionResultStateForScore(

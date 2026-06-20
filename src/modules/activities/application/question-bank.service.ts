@@ -200,6 +200,10 @@ export class QuestionBankService {
     quiz: GeneratedDiagnosticQuiz;
   }): Promise<void> {
     for (const question of input.quiz.questions) {
+      if (isPdfStructureQuestion(question)) {
+        continue;
+      }
+
       const fingerprint = fingerprintQuestion(input.knowledgeUnitId, question);
       const existing = await this.prisma.questionBankItem.findUnique({
         where: {
@@ -537,6 +541,40 @@ function fingerprintQuestion(
 
 function normalizeForFingerprint(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function isPdfStructureQuestion(question: GeneratedDiagnosticQuizQuestion) {
+  const text = normalizeForFingerprint(
+    [
+      question.prompt,
+      question.explanation,
+      ...question.choices.map((choice) => choice.label),
+    ].join(' '),
+  );
+  const structuralMarkers = [
+    'table des matieres',
+    'table des matières',
+    'sommaire',
+    'plan du cours',
+    'structure du document',
+    'structure du pdf',
+    'page ',
+    'pages ',
+    'numero de page',
+    'numéro de page',
+    'annee universitaire',
+    'année universitaire',
+    'bibliographie',
+    'plagiat',
+    'contact',
+    'email',
+    'courriel',
+    'ufr',
+    'l1-',
+    'l1 ',
+  ];
+
+  return structuralMarkers.some((marker) => text.includes(marker));
 }
 
 function dedupeStrings(values: string[]): string[] {
