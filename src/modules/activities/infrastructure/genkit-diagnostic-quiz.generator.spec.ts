@@ -225,7 +225,7 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     });
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockMistralPlugin],
-      model: 'mimo/mimo-v2.5',
+      model: 'mimo/mimo-v2.5-pro',
     });
     expect(quiz).toEqual(generatedQuiz());
   });

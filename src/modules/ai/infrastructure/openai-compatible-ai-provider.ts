@@ -6,7 +6,7 @@ export const MIMO_PROVIDER = 'mimo';
 const DEFAULT_MISTRAL_BASE_URL = 'https://api.mistral.ai/v1';
 const DEFAULT_MISTRAL_MODEL = 'mistral-medium-latest';
 const DEFAULT_MIMO_BASE_URL = 'https://api.xiaomimimo.com/v1';
-const DEFAULT_MIMO_MODEL = 'mimo-v2.5';
+const DEFAULT_MIMO_MODEL = 'mimo-v2.5-pro';
 
 export type OpenAiCompatibleProviderName =
   | typeof MISTRAL_PROVIDER
@@ -106,13 +106,31 @@ export function normalizeOpenAiCompatibleModelName(
   provider: OpenAiCompatibleProviderName,
   model: string,
 ): string {
-  const trimmedModel = model.trim();
+  const trimmedModel = normalizeProviderSpecificModelName(
+    provider,
+    model.trim(),
+  );
 
   if (trimmedModel.startsWith(`${provider}/`)) {
     return trimmedModel;
   }
 
   return `${provider}/${trimmedModel}`;
+}
+
+function normalizeProviderSpecificModelName(
+  provider: OpenAiCompatibleProviderName,
+  model: string,
+): string {
+  // MiMo's base v2.5 model can close the OpenAI-compatible response stream
+  // under Genkit structured generations. Prefer the pro variant for this app's
+  // schema-heavy flows, and transparently lift the previous default if it is
+  // still present in deployment environment variables.
+  if (provider === MIMO_PROVIDER && model === 'mimo-v2.5') {
+    return DEFAULT_MIMO_MODEL;
+  }
+
+  return model;
 }
 
 export function resolveMistralModelName(
