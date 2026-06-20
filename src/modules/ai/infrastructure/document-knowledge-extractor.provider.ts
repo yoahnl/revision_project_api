@@ -3,6 +3,7 @@ import {
   noopAiGenerationObserver,
 } from '../application/ai-generation-observer';
 import type { DocumentKnowledgeExtractor } from '../application/document-knowledge-extractor';
+import { FallbackDocumentKnowledgeExtractor } from './fallback-document-knowledge.extractor';
 import { GenkitDocumentKnowledgeExtractor } from './genkit-document-knowledge.extractor';
 import { GenkitOpenAiCompatibleDocumentKnowledgeExtractor } from './genkit-openai-compatible-document-knowledge.extractor';
 import {
@@ -27,8 +28,21 @@ export function createDocumentKnowledgeExtractor(
   env: AiProviderEnv = process.env,
   observer: AiGenerationObserver = noopAiGenerationObserver,
 ): DocumentKnowledgeExtractor {
-  const provider = resolveDocumentKnowledgeProviderName(env);
+  const extractors = resolveDocumentKnowledgeProviderChain(env).map(
+    (provider) => createExtractorForProvider(provider, observer),
+  );
 
+  if (extractors.length === 1) {
+    return extractors[0];
+  }
+
+  return new FallbackDocumentKnowledgeExtractor(extractors);
+}
+
+function createExtractorForProvider(
+  provider: DocumentKnowledgeProviderName,
+  observer: AiGenerationObserver,
+): DocumentKnowledgeExtractor {
   if (provider === MISTRAL_PROVIDER) {
     return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
       observer,
@@ -44,6 +58,21 @@ export function createDocumentKnowledgeExtractor(
   }
 
   return new GenkitDocumentKnowledgeExtractor(observer);
+}
+
+export function resolveDocumentKnowledgeProviderChain(
+  env: AiProviderEnv = process.env,
+): DocumentKnowledgeProviderName[] {
+  const primaryProvider = resolveDocumentKnowledgeProviderName(env);
+  const providers: DocumentKnowledgeProviderName[] = [primaryProvider];
+  const configuredAppProvider = normalizeConfiguredProvider(env.AI_PROVIDER);
+
+  appendAvailableProvider(providers, configuredAppProvider, env);
+  appendAvailableProvider(providers, MISTRAL_PROVIDER, env);
+  appendAvailableProvider(providers, MIMO_PROVIDER, env);
+  appendAvailableProvider(providers, 'google', env);
+
+  return providers;
 }
 
 export function resolveDocumentKnowledgeProviderName(
@@ -92,6 +121,37 @@ function normalizeConfiguredProvider(
   }
 
   return null;
+}
+
+function appendAvailableProvider(
+  providers: DocumentKnowledgeProviderName[],
+  provider: DocumentKnowledgeProviderName | null,
+  env: AiProviderEnv,
+) {
+  if (
+    !provider ||
+    providers.includes(provider) ||
+    !isProviderConfigured(provider, env)
+  ) {
+    return;
+  }
+
+  providers.push(provider);
+}
+
+function isProviderConfigured(
+  provider: DocumentKnowledgeProviderName,
+  env: AiProviderEnv,
+): boolean {
+  if (provider === MISTRAL_PROVIDER) {
+    return hasValue(env.MISTRAL_API_KEY);
+  }
+
+  if (provider === MIMO_PROVIDER) {
+    return hasValue(env.MIMO_API_KEY);
+  }
+
+  return hasValue(env.GOOGLE_GENAI_API_KEY);
 }
 
 function hasValue(value: string | undefined): boolean {

@@ -2,6 +2,7 @@ import { GenkitDocumentKnowledgeExtractor } from './genkit-document-knowledge.ex
 import { GenkitOpenAiCompatibleDocumentKnowledgeExtractor } from './genkit-openai-compatible-document-knowledge.extractor';
 import {
   createDocumentKnowledgeExtractor,
+  resolveDocumentKnowledgeProviderChain,
   resolveDocumentKnowledgeProviderName,
 } from './document-knowledge-extractor.provider';
 
@@ -69,5 +70,17 @@ describe('createDocumentKnowledgeExtractor', () => {
         GOOGLE_GENAI_API_KEY: 'test-google-key',
       }),
     ).toBe('google');
+  });
+
+  it('builds a fallback chain from the document provider to the app provider', () => {
+    expect(
+      resolveDocumentKnowledgeProviderChain({
+        AI_PROVIDER: 'mimo',
+        DOCUMENT_KNOWLEDGE_PROVIDER: 'mistral',
+        MISTRAL_API_KEY: 'test-mistral-key',
+        MIMO_API_KEY: 'test-mimo-key',
+        GOOGLE_GENAI_API_KEY: 'test-google-key',
+      }),
+    ).toEqual(['mistral', 'mimo', 'google']);
   });
 });
