@@ -294,6 +294,73 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     fetchSpy.mockRestore();
   });
 
+  it('normalizes common direct provider JSON variants before schema validation', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    delete process.env.DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT;
+    const fetchSpy = jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify({
+                  quiz: {
+                    title: 'Diagnostic constitutionnel direct',
+                    ignored: 'champ a ignorer',
+                    questions: [
+                      {
+                        question:
+                          'Quelle limite materielle encadre la revision constitutionnelle en France ?',
+                        options: [
+                          'La forme republicaine du gouvernement',
+                          'La suppression automatique du Parlement',
+                        ],
+                        answer: 'La forme republicaine du gouvernement',
+                        rationale:
+                          'La forme republicaine du gouvernement ne peut pas etre revisee.',
+                        sourceChunkId: 'chunk-source',
+                        extraField: 'ignore',
+                      },
+                    ],
+                  },
+                }),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    const quiz = await new GenkitDiagnosticQuizGenerator().generate({
+      documentId: 'document-1',
+      subjectId: 'subject-1',
+      knowledgeUnit: sourcedKnowledgeUnit(),
+      chunks: [
+        {
+          id: 'chunk-source',
+          index: 1,
+          text: 'Article 89 organise la revision.',
+          pageNumber: 2,
+        },
+      ],
+    });
+
+    expect(quiz.questions[0]).toMatchObject({
+      prompt:
+        'Quelle limite materielle encadre la revision constitutionnelle en France ?',
+      choices: [
+        { id: 'a', label: 'La forme republicaine du gouvernement' },
+        { id: 'b', label: 'La suppression automatique du Parlement' },
+      ],
+      correctChoiceId: 'a',
+      sourceChunkIds: ['chunk-source'],
+    });
+
+    fetchSpy.mockRestore();
+  });
+
   it('falls back through direct non-streaming chat completions when MiMo fails in production transport', async () => {
     process.env.AI_PROVIDER = 'mimo';
     process.env.MIMO_API_KEY = 'test-mimo-key';

@@ -513,9 +513,306 @@ async function generateOpenAiCompatibleDiagnosticQuizJson(input: {
     });
   }
 
-  return parseOpenAiCompatibleJsonContent(
-    extractOpenAiCompatibleMessageContent(payload),
+  return normalizeOpenAiCompatibleDiagnosticQuizOutput(
+    parseOpenAiCompatibleJsonContent(
+      extractOpenAiCompatibleMessageContent(payload),
+    ),
   );
+}
+
+function normalizeOpenAiCompatibleDiagnosticQuizOutput(
+  payload: unknown,
+): unknown {
+  const unwrappedPayload = unwrapOpenAiCompatibleQuizPayload(payload);
+  if (!isRecord(unwrappedPayload)) {
+    return payload;
+  }
+
+  const questionsValue =
+    unwrappedPayload['questions'] ??
+    unwrappedPayload['items'] ??
+    unwrappedPayload['quizQuestions'];
+  if (!Array.isArray(questionsValue)) {
+    return unwrappedPayload;
+  }
+
+  return removeUndefinedProperties({
+    title:
+      readStringField(unwrappedPayload, ['title', 'name']) ?? 'QCM diagnostic',
+    questions: questionsValue.map((question, index) =>
+      normalizeOpenAiCompatibleQuestion(question, index),
+    ),
+  });
+}
+
+function unwrapOpenAiCompatibleQuizPayload(payload: unknown): unknown {
+  if (!isRecord(payload)) {
+    return payload;
+  }
+
+  for (const key of ['quiz', 'diagnosticQuiz', 'result', 'data']) {
+    const value = payload[key];
+    if (isRecord(value)) {
+      return value;
+    }
+  }
+
+  return payload;
+}
+
+function normalizeOpenAiCompatibleQuestion(
+  value: unknown,
+  questionIndex: number,
+): unknown {
+  if (!isRecord(value)) {
+    return value;
+  }
+
+  const choices = normalizeOpenAiCompatibleChoices(
+    value['choices'] ?? value['options'] ?? value['answers'],
+  );
+  const correctChoiceIds = normalizeOpenAiCompatibleCorrectChoiceIds(
+    value,
+    choices,
+  );
+  const selectionMode = resolveOpenAiCompatibleSelectionMode(
+    value,
+    correctChoiceIds,
+  );
+  const effectiveSelectionMode =
+    selectionMode ?? (correctChoiceIds.length > 1 ? 'multiple' : 'single');
+  const sourceChunkIds = readStringArrayValue(
+    value['sourceChunkIds'] ?? value['sourceChunkId'] ?? value['sources'],
+  );
+
+  return removeUndefinedProperties({
+    prompt:
+      readStringField(value, ['prompt', 'question', 'text']) ??
+      `Question ${questionIndex + 1}`,
+    difficulty: readDiagnosticQuizDifficulty(value['difficulty']),
+    choices,
+    selectionMode,
+    correctChoiceId:
+      effectiveSelectionMode === 'single' ? correctChoiceIds[0] : undefined,
+    correctChoiceIds:
+      effectiveSelectionMode === 'multiple' && correctChoiceIds.length > 0
+        ? correctChoiceIds
+        : undefined,
+    minSelections:
+      effectiveSelectionMode === 'multiple'
+        ? readPositiveInteger(value['minSelections'])
+        : undefined,
+    maxSelections:
+      effectiveSelectionMode === 'multiple'
+        ? readPositiveInteger(value['maxSelections'])
+        : undefined,
+    explanation:
+      readStringField(value, ['explanation', 'rationale', 'feedback']) ??
+      readStringField(value, ['reason']),
+    sourceChunkIds: sourceChunkIds.length > 0 ? sourceChunkIds : undefined,
+    visuals: Array.isArray(value['visuals']) ? value['visuals'] : undefined,
+  });
+}
+
+function normalizeOpenAiCompatibleChoices(value: unknown): unknown[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const usedIds = new Set<string>();
+  return value.map((choice, index) => {
+    const fallbackId = fallbackChoiceId(index);
+    const normalized = normalizeOpenAiCompatibleChoice(choice, fallbackId);
+    const rawId = normalized.id;
+    const id = usedIds.has(rawId) ? fallbackId : rawId;
+    usedIds.add(id);
+
+    return {
+      ...normalized,
+      id,
+    };
+  });
+}
+
+function normalizeOpenAiCompatibleChoice(
+  value: unknown,
+  fallbackId: string,
+): { id: string; label: string; feedback?: string | null } {
+  if (typeof value === 'string') {
+    return {
+      id: fallbackId,
+      label: value,
+    };
+  }
+
+  if (!isRecord(value)) {
+    return {
+      id: fallbackId,
+      label: fallbackId.toUpperCase(),
+    };
+  }
+
+  const id = readStringField(value, ['id', 'key', 'letter']);
+  const label =
+    readStringField(value, ['label', 'text', 'content', 'answer', 'option']) ??
+    readStringField(value, ['value']) ??
+    id ??
+    fallbackId.toUpperCase();
+  const feedback = readStringField(value, ['feedback', 'rationale']);
+
+  return removeUndefinedProperties({
+    id: normalizeChoiceId(id) ?? fallbackId,
+    label,
+    feedback,
+  });
+}
+
+function normalizeOpenAiCompatibleCorrectChoiceIds(
+  question: Record<string, unknown>,
+  choices: unknown[],
+): string[] {
+  const choiceRecords = choices.filter(isRecord);
+  const candidates = [
+    ...readStringArrayValue(question['correctChoiceIds']),
+    ...readStringArrayValue(question['correctAnswerIds']),
+    ...readStringArrayValue(question['correctOptionIds']),
+    ...readStringArrayValue(question['answers']),
+    ...readStringArrayValue(question['answer']),
+    ...readStringArrayValue(question['correctChoiceId']),
+    ...readStringArrayValue(question['correctAnswerId']),
+    ...readStringArrayValue(question['correctOptionId']),
+    ...readStringArrayValue(question['correctAnswer']),
+  ];
+
+  const normalized = candidates
+    .map((candidate) => matchOpenAiCompatibleChoiceId(candidate, choiceRecords))
+    .filter((candidate): candidate is string => candidate !== undefined);
+
+  return [...new Set(normalized)];
+}
+
+function matchOpenAiCompatibleChoiceId(
+  candidate: string,
+  choices: Array<Record<string, unknown>>,
+): string | undefined {
+  const normalizedCandidate = candidate.trim();
+  const directId = normalizeChoiceId(normalizedCandidate);
+
+  if (
+    directId &&
+    choices.some((choice) => readStringField(choice, ['id']) === directId)
+  ) {
+    return directId;
+  }
+
+  const numericIndex = Number.parseInt(normalizedCandidate, 10);
+  if (
+    Number.isInteger(numericIndex) &&
+    numericIndex >= 1 &&
+    numericIndex <= choices.length
+  ) {
+    return readStringField(choices[numericIndex - 1], ['id']);
+  }
+
+  const byLabel = choices.find((choice) => {
+    const label = readStringField(choice, ['label']);
+    return (
+      label !== undefined &&
+      label.trim().toLowerCase() === normalizedCandidate.toLowerCase()
+    );
+  });
+
+  return byLabel ? readStringField(byLabel, ['id']) : undefined;
+}
+
+function resolveOpenAiCompatibleSelectionMode(
+  question: Record<string, unknown>,
+  correctChoiceIds: string[],
+): 'single' | 'multiple' | undefined {
+  const explicitMode = readStringField(question, [
+    'selectionMode',
+    'type',
+    'mode',
+  ])?.toLowerCase();
+
+  if (explicitMode === 'multiple') {
+    return 'multiple';
+  }
+
+  if (explicitMode === 'single') {
+    return 'single';
+  }
+
+  return correctChoiceIds.length > 1 ? 'multiple' : undefined;
+}
+
+function readDiagnosticQuizDifficulty(value: unknown) {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+
+  const normalized = value.trim().toUpperCase();
+  return ['LOW', 'MEDIUM', 'HIGH'].includes(normalized)
+    ? normalized
+    : undefined;
+}
+
+function readStringField(
+  record: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value.trim();
+    }
+  }
+
+  return undefined;
+}
+
+function readStringArrayValue(value: unknown): string[] {
+  if (typeof value === 'string' && value.trim().length > 0) {
+    return [value.trim()];
+  }
+
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is string =>
+      typeof item === 'string' && item.trim().length > 0,
+  );
+}
+
+function readPositiveInteger(value: unknown): number | undefined {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    return undefined;
+  }
+
+  return value;
+}
+
+function normalizeChoiceId(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  return /^[a-z0-9_-]{1,40}$/.test(normalized) ? normalized : undefined;
+}
+
+function fallbackChoiceId(index: number): string {
+  return String.fromCharCode('a'.charCodeAt(0) + index);
+}
+
+function removeUndefinedProperties<T extends Record<string, unknown>>(
+  value: T,
+): T {
+  return Object.fromEntries(
+    Object.entries(value).filter((entry) => entry[1] !== undefined),
+  ) as T;
 }
 
 function buildOpenAiCompatibleDiagnosticQuizRequestBody(input: {
