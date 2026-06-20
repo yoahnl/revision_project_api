@@ -12,6 +12,7 @@ La vision produit complète vit principalement côté Flutter dans `revision_pro
 - `EXECUTION_LOT_TRACKER_V2.md` : tracker backend des lots exécutables avec les mêmes IDs que le repo app.
 - `ROADMAP_UPDATE_PROTOCOL.md` : règles de mise à jour après chaque lot.
 - `STAB_00B_ROADMAP_V2_HARDENING_REPORT.md` : rapport du durcissement de roadmap côté API.
+- `QUALITY_00_CI_BASELINE_REPORT.md` : rapport de la baseline CI GitHub Actions côté API.
 
 Les rapports `docs/core/` restent l'historique des lots déjà réalisés.
 

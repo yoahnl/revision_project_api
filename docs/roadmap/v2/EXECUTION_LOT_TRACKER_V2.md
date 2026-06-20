@@ -9,7 +9,7 @@ Horizons autorisés : `FOUNDATION`, `MVP_STABLE`, `MVP_PLUS`, `POST_MVP`, `RELEA
 | Lot | Parent macro-lot | Horizon | Impact API | Statut | Dépend de | Objectif API | Validation API | Rapport |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | STAB-00B | STAB-00 | FOUNDATION | Documentation | DONE | STAB-00 | Synchroniser la roadmap API avec la couche exécutable. | Docs et trackers API alignés. | `docs/roadmap/v2/STAB_00B_ROADMAP_V2_HARDENING_REPORT.md` |
-| QUALITY-00 | QUALITY-00 | FOUNDATION | Oui | TODO | STAB-00B | Baseline CI API : Prisma, build, lint, tests et e2e critiques. | Pipeline reproductible. | À créer |
+| QUALITY-00 | QUALITY-00 | FOUNDATION | Oui | DONE | STAB-00B | Baseline CI API : Prisma, build, lint, tests et e2e critiques. | Pipeline GitHub Actions reproductible sans secrets réels. | `docs/roadmap/v2/QUALITY_00_CI_BASELINE_REPORT.md` |
 | STAB-01A | STAB-01 | MVP_STABLE | Aucun attendu | TODO | STAB-00B | Confirmer que le shell n'a pas besoin de nouvelle route. | API inchangée ou besoin documenté. | Repo app |
 | STAB-01B | STAB-01 | MVP_STABLE | Aucun attendu | TODO | STAB-01A | Confirmer que Home/Hub/Course utilisent les contrats existants. | API inchangée ou besoin documenté. | Repo app |
 | STAB-01C | STAB-01 | MVP_STABLE | Possible | TODO | STAB-01B | Identifier les actions UX qui nécessitent une API. | Aucun bouton `NEEDS_API` sans lot backend. | À créer si API touchée |

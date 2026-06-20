@@ -1,0 +1,65 @@
+name: API CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: api-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: Build, lint, and test API
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      CI: "true"
+      NODE_ENV: test
+      DATABASE_URL: postgresql://revision:revision@localhost:5432/revision?schema=public
+      DOCUMENT_PROCESSING_QUEUE_DISABLED: "true"
+      DOCUMENT_PROCESSING_WORKER_ENABLED: "false"
+      FIREBASE_PROJECT_ID: revision-ci
+      FIREBASE_SERVICE_ACCOUNT_JSON: ""
+      AI_PROVIDER: google
+      GOOGLE_GENAI_API_KEY: local-dev-key
+      GENKIT_MODEL: googleai/gemini-2.5-flash
+      MISTRAL_API_KEY: ""
+      MIMO_API_KEY: ""
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate Prisma schema
+        run: npx prisma validate
+
+      - name: Generate Prisma client
+        run: npx prisma generate
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint
+        run: npm run lint:check
+
+      - name: Test unit suite
+        run: npm test -- --runInBand
+
+      - name: Test e2e suite
+        run: npm run test:e2e -- --runInBand
+
+      - name: Check whitespace
+        run: git diff --check
