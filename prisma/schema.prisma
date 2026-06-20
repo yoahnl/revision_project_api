@@ -16,17 +16,18 @@ model StudentProfile {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  goals    RevisionGoal[]
-  subjects Subject[]
-  courses  Course[]
-  mastery  MasteryState[]
-  sessions ActivitySession[]
-  revisionSessions RevisionSession[]
+  goals                  RevisionGoal[]
+  subjects               Subject[]
+  courses                Course[]
+  mastery                MasteryState[]
+  sessions               ActivitySession[]
+  revisionSessions       RevisionSession[]
   revisionSessionActions RevisionSessionAction[]
-  summaries Summary[]
-  revisionSheets RevisionSheet[]
-  openQuestions OpenQuestion[]
-  openAnswerEvaluations OpenAnswerEvaluation[]
+  summaries              Summary[]
+  revisionSheets         RevisionSheet[]
+  openQuestions          OpenQuestion[]
+  openAnswerEvaluations  OpenAnswerEvaluation[]
+  questionBankItems      QuestionBankItem[]
 }
 
 model RevisionGoal {
@@ -50,21 +51,22 @@ model Subject {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  student        StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  courses        Course[]
-  documents      Document[]
-  knowledgeUnits KnowledgeUnit[]
-  mastery        MasteryState[]
-  sessions       ActivitySession[]
-  revisionSessions RevisionSession[]
+  student                StudentProfile          @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  courses                Course[]
+  documents              Document[]
+  knowledgeUnits         KnowledgeUnit[]
+  mastery                MasteryState[]
+  sessions               ActivitySession[]
+  revisionSessions       RevisionSession[]
   revisionSessionActions RevisionSessionAction[]
-  summaries      Summary[]
-  revisionSheets RevisionSheet[]
-  openQuestions  OpenQuestion[]
-  openAnswerEvaluations OpenAnswerEvaluation[]
+  summaries              Summary[]
+  revisionSheets         RevisionSheet[]
+  openQuestions          OpenQuestion[]
+  openAnswerEvaluations  OpenAnswerEvaluation[]
+  questionBankItems      QuestionBankItem[]
 
-  @@index([studentId])
   @@unique([id, studentId])
+  @@index([studentId])
 }
 
 model Course {
@@ -79,15 +81,16 @@ model Course {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  student          StudentProfile   @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  subject          Subject          @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
-  documents        Document[]
-  revisionSessions RevisionSession[]
+  student           StudentProfile     @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject           Subject            @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  documents         Document[]
+  revisionSessions  RevisionSession[]
+  questionBankItems QuestionBankItem[]
 
+  @@unique([id, studentId])
   @@index([studentId])
   @@index([subjectId, studentId])
   @@index([subjectId, displayOrder])
-  @@unique([id, studentId])
 }
 
 model Document {
@@ -104,21 +107,22 @@ model Document {
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt
 
-  subject        Subject                 @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
-  course         Course?                 @relation(fields: [courseId], references: [id], onDelete: Restrict)
-  chunks         DocumentChunk[]
-  knowledgeUnits KnowledgeUnit[]
-  jobs           DocumentProcessingJob[]
-  summaries      Summary[]
-  revisionSheets RevisionSheet[]
-  openQuestions  OpenQuestion[]
-  revisionSessions RevisionSession[]
+  subject                Subject                 @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  course                 Course?                 @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  chunks                 DocumentChunk[]
+  knowledgeUnits         KnowledgeUnit[]
+  jobs                   DocumentProcessingJob[]
+  summaries              Summary[]
+  revisionSheets         RevisionSheet[]
+  openQuestions          OpenQuestion[]
+  revisionSessions       RevisionSession[]
   revisionSessionActions RevisionSessionAction[]
+  questionBankItems      QuestionBankItem[]
 
+  @@unique([id, subjectId])
   @@index([studentId])
   @@index([subjectId])
   @@index([courseId])
-  @@unique([id, subjectId])
 }
 
 model DocumentProcessingJob {
@@ -133,32 +137,33 @@ model DocumentProcessingJob {
 }
 
 model KnowledgeUnit {
-  id                       String                   @id @default(cuid())
-  subjectId                String
-  documentId               String?
-  title                    String
-  summary                  String
-  difficulty               KnowledgeUnitDifficulty?
-  displayOrder             Int?
-  confidence               Float?
-  extractionPromptVersion  String?
-  extractionSchemaVersion  String?
-  createdAt                DateTime                 @default(now())
-  updatedAt                DateTime                 @updatedAt
+  id                      String                   @id @default(cuid())
+  subjectId               String
+  documentId              String?
+  title                   String
+  summary                 String
+  difficulty              KnowledgeUnitDifficulty?
+  displayOrder            Int?
+  confidence              Float?
+  extractionPromptVersion String?
+  extractionSchemaVersion String?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
 
-  subject  Subject        @relation(fields: [subjectId], references: [id], onDelete: Cascade)
-  document Document?      @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
-  mastery  MasteryState[]
-  questions Question[]
-  sessions ActivitySession[]
-  revisionSessions RevisionSession[]
+  subject                Subject                 @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+  document               Document?               @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
+  mastery                MasteryState[]
+  questions              Question[]
+  questionBankItems      QuestionBankItem[]
+  sessions               ActivitySession[]
+  revisionSessions       RevisionSession[]
   revisionSessionActions RevisionSessionAction[]
-  sources  KnowledgeUnitSource[]
-  openQuestions OpenQuestion[]
+  sources                KnowledgeUnitSource[]
+  openQuestions          OpenQuestion[]
 
+  @@unique([id, subjectId])
   @@index([subjectId])
   @@index([documentId])
-  @@unique([id, subjectId])
 }
 
 model DocumentChunk {
@@ -172,18 +177,91 @@ model DocumentChunk {
   pageNumber Int?
   createdAt  DateTime @default(now())
 
-  document Document              @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
-  sources  KnowledgeUnitSource[]
-  summarySources SummarySource[]
+  document                    Document                     @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sources                     KnowledgeUnitSource[]
+  summarySources              SummarySource[]
   revisionSheetSectionSources RevisionSheetSectionSource[]
-  questionSources QuestionSource[]
-  questionVisualSources QuestionVisualSource[]
-  openQuestionSources OpenQuestionSource[]
+  questionSources             QuestionSource[]
+  questionBankItemSources     QuestionBankItemSource[]
+  questionVisualSources       QuestionVisualSource[]
+  openQuestionSources         OpenQuestionSource[]
 
-  @@index([documentId])
-  @@index([subjectId])
   @@unique([documentId, index])
   @@unique([id, subjectId])
+  @@index([documentId])
+  @@index([subjectId])
+}
+
+model QuestionBankItem {
+  id               String                   @id @default(cuid())
+  studentId        String
+  subjectId        String
+  courseId         String
+  documentId       String?
+  knowledgeUnitId  String
+  status           QuestionBankItemStatus   @default(ACTIVE)
+  prompt           String
+  difficulty       KnowledgeUnitDifficulty?
+  choices          Json
+  selectionMode    QuestionSelectionMode    @default(SINGLE)
+  minSelections    Int?
+  maxSelections    Int?
+  correctChoiceId  String?
+  correctChoiceIds Json?
+  explanation      String
+  fingerprint      String
+  askedCount       Int                      @default(0)
+  lastAskedAt      DateTime?
+  flaggedAt        DateTime?
+  flagReason       String?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  student          StudentProfile           @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject          Subject                  @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  course           Course                   @relation(fields: [courseId, studentId], references: [id, studentId], onDelete: Cascade)
+  document         Document?                @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
+  knowledgeUnit    KnowledgeUnit            @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sessionQuestions Question[]
+  sources          QuestionBankItemSource[]
+  visuals          QuestionBankItemVisual[]
+
+  @@unique([courseId, fingerprint])
+  @@unique([id, subjectId])
+  @@index([studentId])
+  @@index([subjectId])
+  @@index([courseId, status])
+  @@index([knowledgeUnitId])
+  @@index([askedCount])
+}
+
+model QuestionBankItemSource {
+  questionBankItemId String
+  subjectId          String
+  chunkId            String
+  relevanceScore     Float?
+  createdAt          DateTime @default(now())
+
+  questionBankItem QuestionBankItem @relation(fields: [questionBankItemId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  chunk            DocumentChunk    @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
+
+  @@id([questionBankItemId, chunkId])
+  @@index([chunkId])
+  @@index([subjectId])
+}
+
+model QuestionBankItemVisual {
+  id                 String             @id @default(cuid())
+  questionBankItemId String
+  type               QuestionVisualType
+  displayOrder       Int                @default(0)
+  payload            Json
+  createdAt          DateTime           @default(now())
+
+  questionBankItem QuestionBankItem @relation(fields: [questionBankItemId], references: [id], onDelete: Cascade)
+
+  @@unique([questionBankItemId, displayOrder])
+  @@index([questionBankItemId])
 }
 
 model KnowledgeUnitSource {
@@ -202,36 +280,36 @@ model KnowledgeUnitSource {
 }
 
 model Summary {
-  id              String                      @id @default(cuid())
-  documentId      String
-  subjectId       String
-  studentId       String
-  status          StudyArtifactStatus
-  title           String?
-  content         String?
-  keyPoints       Json?
-  limits          String?
-  createdAt       DateTime                    @default(now())
-  updatedAt       DateTime                    @updatedAt
-  generatedAt     DateTime
-  flowName        String
-  provider        String
-  model           String
-  promptVersion   String
-  schemaVersion   String
-  inputSize       Int?
-  sourceStrategy  StudyArtifactSourceStrategy
-  errorCode       String?
+  id             String                      @id @default(cuid())
+  documentId     String
+  subjectId      String
+  studentId      String
+  status         StudyArtifactStatus
+  title          String?
+  content        String?
+  keyPoints      Json?
+  limits         String?
+  createdAt      DateTime                    @default(now())
+  updatedAt      DateTime                    @updatedAt
+  generatedAt    DateTime
+  flowName       String
+  provider       String
+  model          String
+  promptVersion  String
+  schemaVersion  String
+  inputSize      Int?
+  sourceStrategy StudyArtifactSourceStrategy
+  errorCode      String?
 
-  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  subject Subject        @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
-  document Document      @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
-  sources SummarySource[]
+  student  StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject  Subject         @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  document Document        @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sources  SummarySource[]
 
-  @@index([studentId])
-  @@index([subjectId])
   @@unique([documentId])
   @@unique([id, subjectId])
+  @@index([studentId])
+  @@index([subjectId])
 }
 
 model SummarySource {
@@ -273,15 +351,15 @@ model RevisionSheet {
   sourceStrategy      StudyArtifactSourceStrategy
   errorCode           String?
 
-  student StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  subject Subject        @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
-  document Document      @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  student  StudentProfile         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject  Subject                @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  document Document               @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: Cascade)
   sections RevisionSheetSection[]
 
-  @@index([studentId])
-  @@index([subjectId])
   @@unique([documentId])
   @@unique([id, subjectId])
+  @@index([studentId])
+  @@index([subjectId])
 }
 
 model RevisionSheetSection {
@@ -293,12 +371,12 @@ model RevisionSheetSection {
   content         String
   createdAt       DateTime @default(now())
 
-  revisionSheet RevisionSheet @relation(fields: [revisionSheetId, subjectId], references: [id, subjectId], onDelete: Cascade)
-  sources RevisionSheetSectionSource[]
+  revisionSheet RevisionSheet                @relation(fields: [revisionSheetId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  sources       RevisionSheetSectionSource[]
 
-  @@index([subjectId])
   @@unique([revisionSheetId, displayOrder])
   @@unique([id, subjectId])
+  @@index([subjectId])
 }
 
 model RevisionSheetSectionSource {
@@ -326,7 +404,7 @@ model MasteryState {
 
   student       StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
   subject       Subject        @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
-  knowledgeUnit KnowledgeUnit   @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  knowledgeUnit KnowledgeUnit  @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
 
   @@id([studentId, knowledgeUnitId])
   @@index([subjectId, studentId])
@@ -334,69 +412,72 @@ model MasteryState {
 }
 
 model ActivitySession {
-  id              String         @id @default(cuid())
-  studentId       String
-  subjectId       String
-  knowledgeUnitId String
-  version         Int            @default(1)
-  documentId      String?
+  id                      String         @id @default(cuid())
+  studentId               String
+  subjectId               String
+  knowledgeUnitId         String
+  version                 Int            @default(1)
+  documentId              String?
   generationFlowName      String?
   generationProvider      String?
   generationModel         String?
   generationPromptVersion String?
   generationSchemaVersion String?
   generationInputSize     Int?
-  type            ActivityType
-  status          ActivityStatus @default(STARTED)
-  createdAt       DateTime       @default(now())
-  completedAt     DateTime?
+  type                    ActivityType
+  status                  ActivityStatus @default(STARTED)
+  createdAt               DateTime       @default(now())
+  completedAt             DateTime?
 
-  student       StudentProfile @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  subject       Subject        @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
-  knowledgeUnit KnowledgeUnit  @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
-  questions     Question[]
-  result        ActivityResult?
-  answers       QuestionAnswer[]
-  openQuestion  OpenQuestion?
-  openAnswerEvaluation OpenAnswerEvaluation?
+  student                   StudentProfile             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject                   Subject                    @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  knowledgeUnit             KnowledgeUnit              @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  questions                 Question[]
+  result                    ActivityResult?
+  answers                   QuestionAnswer[]
+  openQuestion              OpenQuestion?
+  openAnswerEvaluation      OpenAnswerEvaluation?
   richClosedExercisePayload RichClosedExercisePayload?
-  richClosedExerciseResult RichClosedExerciseResult?
-  revisionSessionActions RevisionSessionAction[]
+  richClosedExerciseResult  RichClosedExerciseResult?
+  revisionSessionActions    RevisionSessionAction[]
 
+  @@unique([id, knowledgeUnitId])
   @@index([studentId])
   @@index([subjectId])
   @@index([documentId])
   @@index([knowledgeUnitId])
-  @@unique([id, knowledgeUnitId])
 }
 
 model Question {
-  id              String @id @default(cuid())
-  sessionId       String
-  subjectId       String?
-  documentId      String?
-  knowledgeUnitId String
-  prompt          String
-  difficulty      KnowledgeUnitDifficulty?
-  displayOrder    Int    @default(0)
-  choices         Json
-  selectionMode   QuestionSelectionMode @default(SINGLE)
-  minSelections   Int?
-  maxSelections   Int?
-  correctChoiceId String?
+  id               String                   @id @default(cuid())
+  sessionId        String
+  bankQuestionId   String?
+  subjectId        String?
+  documentId       String?
+  knowledgeUnitId  String
+  prompt           String
+  difficulty       KnowledgeUnitDifficulty?
+  displayOrder     Int                      @default(0)
+  choices          Json
+  selectionMode    QuestionSelectionMode    @default(SINGLE)
+  minSelections    Int?
+  maxSelections    Int?
+  correctChoiceId  String?
   correctChoiceIds Json?
-  explanation     String
+  explanation      String
 
-  session       ActivitySession @relation(fields: [sessionId, knowledgeUnitId], references: [id, knowledgeUnitId], onDelete: Cascade)
-  knowledgeUnit KnowledgeUnit   @relation(fields: [knowledgeUnitId], references: [id], onDelete: Cascade)
+  session       ActivitySession   @relation(fields: [sessionId, knowledgeUnitId], references: [id, knowledgeUnitId], onDelete: Cascade)
+  bankQuestion  QuestionBankItem? @relation(fields: [bankQuestionId], references: [id], onDelete: NoAction)
+  knowledgeUnit KnowledgeUnit     @relation(fields: [knowledgeUnitId], references: [id], onDelete: Cascade)
   sources       QuestionSource[]
   answers       QuestionAnswer[]
   visuals       QuestionVisual[]
 
+  @@unique([id, subjectId])
   @@index([sessionId])
+  @@index([bankQuestionId])
   @@index([subjectId])
   @@index([documentId])
-  @@unique([id, subjectId])
 }
 
 model QuestionSource {
@@ -406,7 +487,7 @@ model QuestionSource {
   relevanceScore Float?
   createdAt      DateTime @default(now())
 
-  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  question Question      @relation(fields: [questionId], references: [id], onDelete: Cascade)
   chunk    DocumentChunk @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
 
   @@id([questionId, chunkId])
@@ -422,11 +503,11 @@ model QuestionVisual {
   payload      Json
   createdAt    DateTime           @default(now())
 
-  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  question Question               @relation(fields: [questionId], references: [id], onDelete: Cascade)
   sources  QuestionVisualSource[]
 
-  @@index([questionId])
   @@unique([questionId, displayOrder])
+  @@index([questionId])
 }
 
 model QuestionVisualSource {
@@ -437,7 +518,7 @@ model QuestionVisualSource {
   createdAt      DateTime @default(now())
 
   visual QuestionVisual @relation(fields: [visualId], references: [id], onDelete: Cascade)
-  chunk  DocumentChunk   @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  chunk  DocumentChunk  @relation(fields: [chunkId, subjectId], references: [id, subjectId], onDelete: Cascade)
 
   @@id([visualId, chunkId])
   @@index([chunkId])
@@ -452,8 +533,8 @@ model QuestionAnswer {
   isCorrect        Boolean
   createdAt        DateTime @default(now())
 
-  session  ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  question Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  session         ActivitySession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  question        Question               @relation(fields: [questionId], references: [id], onDelete: Cascade)
   selectedChoices QuestionAnswerChoice[]
 
   @@unique([sessionId, questionId])
@@ -494,19 +575,19 @@ model OpenQuestion {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  session       ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  student       StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
-  subject       Subject         @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
-  document      Document?       @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
-  knowledgeUnit KnowledgeUnit   @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
+  session       ActivitySession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student       StudentProfile         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  subject       Subject                @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
+  document      Document?              @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
+  knowledgeUnit KnowledgeUnit          @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: Cascade)
   sources       OpenQuestionSource[]
   evaluations   OpenAnswerEvaluation[]
 
+  @@unique([id, subjectId])
   @@index([studentId])
   @@index([subjectId])
   @@index([documentId])
   @@index([knowledgeUnitId])
-  @@unique([id, subjectId])
 }
 
 model OpenQuestionSource {
@@ -614,12 +695,12 @@ model RevisionSession {
   knowledgeUnit KnowledgeUnit?          @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: NoAction)
   actions       RevisionSessionAction[]
 
+  @@unique([id, studentId])
   @@index([studentId])
   @@index([subjectId])
   @@index([courseId])
   @@index([documentId])
   @@index([knowledgeUnitId])
-  @@unique([id, studentId])
 }
 
 model RevisionSessionAction {
@@ -738,4 +819,10 @@ enum QuestionVisualType {
   IMAGE
   CHART
   DIAGRAM
+}
+
+enum QuestionBankItemStatus {
+  ACTIVE
+  FLAGGED
+  ARCHIVED
 }

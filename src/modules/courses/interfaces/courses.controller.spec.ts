@@ -12,6 +12,8 @@ import {
 import {
   CourseQuickRevisionGenerationFailedError,
   CourseQuickRevisionKnowledgeUnitNotReadyError,
+  CourseQuickRevisionQuestionCountInvalidError,
+  CourseQuickRevisionQuestionsPreparingError,
   CourseQuickRevisionSourceNotReadyError,
   StartCourseQuickRevisionSessionUseCase,
 } from '../application/start-course-quick-revision-session.use-case';
@@ -357,14 +359,16 @@ describe('CoursesController', () => {
     ).rejects.toThrow(ConflictException);
   });
 
-  it('starts a course quick revision session with URL courseId only', async () => {
+  it('starts a course quick revision session with an optional questionCount', async () => {
     const { controller, startCourseQuickRevisionSession } = createController();
     startCourseQuickRevisionSession.execute.mockResolvedValue(
       revisionSessionResponse(),
     );
 
     await expect(
-      controller.startQuickRevisionSession(currentStudent, ' course-1 '),
+      controller.startQuickRevisionSession(currentStudent, ' course-1 ', {
+        questionCount: 20,
+      }),
     ).resolves.toMatchObject({
       session: {
         id: 'session-1',
@@ -379,10 +383,26 @@ describe('CoursesController', () => {
     expect(startCourseQuickRevisionSession.execute).toHaveBeenCalledWith({
       studentId: 'student-1',
       courseId: 'course-1',
+      questionCount: 20,
     });
   });
 
-  it('rejects client-owned course quick revision fields', () => {
+  it('defaults course quick revision questionCount when omitted', async () => {
+    const { controller, startCourseQuickRevisionSession } = createController();
+    startCourseQuickRevisionSession.execute.mockResolvedValue(
+      revisionSessionResponse(),
+    );
+
+    await controller.startQuickRevisionSession(currentStudent, 'course-1');
+
+    expect(startCourseQuickRevisionSession.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      questionCount: undefined,
+    });
+  });
+
+  it('rejects client-owned or unsupported course quick revision fields', () => {
     const { controller, startCourseQuickRevisionSession } = createController();
 
     expect(() =>
@@ -390,6 +410,27 @@ describe('CoursesController', () => {
         subjectId: 'subject-1',
       }),
     ).toThrow(BadRequestException);
+
+    expect(() =>
+      controller.startQuickRevisionSession(currentStudent, 'course-1', {
+        questionCount: 10,
+        documentId: 'document-1',
+      }),
+    ).toThrow(BadRequestException);
+
+    expect(() =>
+      controller.startQuickRevisionSession(currentStudent, 'course-1', {
+        unexpected: true,
+      }),
+    ).toThrow(BadRequestException);
+
+    for (const questionCount of [4, 31, 10.5, '10']) {
+      expect(() =>
+        controller.startQuickRevisionSession(currentStudent, 'course-1', {
+          questionCount,
+        }),
+      ).toThrow(BadRequestException);
+    }
 
     expect(startCourseQuickRevisionSession.execute).not.toHaveBeenCalled();
   });
@@ -412,6 +453,22 @@ describe('CoursesController', () => {
     await expect(
       controller.startQuickRevisionSession(currentStudent, 'course-1'),
     ).rejects.toThrow(ConflictException);
+
+    startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
+      new CourseQuickRevisionQuestionsPreparingError(),
+    );
+
+    await expect(
+      controller.startQuickRevisionSession(currentStudent, 'course-1'),
+    ).rejects.toThrow(ConflictException);
+
+    startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
+      new CourseQuickRevisionQuestionCountInvalidError(),
+    );
+
+    await expect(
+      controller.startQuickRevisionSession(currentStudent, 'course-1'),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('maps course quick revision generation failures to 409', async () => {

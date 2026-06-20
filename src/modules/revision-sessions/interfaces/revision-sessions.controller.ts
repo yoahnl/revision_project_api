@@ -14,6 +14,7 @@ import { CurrentStudent } from '../../auth/interfaces/current-student.decorator'
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import type { RevisionSessionPreferredAction } from '../domain/revision-session.entity';
 import { CompleteQuickRevisionSessionUseCase } from '../application/complete-quick-revision-session.use-case';
+import { FlagRevisionSessionQuestionUseCase } from '../application/flag-revision-session-question.use-case';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
 import { GetRevisionSessionResultUseCase } from '../application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
@@ -24,6 +25,10 @@ class StartRevisionSessionDto {
   documentId?: string;
   knowledgeUnitId?: string;
   preferredAction?: string;
+}
+
+class FlagRevisionSessionQuestionDto {
+  reason?: string;
 }
 
 interface ValidatedStartRevisionSessionBody {
@@ -42,6 +47,7 @@ export class RevisionSessionsController {
     private readonly requestNextAction: RequestNextRevisionSessionActionUseCase,
     private readonly completeQuickRevisionSession: CompleteQuickRevisionSessionUseCase,
     private readonly getRevisionSessionResult: GetRevisionSessionResultUseCase,
+    private readonly flagRevisionSessionQuestion: FlagRevisionSessionQuestionUseCase,
   ) {}
 
   @Post()
@@ -145,6 +151,32 @@ export class RevisionSessionsController {
         normalizeRevisionSessionError(error);
       });
   }
+
+  @Post(':sessionId/questions/:questionId/flag')
+  flagQuestion(
+    @CurrentStudent() student: { id: string },
+    @Param('sessionId') sessionId: string,
+    @Param('questionId') questionId: string,
+    @Body() body: FlagRevisionSessionQuestionDto | undefined,
+  ) {
+    const validatedSessionId = validateRequiredId(
+      sessionId,
+      'Revision session id',
+    );
+    const validatedQuestionId = validateRequiredId(questionId, 'Question id');
+    const reason = validateFlagQuestionBody(body);
+
+    return this.flagRevisionSessionQuestion
+      .execute({
+        studentId: student.id,
+        sessionId: validatedSessionId,
+        questionId: validatedQuestionId,
+        reason,
+      })
+      .catch((error: unknown) => {
+        normalizeRevisionSessionError(error);
+      });
+  }
 }
 
 function validateStartRevisionSessionBody(
@@ -209,13 +241,50 @@ function validateEmptyBody(input: Record<string, unknown> | undefined): void {
   }
 }
 
+function validateFlagQuestionBody(
+  input: FlagRevisionSessionQuestionDto | undefined,
+): string | null {
+  if (!input) {
+    return null;
+  }
+
+  const unknownField = Object.keys(input).find((field) => field !== 'reason');
+
+  if (unknownField) {
+    throw new BadRequestException(
+      'Revision session flag body only accepts reason',
+    );
+  }
+
+  if (input.reason === undefined || input.reason === null) {
+    return null;
+  }
+
+  if (typeof input.reason !== 'string') {
+    throw new BadRequestException('Revision session flag reason invalid');
+  }
+
+  const trimmed = input.reason.trim();
+
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.length > 240) {
+    throw new BadRequestException('Revision session flag reason too long');
+  }
+
+  return trimmed;
+}
+
 function normalizeRevisionSessionError(error: unknown): never {
   if (error instanceof Error) {
     if (
       error.message === 'Revision subject not found' ||
       error.message === 'Revision document not found' ||
       error.message === 'Revision knowledge unit not found' ||
-      error.message === 'Revision session not found'
+      error.message === 'Revision session not found' ||
+      error.message === 'Revision session question not found'
     ) {
       throw new NotFoundException(error.message);
     }
@@ -245,7 +314,8 @@ function normalizeRevisionSessionError(error: unknown): never {
       error.message === 'Revision session activity not found' ||
       error.message === 'Revision session activity not submitted' ||
       error.message === 'Revision session result not found' ||
-      error.message === 'Revision session not completed'
+      error.message === 'Revision session not completed' ||
+      error.message === 'Revision session question cannot be flagged'
     ) {
       throw new ConflictException(error.message);
     }

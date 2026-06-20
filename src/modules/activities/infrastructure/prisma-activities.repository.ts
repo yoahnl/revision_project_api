@@ -68,6 +68,7 @@ type QuestionSourceRecord = {
 
 type QuestionRecord = {
   id: string;
+  bankQuestionId?: string | null;
   knowledgeUnitId: string;
   prompt: string;
   choices: unknown;
@@ -1151,6 +1152,7 @@ function buildQuestionCreateData(input: {
       : QuestionSelectionMode.SINGLE;
   const data: Prisma.QuestionUncheckedCreateInput = {
     sessionId: input.sessionId,
+    bankQuestionId: input.question.bankQuestionId,
     knowledgeUnitId: input.knowledgeUnitId,
     prompt: input.question.prompt,
     choices: toQuestionChoicesJson(input.question.choices),

@@ -27,8 +27,14 @@ import {
   GetSubjectProgressUseCase,
 } from '../application/course-progress.use-case';
 import {
+  QUICK_QUESTION_BANK_MAX_QUESTION_COUNT,
+  QUICK_QUESTION_BANK_MIN_QUESTION_COUNT,
+} from '../../activities/application/question-bank.service';
+import {
   CourseQuickRevisionGenerationFailedError,
   CourseQuickRevisionKnowledgeUnitNotReadyError,
+  CourseQuickRevisionQuestionCountInvalidError,
+  CourseQuickRevisionQuestionsPreparingError,
   CourseQuickRevisionSourceNotReadyError,
   StartCourseQuickRevisionSessionUseCase,
 } from '../application/start-course-quick-revision-session.use-case';
@@ -269,12 +275,13 @@ export class CoursesController {
     @Param('courseId') courseId: string,
     @Body() body: Record<string, unknown> = {},
   ) {
-    rejectClientOwnedQuickRevisionFields(body);
+    const validatedBody = validateQuickRevisionBody(body);
 
     return this.startCourseQuickRevisionSessionUseCase
       .execute({
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
+        questionCount: validatedBody.questionCount,
       })
       .catch(normalizeCourseError);
   }
@@ -376,9 +383,9 @@ function rejectClientOwnedUploadFields(body: Record<string, unknown> = {}) {
   }
 }
 
-function rejectClientOwnedQuickRevisionFields(
-  body: Record<string, unknown> = {},
-) {
+function validateQuickRevisionBody(body: Record<string, unknown> = {}): {
+  questionCount?: number;
+} {
   if (
     'studentId' in body ||
     'subjectId' in body ||
@@ -390,6 +397,36 @@ function rejectClientOwnedQuickRevisionFields(
       'Course quick revision only accepts courseId from the URL',
     );
   }
+
+  const allowedFields = new Set(['questionCount']);
+  const unknownField = Object.keys(body).find(
+    (field) => !allowedFields.has(field),
+  );
+
+  if (unknownField) {
+    throw new BadRequestException(
+      'Course quick revision only accepts questionCount in the body',
+    );
+  }
+
+  if (!('questionCount' in body)) {
+    return {};
+  }
+
+  const questionCount = body.questionCount;
+
+  if (
+    typeof questionCount !== 'number' ||
+    !Number.isInteger(questionCount) ||
+    questionCount < QUICK_QUESTION_BANK_MIN_QUESTION_COUNT ||
+    questionCount > QUICK_QUESTION_BANK_MAX_QUESTION_COUNT
+  ) {
+    throw new BadRequestException(
+      'Course quick revision questionCount must be an integer between 5 and 30',
+    );
+  }
+
+  return { questionCount };
 }
 
 function normalizeCourseError(error: unknown): never {
@@ -408,9 +445,14 @@ function normalizeCourseError(error: unknown): never {
   if (
     error instanceof CourseQuickRevisionSourceNotReadyError ||
     error instanceof CourseQuickRevisionKnowledgeUnitNotReadyError ||
-    error instanceof CourseQuickRevisionGenerationFailedError
+    error instanceof CourseQuickRevisionGenerationFailedError ||
+    error instanceof CourseQuickRevisionQuestionsPreparingError
   ) {
     throw new ConflictException(error.message);
+  }
+
+  if (error instanceof CourseQuickRevisionQuestionCountInvalidError) {
+    throw new BadRequestException(error.message);
   }
 
   if (

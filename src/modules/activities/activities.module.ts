@@ -17,6 +17,7 @@ import { StartOpenQuestionActivityUseCase } from './application/start-open-quest
 import { StartNextActivityUseCase } from './application/start-next-activity.use-case';
 import { SubmitOpenAnswerUseCase } from './application/submit-open-answer.use-case';
 import { SubmitActivityResultUseCase } from './application/submit-activity-result.use-case';
+import { QuestionBankService } from './application/question-bank.service';
 import { GenkitDiagnosticQuizGenerator } from './infrastructure/genkit-diagnostic-quiz.generator';
 import { GenkitOpenAnswerEvaluator } from './infrastructure/genkit-open-answer.evaluator';
 import { GenkitOpenQuestionGenerator } from './infrastructure/genkit-open-question.generator';
@@ -37,6 +38,7 @@ import { ActivitiesController } from './interfaces/activities.controller';
     GetRichClosedExerciseResultUseCase,
     SubmitActivityResultUseCase,
     SubmitOpenAnswerUseCase,
+    QuestionBankService,
     {
       provide: ACTIVITIES_REPOSITORY,
       useClass: PrismaActivitiesRepository,
@@ -58,6 +60,10 @@ import { ActivitiesController } from './interfaces/activities.controller';
       useClass: GenkitRichClosedQuestionGenerator,
     },
   ],
-  exports: [StartNextActivityUseCase, StartOpenQuestionActivityUseCase],
+  exports: [
+    StartNextActivityUseCase,
+    StartOpenQuestionActivityUseCase,
+    QuestionBankService,
+  ],
 })
 export class ActivitiesModule {}

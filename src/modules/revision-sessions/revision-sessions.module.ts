@@ -4,6 +4,7 @@ import { AuthModule } from '../auth/auth.module';
 import { AiModule } from '../ai/ai.module';
 import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
 import { CompleteQuickRevisionSessionUseCase } from './application/complete-quick-revision-session.use-case';
+import { FlagRevisionSessionQuestionUseCase } from './application/flag-revision-session-question.use-case';
 import { GetRevisionSessionUseCase } from './application/get-revision-session.use-case';
 import { GetRevisionSessionResultUseCase } from './application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from './application/request-next-revision-session-action.use-case';
@@ -22,6 +23,7 @@ import { RevisionSessionsController } from './interfaces/revision-sessions.contr
     GetRevisionSessionUseCase,
     CompleteQuickRevisionSessionUseCase,
     GetRevisionSessionResultUseCase,
+    FlagRevisionSessionQuestionUseCase,
     RequestNextRevisionSessionActionUseCase,
     {
       provide: REVISION_COACH_NEXT_ACTION_GENERATOR,

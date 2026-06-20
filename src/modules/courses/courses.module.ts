@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
+import { ActivitiesModule } from '../activities/activities.module';
 import { AuthModule } from '../auth/auth.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { JobsModule } from '../jobs/jobs.module';
@@ -29,6 +30,7 @@ import { CoursesController } from './interfaces/courses.controller';
 
 @Module({
   imports: [
+    ActivitiesModule,
     AuthModule,
     DocumentsModule,
     JobsModule,

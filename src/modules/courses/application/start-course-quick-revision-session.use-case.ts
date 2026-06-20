@@ -1,12 +1,16 @@
 import { Inject, Injectable } from '@nestjs/common';
+import {
+  QUICK_QUESTION_BANK_COUNT_INVALID,
+  QUICK_QUESTION_BANK_INSUFFICIENT_QUESTIONS,
+  QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY,
+  QuestionBankService,
+} from '../../activities/application/question-bank.service';
 import type { RevisionSessionResponseDto } from '../../revision-sessions/domain/revision-session.entity';
 import { StartRevisionSessionUseCase } from '../../revision-sessions/application/start-revision-session.use-case';
 import {
   COURSES_REPOSITORY,
   type CoursesRepository,
 } from './courses.repository';
-
-const COURSE_QUICK_REVISION_QUESTION_COUNT = 6;
 
 export class CourseQuickRevisionSourceNotReadyError extends Error {
   readonly code = 'COURSE_QUICK_REVISION_SOURCE_NOT_READY';
@@ -32,17 +36,37 @@ export class CourseQuickRevisionGenerationFailedError extends Error {
   }
 }
 
+export class CourseQuickRevisionQuestionCountInvalidError extends Error {
+  readonly code = 'COURSE_QUICK_REVISION_QUESTION_COUNT_INVALID';
+
+  constructor() {
+    super(
+      'Course quick revision questionCount must be an integer between 5 and 30',
+    );
+  }
+}
+
+export class CourseQuickRevisionQuestionsPreparingError extends Error {
+  readonly code = 'COURSE_QUICK_REVISION_QUESTIONS_PREPARING';
+
+  constructor() {
+    super('Course quick revision questions are being prepared');
+  }
+}
+
 @Injectable()
 export class StartCourseQuickRevisionSessionUseCase {
   constructor(
     @Inject(COURSES_REPOSITORY)
     private readonly coursesRepository: CoursesRepository,
     private readonly startRevisionSession: StartRevisionSessionUseCase,
+    private readonly questionBank: QuestionBankService,
   ) {}
 
   async execute(input: {
     studentId: string;
     courseId: string;
+    questionCount?: number;
   }): Promise<RevisionSessionResponseDto> {
     const course =
       await this.coursesRepository.findCourseOwnershipContext(input);
@@ -77,6 +101,16 @@ export class StartCourseQuickRevisionSessionUseCase {
     }
 
     try {
+      const diagnosticQuizActivity =
+        await this.questionBank.createCourseQuickDiagnosticQuiz({
+          studentId: input.studentId,
+          subjectId: course.subjectId,
+          courseId: course.courseId,
+          documentId: readySource.documentId,
+          knowledgeUnitId: knowledgeUnit.id,
+          questionCount: input.questionCount,
+        });
+
       return await this.startRevisionSession.execute({
         studentId: input.studentId,
         subjectId: course.subjectId,
@@ -84,9 +118,24 @@ export class StartCourseQuickRevisionSessionUseCase {
         documentId: readySource.documentId,
         knowledgeUnitId: knowledgeUnit.id,
         preferredAction: 'diagnostic_quiz',
-        questionCount: COURSE_QUICK_REVISION_QUESTION_COUNT,
+        diagnosticQuizActivity,
       });
     } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === QUICK_QUESTION_BANK_COUNT_INVALID
+      ) {
+        throw new CourseQuickRevisionQuestionCountInvalidError();
+      }
+
+      if (
+        error instanceof Error &&
+        (error.message === QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY ||
+          error.message === QUICK_QUESTION_BANK_INSUFFICIENT_QUESTIONS)
+      ) {
+        throw new CourseQuickRevisionQuestionsPreparingError();
+      }
+
       // The Course API has already verified ownership, READY source and KU.
       // Any downstream failure here means the quick quiz could not be built.
       throw new CourseQuickRevisionGenerationFailedError(error);

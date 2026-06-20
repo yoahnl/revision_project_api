@@ -54,6 +54,7 @@ import { GetDocumentUseCase } from '../src/modules/documents/application/get-doc
 import { ListDocumentKnowledgeUnitsUseCase } from '../src/modules/documents/application/list-document-knowledge-units.use-case';
 import { GetTodayPlanUseCase } from '../src/modules/revision/application/get-today-plan.use-case';
 import { CompleteQuickRevisionSessionUseCase } from '../src/modules/revision-sessions/application/complete-quick-revision-session.use-case';
+import { FlagRevisionSessionQuestionUseCase } from '../src/modules/revision-sessions/application/flag-revision-session-question.use-case';
 import { GetRevisionSessionUseCase } from '../src/modules/revision-sessions/application/get-revision-session.use-case';
 import { GetRevisionSessionResultUseCase } from '../src/modules/revision-sessions/application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../src/modules/revision-sessions/application/request-next-revision-session-action.use-case';
@@ -158,6 +159,10 @@ describe('Critical demo paths (e2e)', () => {
         .expect(401);
       await request(server)
         .post('/courses/course-1/revision-sessions/quick')
+        .send({})
+        .expect(401);
+      await request(server)
+        .post('/revision-sessions/session-1/questions/question-1/flag')
         .send({})
         .expect(401);
       await request(server)
@@ -548,7 +553,7 @@ describe('Critical demo paths (e2e)', () => {
     it('starts a course-level quick revision session without client-owned ids', async () => {
       const response = await request(app.getHttpServer())
         .post('/courses/course-1/revision-sessions/quick')
-        .send({})
+        .send({ questionCount: 20 })
         .expect(201);
 
       expect(
@@ -558,6 +563,7 @@ describe('Critical demo paths (e2e)', () => {
           {
             studentId: currentStudent.id,
             courseId: 'course-1',
+            questionCount: 20,
           },
         ],
       ]);
@@ -593,6 +599,11 @@ describe('Critical demo paths (e2e)', () => {
         })
         .expect(400);
 
+      await request(app.getHttpServer())
+        .post('/courses/course-1/revision-sessions/quick')
+        .send({ questionCount: 31 })
+        .expect(400);
+
       mocks.startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
         new CourseQuickRevisionSourceNotReadyError(),
       );
@@ -610,6 +621,23 @@ describe('Critical demo paths (e2e)', () => {
         .post('/courses/course-without-ready-unit/revision-sessions/quick')
         .send({})
         .expect(409);
+    });
+
+    it('flags a bank-backed revision session question without exposing the bank id', async () => {
+      await request(app.getHttpServer())
+        .post('/revision-sessions/revision-session-1/questions/question-1/flag')
+        .send({ reason: 'ambiguë' })
+        .expect(201)
+        .expect(({ body }) => {
+          expect(body).toEqual({ status: 'flagged' });
+        });
+
+      expect(mocks.flagRevisionSessionQuestion.execute).toHaveBeenCalledWith({
+        studentId: currentStudent.id,
+        sessionId: 'revision-session-1',
+        questionId: 'question-1',
+        reason: 'ambiguë',
+      });
     });
 
     it('maps missing documents to a clean 404 response', async () => {
@@ -2316,6 +2344,8 @@ async function createAuthenticatedApp(
     .useValue(mocks.getRevisionSessionResult)
     .overrideProvider(RequestNextRevisionSessionActionUseCase)
     .useValue(mocks.requestNextAction)
+    .overrideProvider(FlagRevisionSessionQuestionUseCase)
+    .useValue(mocks.flagRevisionSessionQuestion)
     .compile();
 
   const app = moduleFixture.createNestApplication();
@@ -2424,6 +2454,9 @@ function createCriticalPathMocks() {
     },
     requestNextAction: {
       execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
+    },
+    flagRevisionSessionQuestion: {
+      execute: jest.fn().mockResolvedValue({ status: 'flagged' }),
     },
   };
 }

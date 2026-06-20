@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import type { DiagnosticQuizActivity } from '../../activities/application/activities.repository';
 import { StartNextActivityUseCase } from '../../activities/application/start-next-activity.use-case';
 import { StartOpenQuestionActivityUseCase } from '../../activities/application/start-open-question-activity.use-case';
 import type {
@@ -30,6 +31,7 @@ export class StartRevisionSessionUseCase {
     knowledgeUnitId?: string;
     preferredAction?: RevisionSessionPreferredAction;
     questionCount?: number;
+    diagnosticQuizActivity?: DiagnosticQuizActivity;
   }): Promise<RevisionSessionResponseDto> {
     const actionKind = resolveInitialActionKind(input);
 
@@ -83,14 +85,16 @@ export class StartRevisionSessionUseCase {
       });
     }
 
-    const activity = await this.startNextActivity.execute({
-      studentId: input.studentId,
-      subjectId: context.subjectId,
-      knowledgeUnitId: context.knowledgeUnitId ?? undefined,
-      ...(input.questionCount !== undefined
-        ? { questionCount: input.questionCount }
-        : {}),
-    });
+    const activity =
+      input.diagnosticQuizActivity ??
+      (await this.startNextActivity.execute({
+        studentId: input.studentId,
+        subjectId: context.subjectId,
+        knowledgeUnitId: context.knowledgeUnitId ?? undefined,
+        ...(input.questionCount !== undefined
+          ? { questionCount: input.questionCount }
+          : {}),
+      }));
 
     return this.createSessionWithPayload({
       input,
