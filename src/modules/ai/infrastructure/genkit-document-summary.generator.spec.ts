@@ -57,6 +57,8 @@ describe('GenkitDocumentSummaryGenerator', () => {
   const originalGoogleApiKey = process.env.GOOGLE_GENAI_API_KEY;
   const originalMistralApiKey = process.env.MISTRAL_API_KEY;
   const originalMistralModel = process.env.MISTRAL_MODEL;
+  const originalMimoApiKey = process.env.MIMO_API_KEY;
+  const originalMimoModel = process.env.MIMO_MODEL;
   const originalMistralFallbackModel = process.env.MISTRAL_FALLBACK_MODEL;
   const originalMistralSummaryFallbackModel =
     process.env.MISTRAL_SUMMARY_FALLBACK_MODEL;
@@ -69,6 +71,8 @@ describe('GenkitDocumentSummaryGenerator', () => {
     restoreEnv('GOOGLE_GENAI_API_KEY', originalGoogleApiKey);
     restoreEnv('MISTRAL_API_KEY', originalMistralApiKey);
     restoreEnv('MISTRAL_MODEL', originalMistralModel);
+    restoreEnv('MIMO_API_KEY', originalMimoApiKey);
+    restoreEnv('MIMO_MODEL', originalMimoModel);
     restoreEnv('MISTRAL_FALLBACK_MODEL', originalMistralFallbackModel);
     restoreEnv(
       'MISTRAL_SUMMARY_FALLBACK_MODEL',
@@ -291,6 +295,57 @@ describe('GenkitDocumentSummaryGenerator', () => {
     expect(JSON.stringify(observer.observe.mock.calls)).not.toContain(
       'Synthèse courte.',
     );
+  });
+
+  it('retries summary generation with Mistral after a provider stream failure', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    process.env.MIMO_MODEL = 'mimo-v2.5-pro';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_MODEL = 'mistral-medium-latest';
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate
+      .mockRejectedValueOnce(new Error('ERR_STREAM_PREMATURE_CLOSE'))
+      .mockResolvedValueOnce({
+        output: {
+          title: 'Résumé fallback',
+          content: 'Synthèse courte.',
+          keyPoints: ['Point clé'],
+          sourceChunkIds: ['chunk-1'],
+        },
+      });
+    const observer = createObserver();
+
+    const summary = await new GenkitDocumentSummaryGenerator(observer).generate(
+      {
+        documentId: 'document-1',
+        chunks: [{ id: 'chunk-1', index: 0, text: 'Texte.', pageNumber: null }],
+        knowledgeUnits: [],
+      },
+    );
+
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenkit).toHaveBeenNthCalledWith(1, {
+      plugins: [mockPlugin],
+      model: 'mimo/mimo-v2.5-pro',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(2, {
+      plugins: [mockPlugin],
+      model: 'mistral/mistral-medium-latest',
+    });
+    expect(summary.title).toBe('Résumé fallback');
+    expect(summary.metadata.provider).toBe('mistral');
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      status: 'error',
+      provider: 'mimo',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      status: 'success',
+      provider: 'mistral',
+    });
   });
 
   it('rejects summaries without sources', async () => {

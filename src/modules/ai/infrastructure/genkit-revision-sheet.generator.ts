@@ -24,7 +24,6 @@ import {
   resolveArtifactGenkitMetadata,
 } from './document-artifact-genkit-config';
 import { GeneratedRevisionSheetSchema } from './document-artifact-output.schema';
-import { isInvalidAiOutputError } from './mistral-model-fallback';
 
 const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
 const REVISION_SHEET_SOURCE_INVALID_ERROR_CODE =
@@ -133,13 +132,7 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
           documentId: input.documentId,
         });
 
-        if (
-          index === 0 &&
-          attempts.length > 1 &&
-          isInvalidAiOutputError(error, [
-            REVISION_SHEET_SOURCE_INVALID_ERROR_CODE,
-          ])
-        ) {
+        if (index === 0 && attempts.length > 1) {
           continue;
         }
 

@@ -62,6 +62,8 @@ describe('GenkitRevisionSheetGenerator', () => {
   const originalAiProvider = process.env.AI_PROVIDER;
   const originalMistralApiKey = process.env.MISTRAL_API_KEY;
   const originalMistralModel = process.env.MISTRAL_MODEL;
+  const originalMimoApiKey = process.env.MIMO_API_KEY;
+  const originalMimoModel = process.env.MIMO_MODEL;
   const originalMistralFallbackModel = process.env.MISTRAL_FALLBACK_MODEL;
   const originalMistralRevisionSheetFallbackModel =
     process.env.MISTRAL_REVISION_SHEET_FALLBACK_MODEL;
@@ -72,6 +74,8 @@ describe('GenkitRevisionSheetGenerator', () => {
     restoreEnv('AI_PROVIDER', originalAiProvider);
     restoreEnv('MISTRAL_API_KEY', originalMistralApiKey);
     restoreEnv('MISTRAL_MODEL', originalMistralModel);
+    restoreEnv('MIMO_API_KEY', originalMimoApiKey);
+    restoreEnv('MIMO_MODEL', originalMimoModel);
     restoreEnv('MISTRAL_FALLBACK_MODEL', originalMistralFallbackModel);
     restoreEnv(
       'MISTRAL_REVISION_SHEET_FALLBACK_MODEL',
@@ -334,6 +338,60 @@ describe('GenkitRevisionSheetGenerator', () => {
     expect(JSON.stringify(observer.observe.mock.calls)).not.toContain(
       'Contenu structuré.',
     );
+  });
+
+  it('retries revision sheet generation with Mistral after a provider stream failure', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    process.env.MIMO_MODEL = 'mimo-v2.5-pro';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_MODEL = 'mistral-medium-latest';
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate
+      .mockRejectedValueOnce(new Error('ERR_STREAM_PREMATURE_CLOSE'))
+      .mockResolvedValueOnce({
+        output: {
+          title: 'Fiche fallback',
+          sections: [
+            {
+              title: 'Principe',
+              content: 'Contenu structuré.',
+              sourceChunkIds: ['chunk-1'],
+            },
+          ],
+          keyPoints: ['Point clé'],
+        },
+      });
+    const observer = createObserver();
+
+    const sheet = await new GenkitRevisionSheetGenerator(observer).generate({
+      documentId: 'document-1',
+      chunks: [{ id: 'chunk-1', index: 0, text: 'Texte.', pageNumber: null }],
+      knowledgeUnits: [],
+    });
+
+    expect(mockGenerate).toHaveBeenCalledTimes(2);
+    expect(mockGenkit).toHaveBeenNthCalledWith(1, {
+      plugins: [mockPlugin],
+      model: 'mimo/mimo-v2.5-pro',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(2, {
+      plugins: [mockPlugin],
+      model: 'mistral/mistral-medium-latest',
+    });
+    expect(sheet.title).toBe('Fiche fallback');
+    expect(sheet.metadata.provider).toBe('mistral');
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      status: 'error',
+      provider: 'mimo',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      status: 'success',
+      provider: 'mistral',
+    });
   });
 
   it('does not retry revision sheet generation when fallback model resolves to the primary model', async () => {

@@ -24,7 +24,6 @@ import {
   resolveArtifactGenkitMetadata,
 } from './document-artifact-genkit-config';
 import { GeneratedDocumentSummarySchema } from './document-artifact-output.schema';
-import { isInvalidAiOutputError } from './mistral-model-fallback';
 
 const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
 const SUMMARY_SOURCE_INVALID_ERROR_CODE = 'SUMMARY_SOURCE_INVALID';
@@ -124,11 +123,7 @@ export class GenkitDocumentSummaryGenerator implements DocumentSummaryGenerator 
           documentId: input.documentId,
         });
 
-        if (
-          index === 0 &&
-          attempts.length > 1 &&
-          isInvalidAiOutputError(error, [SUMMARY_SOURCE_INVALID_ERROR_CODE])
-        ) {
+        if (index === 0 && attempts.length > 1) {
           continue;
         }
 
