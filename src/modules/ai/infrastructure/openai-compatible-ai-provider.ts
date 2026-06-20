@@ -1,4 +1,9 @@
-import openAICompatible from '@genkit-ai/compat-oai';
+import openAICompatible, {
+  compatOaiModelRef,
+  defineCompatOpenAIModel,
+  type ModelRequestBuilder,
+  type PluginOptions,
+} from '@genkit-ai/compat-oai';
 
 export const MISTRAL_PROVIDER = 'mistral';
 export const MIMO_PROVIDER = 'mimo';
@@ -95,12 +100,52 @@ export function createOpenAiCompatiblePlugin(
     throw new Error(`${provider.apiKeyEnv} is required`);
   }
 
+  if (provider.provider === MIMO_PROVIDER) {
+    const pluginOptions: PluginOptions = {
+      name: provider.pluginName,
+      apiKey: provider.apiKey,
+      baseURL: provider.baseURL,
+      resolver: (client, actionType, actionName) => {
+        if (actionType !== 'model') {
+          return undefined;
+        }
+
+        return defineCompatOpenAIModel({
+          name: toOpenAiCompatibleModelName(actionName, provider.pluginName),
+          client,
+          pluginOptions,
+          modelRef: compatOaiModelRef({
+            name: actionName,
+            namespace: provider.pluginName,
+          }),
+          requestBuilder: applyMimoOpenAiRequestOptions,
+        });
+      },
+    };
+
+    return openAICompatible(pluginOptions);
+  }
+
   return openAICompatible({
     name: provider.pluginName,
     apiKey: provider.apiKey,
     baseURL: provider.baseURL,
   });
 }
+
+export const applyMimoOpenAiRequestOptions: ModelRequestBuilder = (
+  request,
+  params,
+) => {
+  const body = params as unknown as Record<string, unknown>;
+
+  copyOpenAiCompatiblePassthroughConfig(request.config, body);
+
+  // MiMo's OpenAI-compatible examples explicitly disable the extra thinking
+  // mode. Keeping this out of generic providers avoids leaking MiMo-only
+  // request fields into Mistral.
+  body.thinking = { type: 'disabled' };
+};
 
 export function normalizeOpenAiCompatibleModelName(
   provider: OpenAiCompatibleProviderName,
@@ -131,6 +176,57 @@ function normalizeProviderSpecificModelName(
   }
 
   return model;
+}
+
+function toOpenAiCompatibleModelName(
+  actionName: string,
+  pluginName: string,
+): string {
+  const withoutRefPrefix = actionName.replace(
+    /^\/(background-model|model|models|embedder|embedders)\//,
+    '',
+  );
+
+  return withoutRefPrefix.replace(
+    new RegExp(`^${escapeRegExp(pluginName)}/`, 'g'),
+    '',
+  );
+}
+
+const standardOpenAiCompatibleConfigKeys = new Set([
+  'temperature',
+  'maxOutputTokens',
+  'topK',
+  'topP',
+  'frequencyPenalty',
+  'logProbs',
+  'presencePenalty',
+  'topLogProbs',
+  'stopSequences',
+  'version',
+  'tools',
+  'apiKey',
+]);
+
+function copyOpenAiCompatiblePassthroughConfig(
+  config: unknown,
+  body: Record<string, unknown>,
+) {
+  if (!config || typeof config !== 'object') {
+    return;
+  }
+
+  for (const [key, value] of Object.entries(config)) {
+    if (value === undefined || standardOpenAiCompatibleConfigKeys.has(key)) {
+      continue;
+    }
+
+    body[key] = value;
+  }
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 export function resolveMistralModelName(

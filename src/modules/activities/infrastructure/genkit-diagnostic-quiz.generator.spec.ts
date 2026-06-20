@@ -218,14 +218,81 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       }),
     });
 
-    expect(mockOpenAICompatible).toHaveBeenCalledWith({
-      name: 'mimo',
-      apiKey: 'test-mimo-key',
-      baseURL: 'https://api.xiaomimimo.com/v1',
-    });
+    expect(mockOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'mimo',
+        apiKey: 'test-mimo-key',
+        baseURL: 'https://api.xiaomimimo.com/v1',
+      }),
+    );
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockMistralPlugin],
       model: 'mimo/mimo-v2.5-pro',
+    });
+    expect(quiz).toEqual(generatedQuiz());
+  });
+
+  it('falls back from MiMo to Mistral when MiMo generation fails', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL = 'mistral-large-latest';
+    mockGenerate
+      .mockRejectedValueOnce(new Error('MiMo stream closed prematurely'))
+      .mockResolvedValueOnce({
+        output: generatedQuiz(),
+      });
+    const observer = createObserver();
+
+    const quiz = await new GenkitDiagnosticQuizGenerator(observer).generate({
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-constitution',
+        subjectId: 'subject-constitutional-law',
+        title: 'Revision constitutionnelle',
+        summary:
+          'La Constitution de 1958 encadre la procedure de revision et protege la forme republicaine du gouvernement.',
+      }),
+    });
+
+    expect(mockOpenAICompatible).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        name: 'mimo',
+        apiKey: 'test-mimo-key',
+        baseURL: 'https://api.xiaomimimo.com/v1',
+      }),
+    );
+    expect(mockOpenAICompatible).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        name: 'mistral',
+        apiKey: 'test-mistral-key',
+        baseURL: 'https://api.mistral.ai/v1',
+      }),
+    );
+    expect(mockGenkit).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        model: 'mimo/mimo-v2.5-pro',
+      }),
+    );
+    expect(mockGenkit).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        model: 'mistral/mistral-large-latest',
+      }),
+    );
+    expect(observer.observe.mock.calls).toHaveLength(2);
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      provider: 'mimo',
+      model: 'mimo/mimo-v2.5-pro',
+      status: 'error',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      provider: 'mistral',
+      model: 'mistral/mistral-large-latest',
+      status: 'success',
     });
     expect(quiz).toEqual(generatedQuiz());
   });

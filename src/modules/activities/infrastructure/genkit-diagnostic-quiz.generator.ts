@@ -1161,27 +1161,11 @@ function resolveDiagnosticQuizFallbackMetadata(
   metadata: ResolvedGenkitMetadata,
 ): ResolvedGenkitMetadata | null {
   if (!metadata.openAiCompatible) {
-    if (!hasValue(process.env.MISTRAL_API_KEY)) {
-      return null;
-    }
+    return resolveDiagnosticMistralFallbackMetadata();
+  }
 
-    const fallbackModel =
-      process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL?.trim() ||
-      process.env.MISTRAL_FALLBACK_MODEL?.trim() ||
-      process.env.MISTRAL_MODEL?.trim() ||
-      resolveOpenAiCompatibleProvider(MISTRAL_PROVIDER).model;
-
-    const openAiCompatibleProvider =
-      resolveOpenAiCompatibleProvider(MISTRAL_PROVIDER);
-
-    return {
-      provider: MISTRAL_PROVIDER,
-      model: normalizeMistralModelName(fallbackModel),
-      openAiCompatible: {
-        ...openAiCompatibleProvider,
-        model: normalizeMistralModelName(fallbackModel),
-      },
-    };
+  if (metadata.provider === MIMO_PROVIDER) {
+    return resolveDiagnosticMistralFallbackMetadata();
   }
 
   if (metadata.provider !== MISTRAL_PROVIDER) {
@@ -1203,6 +1187,31 @@ function resolveDiagnosticQuizFallbackMetadata(
     openAiCompatible: {
       ...metadata.openAiCompatible,
       model: fallbackModel,
+    },
+  };
+}
+
+function resolveDiagnosticMistralFallbackMetadata(): ResolvedGenkitMetadata | null {
+  if (!hasValue(process.env.MISTRAL_API_KEY)) {
+    return null;
+  }
+
+  const fallbackModel =
+    process.env.MISTRAL_DIAGNOSTIC_QUIZ_FALLBACK_MODEL?.trim() ||
+    process.env.MISTRAL_FALLBACK_MODEL?.trim() ||
+    process.env.MISTRAL_MODEL?.trim() ||
+    resolveOpenAiCompatibleProvider(MISTRAL_PROVIDER).model;
+
+  const openAiCompatibleProvider =
+    resolveOpenAiCompatibleProvider(MISTRAL_PROVIDER);
+  const normalizedFallbackModel = normalizeMistralModelName(fallbackModel);
+
+  return {
+    provider: MISTRAL_PROVIDER,
+    model: normalizedFallbackModel,
+    openAiCompatible: {
+      ...openAiCompatibleProvider,
+      model: normalizedFallbackModel,
     },
   };
 }
