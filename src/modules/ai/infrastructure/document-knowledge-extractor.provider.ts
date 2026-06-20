@@ -12,47 +12,31 @@ import {
 
 type AiProviderEnv = {
   AI_PROVIDER?: string;
+  DOCUMENT_KNOWLEDGE_PROVIDER?: string;
   GOOGLE_GENAI_API_KEY?: string;
   MISTRAL_API_KEY?: string;
   MIMO_API_KEY?: string;
 };
 
+export type DocumentKnowledgeProviderName =
+  | typeof MISTRAL_PROVIDER
+  | typeof MIMO_PROVIDER
+  | 'google';
+
 export function createDocumentKnowledgeExtractor(
   env: AiProviderEnv = process.env,
   observer: AiGenerationObserver = noopAiGenerationObserver,
 ): DocumentKnowledgeExtractor {
-  const configuredProvider = env.AI_PROVIDER?.trim().toLowerCase();
+  const provider = resolveDocumentKnowledgeProviderName(env);
 
-  if (configuredProvider === MISTRAL_PROVIDER) {
+  if (provider === MISTRAL_PROVIDER) {
     return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
       observer,
       MISTRAL_PROVIDER,
     );
   }
 
-  if (configuredProvider === MIMO_PROVIDER) {
-    return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
-      observer,
-      MIMO_PROVIDER,
-    );
-  }
-
-  if (configuredProvider === 'genkit' || configuredProvider === 'google') {
-    return new GenkitDocumentKnowledgeExtractor(observer);
-  }
-
-  if (!hasValue(env.GOOGLE_GENAI_API_KEY) && hasValue(env.MISTRAL_API_KEY)) {
-    return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
-      observer,
-      MISTRAL_PROVIDER,
-    );
-  }
-
-  if (
-    !hasValue(env.GOOGLE_GENAI_API_KEY) &&
-    !hasValue(env.MISTRAL_API_KEY) &&
-    hasValue(env.MIMO_API_KEY)
-  ) {
+  if (provider === MIMO_PROVIDER) {
     return new GenkitOpenAiCompatibleDocumentKnowledgeExtractor(
       observer,
       MIMO_PROVIDER,
@@ -60,6 +44,54 @@ export function createDocumentKnowledgeExtractor(
   }
 
   return new GenkitDocumentKnowledgeExtractor(observer);
+}
+
+export function resolveDocumentKnowledgeProviderName(
+  env: AiProviderEnv = process.env,
+): DocumentKnowledgeProviderName {
+  const explicitProvider = normalizeConfiguredProvider(
+    env.DOCUMENT_KNOWLEDGE_PROVIDER,
+  );
+
+  if (explicitProvider) {
+    return explicitProvider;
+  }
+
+  const configuredProvider = normalizeConfiguredProvider(env.AI_PROVIDER);
+
+  // Document processing is the entry point for course readiness. MiMo is useful
+  // for shorter generation flows, but its OpenAI-compatible stream has proven
+  // unstable for document knowledge extraction, so Mistral is the safe default
+  // whenever a key is available.
+  if (hasValue(env.MISTRAL_API_KEY)) {
+    return MISTRAL_PROVIDER;
+  }
+
+  if (configuredProvider) {
+    return configuredProvider;
+  }
+
+  if (!hasValue(env.GOOGLE_GENAI_API_KEY) && hasValue(env.MIMO_API_KEY)) {
+    return MIMO_PROVIDER;
+  }
+
+  return 'google';
+}
+
+function normalizeConfiguredProvider(
+  value: string | undefined,
+): DocumentKnowledgeProviderName | null {
+  const provider = value?.trim().toLowerCase();
+
+  if (provider === MISTRAL_PROVIDER || provider === MIMO_PROVIDER) {
+    return provider;
+  }
+
+  if (provider === 'genkit' || provider === 'google') {
+    return 'google';
+  }
+
+  return null;
 }
 
 function hasValue(value: string | undefined): boolean {

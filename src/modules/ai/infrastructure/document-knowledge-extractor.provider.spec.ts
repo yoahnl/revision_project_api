@@ -1,6 +1,9 @@
 import { GenkitDocumentKnowledgeExtractor } from './genkit-document-knowledge.extractor';
 import { GenkitOpenAiCompatibleDocumentKnowledgeExtractor } from './genkit-openai-compatible-document-knowledge.extractor';
-import { createDocumentKnowledgeExtractor } from './document-knowledge-extractor.provider';
+import {
+  createDocumentKnowledgeExtractor,
+  resolveDocumentKnowledgeProviderName,
+} from './document-knowledge-extractor.provider';
 
 describe('createDocumentKnowledgeExtractor', () => {
   it('uses Genkit by default', () => {
@@ -33,5 +36,38 @@ describe('createDocumentKnowledgeExtractor', () => {
         MIMO_API_KEY: 'test-mimo-key',
       }),
     ).toBeInstanceOf(GenkitOpenAiCompatibleDocumentKnowledgeExtractor);
+  });
+
+  it('defaults document extraction to Mistral when the app provider is MiMo and Mistral is configured', () => {
+    expect(
+      resolveDocumentKnowledgeProviderName({
+        AI_PROVIDER: 'mimo',
+        MIMO_API_KEY: 'test-mimo-key',
+        MISTRAL_API_KEY: 'test-mistral-key',
+      }),
+    ).toBe('mistral');
+  });
+
+  it('allows overriding document extraction back to MiMo explicitly', () => {
+    expect(
+      resolveDocumentKnowledgeProviderName({
+        AI_PROVIDER: 'mimo',
+        DOCUMENT_KNOWLEDGE_PROVIDER: 'mimo',
+        MIMO_API_KEY: 'test-mimo-key',
+        MISTRAL_API_KEY: 'test-mistral-key',
+      }),
+    ).toBe('mimo');
+  });
+
+  it('allows using Google for document extraction explicitly', () => {
+    expect(
+      resolveDocumentKnowledgeProviderName({
+        AI_PROVIDER: 'mimo',
+        DOCUMENT_KNOWLEDGE_PROVIDER: 'google',
+        MIMO_API_KEY: 'test-mimo-key',
+        MISTRAL_API_KEY: 'test-mistral-key',
+        GOOGLE_GENAI_API_KEY: 'test-google-key',
+      }),
+    ).toBe('google');
   });
 });

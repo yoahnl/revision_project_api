@@ -1,6 +1,9 @@
 import { googleAI } from '@genkit-ai/google-genai';
 import type { genkit } from 'genkit';
-import { resolveMistralFallbackModel } from './mistral-model-fallback';
+import {
+  normalizeMistralModelName,
+  resolveMistralFallbackModel,
+} from './mistral-model-fallback';
 import {
   createOpenAiCompatiblePlugin,
   hasOpenAiCompatibleApiKey,
@@ -103,6 +106,21 @@ export function resolveArtifactMistralFallbackMetadata(
   specificFallbackEnv: string,
 ): ResolvedArtifactGenkitMetadata | null {
   if (metadata.provider !== MISTRAL_PROVIDER) {
+    return resolveDefaultMistralFallbackMetadata(specificFallbackEnv);
+  }
+
+  if (!metadata.openAiCompatible) {
+    return null;
+  }
+
+  return resolveSecondaryMistralFallbackMetadata(metadata, specificFallbackEnv);
+}
+
+function resolveSecondaryMistralFallbackMetadata(
+  metadata: ResolvedArtifactGenkitMetadata,
+  specificFallbackEnv: string,
+): ResolvedArtifactGenkitMetadata | null {
+  if (metadata.provider !== MISTRAL_PROVIDER) {
     return null;
   }
 
@@ -120,6 +138,32 @@ export function resolveArtifactMistralFallbackMetadata(
     model: fallbackModel,
     openAiCompatible: {
       ...metadata.openAiCompatible!,
+      model: fallbackModel,
+    },
+  };
+}
+
+function resolveDefaultMistralFallbackMetadata(
+  specificFallbackEnv: string,
+): ResolvedArtifactGenkitMetadata | null {
+  if (!hasOpenAiCompatibleApiKey(MISTRAL_PROVIDER)) {
+    return null;
+  }
+
+  const openAiCompatibleProvider =
+    resolveOpenAiCompatibleProvider(MISTRAL_PROVIDER);
+  const fallbackModel = normalizeMistralModelName(
+    process.env[specificFallbackEnv]?.trim() ||
+      process.env.MISTRAL_FALLBACK_MODEL?.trim() ||
+      process.env.MISTRAL_MODEL?.trim() ||
+      openAiCompatibleProvider.model,
+  );
+
+  return {
+    provider: MISTRAL_PROVIDER,
+    model: fallbackModel,
+    openAiCompatible: {
+      ...openAiCompatibleProvider,
       model: fallbackModel,
     },
   };
