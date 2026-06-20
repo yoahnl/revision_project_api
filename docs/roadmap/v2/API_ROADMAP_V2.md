@@ -89,6 +89,7 @@ Routes structurantes déjà présentes :
 - Pas de politique complète de lifecycle/archive.
 - CI/preuves de validation à systématiser.
 - Providers IA et quotas encore sensibles.
+- Roadmap exécutable à maintenir synchronisée avec le repo app.
 
 ## 5. Principes backend non négociables
 
@@ -110,6 +111,18 @@ Routes structurantes déjà présentes :
 - API scope : créer ce dossier V2.
 - Validation : format docs et `git diff --check`.
 - Risque : documentation divergente avec le repo app.
+
+### STAB-00B — Roadmap V2 hardening, execution slicing & governance
+
+- API scope : ajouter le plan d'exécution API, le tracker exécutable, les horizons, `QUALITY-00` et les règles de synchronisation.
+- Validation : validations documentaires et `git diff --check`.
+- Risque : dupliquer la vision produit au lieu de pointer vers la source canonique app.
+
+### QUALITY-00 — CI baseline
+
+- API scope : ajouter une baseline CI avec Prisma validate, build, lint, tests Jest et e2e critiques.
+- Validation : pipeline reproductible sur pull request ou branche de validation.
+- Risque : attendre `RELEASE-01` pour systématiser la preuve qualité.
 
 ### STAB-01 — Product navigation & UX coherence
 
@@ -179,18 +192,47 @@ Routes structurantes déjà présentes :
 ## 7. Dépendances
 
 ```text
-STAB-00
--> STAB-01
--> STAB-02
-
-STAB-01 -> CORE-09 -> CORE-10 -> CORE-11
-STAB-02 + CORE-11 -> PLUS-01 -> PLUS-02 -> PLUS-03
-CORE-11 -> ADAPT-01
-STAB-02 + ADAPT-01 -> GENUI-01
-Lots MVP validés -> RELEASE-01
+STAB-00 -> STAB-00B
+STAB-00B -> QUALITY-00
+STAB-00B -> STAB-01A
+STAB-01A -> STAB-01B
+STAB-01A -> CORE-09A
+STAB-01B -> STAB-01C
+STAB-01C -> STAB-02A
+STAB-02A -> STAB-02B
+CORE-09A -> CORE-09B
+CORE-09A -> CORE-09C
+CORE-09A -> CORE-10A
+CORE-10A -> CORE-10B
+CORE-10A -> CORE-11A
+CORE-10A -> PLUS-01A
+CORE-10B -> CORE-10C
+CORE-10B -> ADAPT-01
+CORE-11A -> CORE-11B
+CORE-11A -> PLUS-01B
+PLUS-01A -> PLUS-01B
+STAB-02B + CORE-09A -> PLUS-02
+PLUS-01B + PLUS-02 + CORE-11B -> PLUS-03
+STAB-02B + ADAPT-01 + PLUS-01A -> GENUI-01
+QUALITY-00 + lots MVP_STABLE requis -> RELEASE-01
 ```
 
+`PLUS-01A` dépend de `STAB-02A`, `CORE-10A` et du quick lifecycle stable. Il ne dépend plus de tout `CORE-11`.
+
 ## 8. Critères backend de sortie MVP
+
+`MVP_STABLE` côté backend suppose :
+
+- `QUALITY-00` terminé ;
+- `CORE-09A` terminé ;
+- `CORE-10A` terminé ;
+- `CORE-11A` terminé ;
+- quick flow vert ;
+- source lifecycle sûr ;
+- sessions reprenables ;
+- validations CI reproductibles.
+
+Deep, fiche complète, Exam, Today adaptatif et GenUI ne sont pas requis pour `MVP_STABLE`.
 
 - Upload source sûr et observable.
 - Processing fiable ou erreur lisible.
