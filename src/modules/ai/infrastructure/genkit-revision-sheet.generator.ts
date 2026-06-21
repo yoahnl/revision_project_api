@@ -17,6 +17,7 @@ import {
   normalizeSourceChunkIds,
   selectDocumentArtifactChunks,
 } from './document-artifact-generation-input';
+import { buildAiErrorDiagnostics } from './ai-error-diagnostics';
 import {
   type ResolvedArtifactGenkitMetadata,
   resolveArtifactGoogleFallbackMetadata,
@@ -126,6 +127,8 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
           },
         };
       } catch (error) {
+        const diagnostics = buildAiErrorDiagnostics(error);
+
         this.observer.observe({
           flowName: REVISION_SHEET_FLOW_NAME,
           provider: metadata.provider,
@@ -136,6 +139,11 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
           durationMs: Date.now() - startedAt,
           status: 'error',
           errorCode: resolveRevisionSheetGenerationErrorCode(error),
+          errorCategory: diagnostics.errorCategory,
+          errorName: diagnostics.errorName,
+          errorStatus: diagnostics.errorStatus,
+          errorProviderCode: diagnostics.errorProviderCode,
+          errorSummary: diagnostics.errorSummary,
           documentId: input.documentId,
         });
 

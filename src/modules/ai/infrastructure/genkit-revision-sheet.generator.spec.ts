@@ -352,7 +352,7 @@ describe('GenkitRevisionSheetGenerator', () => {
     mockGenkit.mockClear();
     mockGenerate.mockReset();
     mockGenerate
-      .mockRejectedValueOnce(new Error('ERR_STREAM_PREMATURE_CLOSE'))
+      .mockRejectedValueOnce(providerStreamError())
       .mockResolvedValueOnce({
         output: {
           title: 'Fiche fallback',
@@ -389,6 +389,10 @@ describe('GenkitRevisionSheetGenerator', () => {
       status: 'error',
       provider: 'mimo',
       errorCode: 'GENKIT_GENERATION_FAILED',
+      errorCategory: 'UNKNOWN',
+      errorName: 'FetchError',
+      errorProviderCode: 'ERR_STREAM_PREMATURE_CLOSE',
+      errorSummary: 'AI provider generation failed',
     });
     expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
       status: 'success',
@@ -627,4 +631,11 @@ function restoreEnv(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+function providerStreamError(): Error {
+  return Object.assign(new Error('stream closed before completion'), {
+    name: 'FetchError',
+    code: 'ERR_STREAM_PREMATURE_CLOSE',
+  });
 }
