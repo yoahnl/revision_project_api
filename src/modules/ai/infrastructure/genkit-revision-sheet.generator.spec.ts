@@ -64,6 +64,7 @@ describe('GenkitRevisionSheetGenerator', () => {
   const originalMistralModel = process.env.MISTRAL_MODEL;
   const originalMimoApiKey = process.env.MIMO_API_KEY;
   const originalMimoModel = process.env.MIMO_MODEL;
+  const originalGoogleGenaiApiKey = process.env.GOOGLE_GENAI_API_KEY;
   const originalMistralFallbackModel = process.env.MISTRAL_FALLBACK_MODEL;
   const originalMistralRevisionSheetFallbackModel =
     process.env.MISTRAL_REVISION_SHEET_FALLBACK_MODEL;
@@ -76,6 +77,7 @@ describe('GenkitRevisionSheetGenerator', () => {
     restoreEnv('MISTRAL_MODEL', originalMistralModel);
     restoreEnv('MIMO_API_KEY', originalMimoApiKey);
     restoreEnv('MIMO_MODEL', originalMimoModel);
+    restoreEnv('GOOGLE_GENAI_API_KEY', originalGoogleGenaiApiKey);
     restoreEnv('MISTRAL_FALLBACK_MODEL', originalMistralFallbackModel);
     restoreEnv(
       'MISTRAL_REVISION_SHEET_FALLBACK_MODEL',
@@ -391,6 +393,73 @@ describe('GenkitRevisionSheetGenerator', () => {
     expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
       status: 'success',
       provider: 'mistral',
+    });
+  });
+
+  it('falls back to Gemini when Mimo and Mistral both fail for revision sheets', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    process.env.MIMO_MODEL = 'mimo-v2.5-pro';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.MISTRAL_MODEL = 'mistral-medium-latest';
+    process.env.GOOGLE_GENAI_API_KEY = 'test-google-key';
+    mockOpenAICompatible.mockClear();
+    mockGenkit.mockClear();
+    mockGenerate.mockReset();
+    mockGenerate
+      .mockRejectedValueOnce(new Error('ERR_STREAM_PREMATURE_CLOSE'))
+      .mockRejectedValueOnce(new Error('ERR_STREAM_PREMATURE_CLOSE'))
+      .mockResolvedValueOnce({
+        output: {
+          title: 'Fiche Gemini',
+          sections: [
+            {
+              title: 'Principe',
+              content: 'Contenu structuré.',
+              sourceChunkIds: ['chunk-1'],
+            },
+          ],
+          keyPoints: ['Point clé'],
+        },
+      });
+    const observer = createObserver();
+
+    const sheet = await new GenkitRevisionSheetGenerator(observer).generate({
+      documentId: 'document-1',
+      chunks: [{ id: 'chunk-1', index: 0, text: 'Texte.', pageNumber: null }],
+      knowledgeUnits: [],
+    });
+
+    expect(mockGenerate).toHaveBeenCalledTimes(3);
+    expect(mockGenkit).toHaveBeenNthCalledWith(1, {
+      plugins: [mockPlugin],
+      model: 'mimo/mimo-v2.5-pro',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(2, {
+      plugins: [mockPlugin],
+      model: 'mistral/mistral-medium-latest',
+    });
+    expect(mockGenkit).toHaveBeenNthCalledWith(
+      3,
+      expect.objectContaining({
+        model: 'googleai/gemini-2.5-flash',
+      }),
+    );
+    expect(sheet.title).toBe('Fiche Gemini');
+    expect(sheet.metadata.provider).toBe('google-genai');
+    expect(observer.observe.mock.calls[0]?.[0]).toMatchObject({
+      status: 'error',
+      provider: 'mimo',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+    });
+    expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
+      status: 'error',
+      provider: 'mistral',
+      errorCode: 'GENKIT_GENERATION_FAILED',
+    });
+    expect(observer.observe.mock.calls[2]?.[0]).toMatchObject({
+      status: 'success',
+      provider: 'google-genai',
     });
   });
 

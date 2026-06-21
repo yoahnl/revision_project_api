@@ -42,10 +42,7 @@ export function resolveArtifactGenkitMetadata(): ResolvedArtifactGenkitMetadata 
     };
   }
 
-  if (
-    !hasValue(process.env.GOOGLE_GENAI_API_KEY) &&
-    hasOpenAiCompatibleApiKey(MISTRAL_PROVIDER)
-  ) {
+  if (!hasGoogleGenaiApiKey() && hasOpenAiCompatibleApiKey(MISTRAL_PROVIDER)) {
     const openAiCompatibleProvider =
       resolveOpenAiCompatibleProvider(MISTRAL_PROVIDER);
 
@@ -57,7 +54,7 @@ export function resolveArtifactGenkitMetadata(): ResolvedArtifactGenkitMetadata 
   }
 
   if (
-    !hasValue(process.env.GOOGLE_GENAI_API_KEY) &&
+    !hasGoogleGenaiApiKey() &&
     !hasOpenAiCompatibleApiKey(MISTRAL_PROVIDER) &&
     hasOpenAiCompatibleApiKey(MIMO_PROVIDER)
   ) {
@@ -116,6 +113,19 @@ export function resolveArtifactMistralFallbackMetadata(
   return resolveSecondaryMistralFallbackMetadata(metadata, specificFallbackEnv);
 }
 
+export function resolveArtifactGoogleFallbackMetadata(
+  metadata: ResolvedArtifactGenkitMetadata,
+): ResolvedArtifactGenkitMetadata | null {
+  if (metadata.provider === GOOGLE_PROVIDER || !hasGoogleGenaiApiKey()) {
+    return null;
+  }
+
+  return {
+    provider: GOOGLE_PROVIDER,
+    model: process.env.GENKIT_MODEL ?? DEFAULT_GENKIT_MODEL,
+  };
+}
+
 function resolveSecondaryMistralFallbackMetadata(
   metadata: ResolvedArtifactGenkitMetadata,
   specificFallbackEnv: string,
@@ -171,4 +181,12 @@ function resolveDefaultMistralFallbackMetadata(
 
 function hasValue(value: string | undefined): boolean {
   return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasGoogleGenaiApiKey(): boolean {
+  return (
+    hasValue(process.env.GOOGLE_GENAI_API_KEY) ||
+    hasValue(process.env.GEMINI_API_KEY) ||
+    hasValue(process.env.GOOGLE_API_KEY)
+  );
 }

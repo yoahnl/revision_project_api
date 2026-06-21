@@ -19,6 +19,7 @@ import {
 } from './document-artifact-generation-input';
 import {
   type ResolvedArtifactGenkitMetadata,
+  resolveArtifactGoogleFallbackMetadata,
   resolveArtifactMistralFallbackMetadata,
   resolveArtifactGenkitConfig,
   resolveArtifactGenkitMetadata,
@@ -47,9 +48,15 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
       primaryMetadata,
       'MISTRAL_REVISION_SHEET_FALLBACK_MODEL',
     );
-    const attempts = fallbackMetadata
-      ? [primaryMetadata, fallbackMetadata]
-      : [primaryMetadata];
+    const googleFallbackMetadata =
+      resolveArtifactGoogleFallbackMetadata(primaryMetadata);
+    const attempts = [
+      primaryMetadata,
+      fallbackMetadata,
+      googleFallbackMetadata,
+    ].filter((metadata): metadata is ResolvedArtifactGenkitMetadata =>
+      Boolean(metadata),
+    );
     const chunks = selectDocumentArtifactChunks(input.chunks, {
       maxChunksEnv: 'REVISION_SHEET_GENERATION_MAX_CHUNKS',
       maxCharsEnv: 'REVISION_SHEET_GENERATION_MAX_CHARS',
@@ -132,7 +139,7 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
           documentId: input.documentId,
         });
 
-        if (index === 0 && attempts.length > 1) {
+        if (index < attempts.length - 1) {
           continue;
         }
 

@@ -1,4 +1,5 @@
 import {
+  resolveArtifactGoogleFallbackMetadata,
   resolveArtifactMistralFallbackMetadata,
   type ResolvedArtifactGenkitMetadata,
 } from './document-artifact-genkit-config';
@@ -58,5 +59,34 @@ describe('resolveArtifactMistralFallbackMetadata', () => {
         'MISTRAL_SUMMARY_FALLBACK_MODEL',
       ),
     ).toBeNull();
+  });
+
+  it('uses Gemini as a final artifact fallback when a Google key is configured', () => {
+    process.env.GOOGLE_GENAI_API_KEY = 'test-google-key';
+
+    const fallback = resolveArtifactGoogleFallbackMetadata({
+      provider: 'mistral',
+      model: 'mistral/mistral-medium-latest',
+    });
+
+    expect(fallback).toEqual({
+      provider: 'google-genai',
+      model: 'googleai/gemini-2.5-flash',
+    });
+  });
+
+  it('accepts GEMINI_API_KEY for the Gemini artifact fallback', () => {
+    delete process.env.GOOGLE_GENAI_API_KEY;
+    process.env.GEMINI_API_KEY = 'test-gemini-key';
+
+    const fallback = resolveArtifactGoogleFallbackMetadata({
+      provider: 'mimo',
+      model: 'mimo/mimo-v2.5-pro',
+    });
+
+    expect(fallback).toEqual({
+      provider: 'google-genai',
+      model: 'googleai/gemini-2.5-flash',
+    });
   });
 });
