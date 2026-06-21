@@ -472,6 +472,9 @@ describe('GenkitRevisionSheetGenerator', () => {
     process.env.MISTRAL_API_KEY = 'test-mistral-key';
     process.env.MISTRAL_MODEL = 'mistral-small-latest';
     process.env.MISTRAL_REVISION_SHEET_FALLBACK_MODEL = 'mistral-small-latest';
+    delete process.env.GOOGLE_GENAI_API_KEY;
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GOOGLE_API_KEY;
     mockGenerate.mockReset();
     mockGenerate.mockResolvedValue({
       output: {
