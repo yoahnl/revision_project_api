@@ -301,6 +301,7 @@ describe('PrismaCoursesRepository', () => {
         courseId: 'course-1',
         kind: 'COURSE_PDF',
         status: 'READY',
+        archivedAt: null,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -373,6 +374,7 @@ describe('PrismaCoursesRepository', () => {
           courseId: 'course-1',
           kind: 'COURSE_PDF',
           status: 'READY',
+          archivedAt: null,
         },
       },
       select: {
@@ -471,6 +473,7 @@ describe('PrismaCoursesRepository', () => {
         studentId: 'student-1',
         courseId: 'course-1',
         kind: 'COURSE_PDF',
+        archivedAt: null,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -490,6 +493,7 @@ describe('PrismaCoursesRepository', () => {
           courseId: 'course-1',
           kind: 'COURSE_PDF',
           status: 'READY',
+          archivedAt: null,
         },
       },
       select: {
@@ -686,6 +690,7 @@ describe('PrismaCoursesRepository', () => {
         subjectId: 'subject-1',
         courseId: { in: ['course-1', 'course-2'] },
         kind: 'COURSE_PDF',
+        archivedAt: null,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -706,7 +711,7 @@ describe('PrismaCoursesRepository', () => {
     const result = await repository.backfillFromExistingDocumentsDryRun();
 
     expect(prisma.document.findMany).toHaveBeenCalledWith({
-      where: { kind: 'COURSE_PDF', courseId: null },
+      where: { kind: 'COURSE_PDF', courseId: null, archivedAt: null },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
         id: true,

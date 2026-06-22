@@ -12,6 +12,13 @@ import {
 } from '../application/documents.repository';
 import { RevisionDocument } from '../domain/document.entity';
 import type { DocumentKind, DocumentStatus } from '../domain/document.entity';
+import {
+  buildSourceLifecycleDecision,
+  SourceArchiveBlockedError,
+  SourceDeleteBlockedError,
+  type SourceLifecycleDecision,
+  type SourceLifecycleReason,
+} from '../domain/source-lifecycle.entity';
 
 type DocumentRecord = {
   id: string;
@@ -24,9 +31,36 @@ type DocumentRecord = {
   mimeType: string;
   status: DocumentStatus;
   errorCode: string | null;
+  archivedAt: Date | null;
+  archivedReason: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
+
+type SourceLifecycleDocumentRecord = {
+  id: string;
+  studentId: string;
+  subjectId: string;
+  courseId: string | null;
+  status: DocumentStatus;
+  archivedAt: Date | null;
+};
+
+type SourceLifecyclePrismaClient = Pick<
+  PrismaService,
+  | 'activitySession'
+  | 'document'
+  | 'documentChunk'
+  | 'knowledgeUnit'
+  | 'openQuestion'
+  | 'question'
+  | 'questionBankItem'
+  | 'revisionSession'
+  | 'revisionSessionAction'
+  | 'revisionSheet'
+  | 'richClosedExercisePayload'
+  | 'summary'
+>;
 
 type DocumentChunkRecord = {
   id: string;
@@ -120,6 +154,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       where: {
         studentId: input.studentId,
         subjectId: input.subjectId,
+        archivedAt: null,
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -135,10 +170,90 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       where: {
         id: input.documentId,
         studentId: input.studentId,
+        archivedAt: null,
       },
     });
 
     return record ? this.toDto(record) : null;
+  }
+
+  async getLifecycleDecisionForStudent(input: {
+    studentId: string;
+    documentId: string;
+    courseId?: string | null;
+  }): Promise<SourceLifecycleDecision | null> {
+    const document = await this.findLifecycleDocument(input);
+
+    if (!document) {
+      return null;
+    }
+
+    const dependencyCounts = await this.countSourceDependencies(
+      this.prisma,
+      document,
+    );
+
+    return buildSourceLifecycleDecision({
+      documentId: document.id,
+      courseId: document.courseId,
+      status: document.status,
+      archivedAt: document.archivedAt,
+      dependencyCounts,
+    });
+  }
+
+  async archiveForStudent(input: {
+    studentId: string;
+    documentId: string;
+    courseId?: string | null;
+    reason?: string | null;
+  }): Promise<SourceLifecycleDecision | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const document = await this.findLifecycleDocument(input, tx);
+
+      if (!document) {
+        return null;
+      }
+
+      const dependencyCounts = await this.countSourceDependencies(tx, document);
+      const decision = buildSourceLifecycleDecision({
+        documentId: document.id,
+        courseId: document.courseId,
+        status: document.status,
+        archivedAt: document.archivedAt,
+        dependencyCounts,
+      });
+
+      if (decision.status === 'ARCHIVED') {
+        return decision;
+      }
+
+      if (!decision.canArchive) {
+        throw new SourceArchiveBlockedError(decision);
+      }
+
+      const archivedAt = new Date();
+
+      await tx.document.updateMany({
+        where: {
+          id: document.id,
+          studentId: input.studentId,
+          archivedAt: null,
+        },
+        data: {
+          archivedAt,
+          archivedReason: input.reason?.trim() || decision.recommendedAction,
+        },
+      });
+
+      return buildSourceLifecycleDecision({
+        documentId: document.id,
+        courseId: document.courseId,
+        status: document.status,
+        archivedAt,
+        dependencyCounts,
+      });
+    });
   }
 
   async deleteForStudent(input: {
@@ -146,27 +261,24 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
     documentId: string;
   }): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
-      const document = await tx.document.findFirst({
-        where: {
-          id: input.documentId,
-          studentId: input.studentId,
-        },
-        select: {
-          id: true,
-          subjectId: true,
-        },
-      });
+      const document = await this.findLifecycleDocument(input, tx);
 
       if (!document) {
         return false;
       }
 
-      await tx.knowledgeUnit.deleteMany({
-        where: {
-          documentId: input.documentId,
-          subjectId: document.subjectId,
-        },
+      const dependencyCounts = await this.countSourceDependencies(tx, document);
+      const decision = buildSourceLifecycleDecision({
+        documentId: document.id,
+        courseId: document.courseId,
+        status: document.status,
+        archivedAt: document.archivedAt,
+        dependencyCounts,
       });
+
+      if (!decision.canDelete) {
+        throw new SourceDeleteBlockedError(decision);
+      }
 
       const result = await tx.document.deleteMany({
         where: {
@@ -185,28 +297,24 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
     documentId: string;
   }): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
-      const document = await tx.document.findFirst({
-        where: {
-          id: input.documentId,
-          studentId: input.studentId,
-          courseId: input.courseId,
-        },
-        select: {
-          id: true,
-          subjectId: true,
-        },
-      });
+      const document = await this.findLifecycleDocument(input, tx);
 
       if (!document) {
         return false;
       }
 
-      await tx.knowledgeUnit.deleteMany({
-        where: {
-          documentId: input.documentId,
-          subjectId: document.subjectId,
-        },
+      const dependencyCounts = await this.countSourceDependencies(tx, document);
+      const decision = buildSourceLifecycleDecision({
+        documentId: document.id,
+        courseId: document.courseId,
+        status: document.status,
+        archivedAt: document.archivedAt,
+        dependencyCounts,
       });
+
+      if (!decision.canDelete) {
+        throw new SourceDeleteBlockedError(decision);
+      }
 
       const result = await tx.document.deleteMany({
         where: {
@@ -416,6 +524,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       where: {
         id: input.documentId,
         studentId: input.studentId,
+        archivedAt: null,
       },
     });
 
@@ -571,6 +680,82 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
     });
   }
 
+  private findLifecycleDocument(
+    input: { studentId: string; documentId: string; courseId?: string | null },
+    client: SourceLifecyclePrismaClient = this.prisma,
+  ): Promise<SourceLifecycleDocumentRecord | null> {
+    return client.document.findFirst({
+      where: {
+        id: input.documentId,
+        studentId: input.studentId,
+        ...(input.courseId !== undefined ? { courseId: input.courseId } : {}),
+      },
+      select: {
+        id: true,
+        studentId: true,
+        subjectId: true,
+        courseId: true,
+        status: true,
+        archivedAt: true,
+      },
+    });
+  }
+
+  private async countSourceDependencies(
+    client: SourceLifecyclePrismaClient,
+    document: SourceLifecycleDocumentRecord,
+  ): Promise<Partial<Record<SourceLifecycleReason, number>>> {
+    const whereDocument = {
+      documentId: document.id,
+      subjectId: document.subjectId,
+    };
+    const whereStudentDocument = {
+      documentId: document.id,
+      studentId: document.studentId,
+      subjectId: document.subjectId,
+    };
+
+    const [
+      chunks,
+      knowledgeUnits,
+      summaries,
+      revisionSheets,
+      questionBankItems,
+      revisionSessions,
+      revisionSessionActions,
+      openQuestions,
+      activitySessions,
+      questions,
+      richClosedPayloads,
+    ] = await Promise.all([
+      client.documentChunk.count({ where: whereDocument }),
+      client.knowledgeUnit.count({ where: whereDocument }),
+      client.summary.count({ where: whereStudentDocument }),
+      client.revisionSheet.count({ where: whereStudentDocument }),
+      client.questionBankItem.count({ where: whereStudentDocument }),
+      client.revisionSession.count({ where: whereStudentDocument }),
+      client.revisionSessionAction.count({ where: whereStudentDocument }),
+      client.openQuestion.count({ where: whereStudentDocument }),
+      client.activitySession.count({ where: whereStudentDocument }),
+      client.question.count({ where: whereDocument }),
+      client.richClosedExercisePayload.count({ where: whereDocument }),
+    ]);
+
+    return {
+      HAS_DOCUMENT_CHUNKS: chunks,
+      HAS_KNOWLEDGE_UNITS: knowledgeUnits,
+      HAS_SUMMARY: summaries,
+      HAS_REVISION_SHEET: revisionSheets,
+      HAS_QUESTION_BANK_ITEMS: questionBankItems,
+      HAS_REVISION_SESSIONS: revisionSessions,
+      HAS_REVISION_SESSION_ACTIONS: revisionSessionActions,
+      HAS_OPEN_QUESTIONS: openQuestions,
+      HAS_ACTIVITY_SESSIONS: activitySessions,
+      HAS_QUESTIONS: questions,
+      HAS_RICH_CLOSED_PAYLOADS: richClosedPayloads,
+    };
+  }
+
   private toDto(record: DocumentRecord): RevisionDocumentDto {
     const document = new RevisionDocument(record);
 
@@ -585,6 +770,8 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       mimeType: document.mimeType,
       status: document.status,
       errorCode: document.errorCode,
+      archivedAt: record.archivedAt,
+      archivedReason: record.archivedReason,
       createdAt: record.createdAt,
       updatedAt: record.updatedAt,
     };

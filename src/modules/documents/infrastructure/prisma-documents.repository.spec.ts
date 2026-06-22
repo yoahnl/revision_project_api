@@ -1,4 +1,5 @@
 import { PrismaDocumentsRepository } from './prisma-documents.repository';
+import { SourceDeleteBlockedError } from '../domain/source-lifecycle.entity';
 
 type DocumentRecord = {
   id: string;
@@ -11,6 +12,8 @@ type DocumentRecord = {
   mimeType: string;
   status: 'UPLOADED' | 'PROCESSING' | 'READY' | 'FAILED';
   errorCode?: string | null;
+  archivedAt?: Date | null;
+  archivedReason?: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -35,14 +38,43 @@ type PrismaDocumentsMock = {
   knowledgeUnit: {
     findUnique: jest.Mock;
     findMany: jest.Mock;
+    count: jest.Mock;
     create: jest.Mock;
     createMany: jest.Mock;
     deleteMany: jest.Mock;
   };
   documentChunk: {
+    count: jest.Mock;
     deleteMany: jest.Mock;
     createMany: jest.Mock;
     findMany: jest.Mock;
+  };
+  summary: {
+    count: jest.Mock;
+  };
+  revisionSheet: {
+    count: jest.Mock;
+  };
+  questionBankItem: {
+    count: jest.Mock;
+  };
+  revisionSession: {
+    count: jest.Mock;
+  };
+  revisionSessionAction: {
+    count: jest.Mock;
+  };
+  openQuestion: {
+    count: jest.Mock;
+  };
+  activitySession: {
+    count: jest.Mock;
+  };
+  question: {
+    count: jest.Mock;
+  };
+  richClosedExercisePayload: {
+    count: jest.Mock;
   };
   knowledgeUnitSource: {
     deleteMany: jest.Mock;
@@ -75,15 +107,26 @@ describe('PrismaDocumentsRepository', () => {
       knowledgeUnit: {
         findUnique: jest.fn(),
         findMany: jest.fn(),
+        count: jest.fn(),
         create: jest.fn(),
         createMany: jest.fn(),
         deleteMany: jest.fn(),
       },
       documentChunk: {
+        count: jest.fn(),
         deleteMany: jest.fn(),
         createMany: jest.fn(),
         findMany: jest.fn(),
       },
+      summary: { count: jest.fn() },
+      revisionSheet: { count: jest.fn() },
+      questionBankItem: { count: jest.fn() },
+      revisionSession: { count: jest.fn() },
+      revisionSessionAction: { count: jest.fn() },
+      openQuestion: { count: jest.fn() },
+      activitySession: { count: jest.fn() },
+      question: { count: jest.fn() },
+      richClosedExercisePayload: { count: jest.fn() },
       knowledgeUnitSource: {
         deleteMany: jest.fn(),
         createMany: jest.fn(),
@@ -93,6 +136,7 @@ describe('PrismaDocumentsRepository', () => {
     prisma.$transaction.mockImplementation((callback) =>
       Promise.resolve(callback(prisma)),
     );
+    mockZeroDependencyCounts(prisma);
 
     return {
       prisma,
@@ -111,10 +155,26 @@ describe('PrismaDocumentsRepository', () => {
     mimeType: 'application/pdf',
     status: 'UPLOADED',
     errorCode: null,
+    archivedAt: null,
+    archivedReason: null,
     createdAt: new Date('2026-06-18T12:00:00.000Z'),
     updatedAt: new Date('2026-06-18T12:00:00.000Z'),
     ...input,
   });
+
+  const mockZeroDependencyCounts = (prisma: PrismaDocumentsMock) => {
+    prisma.documentChunk.count.mockResolvedValue(0);
+    prisma.knowledgeUnit.count.mockResolvedValue(0);
+    prisma.summary.count.mockResolvedValue(0);
+    prisma.revisionSheet.count.mockResolvedValue(0);
+    prisma.questionBankItem.count.mockResolvedValue(0);
+    prisma.revisionSession.count.mockResolvedValue(0);
+    prisma.revisionSessionAction.count.mockResolvedValue(0);
+    prisma.openQuestion.count.mockResolvedValue(0);
+    prisma.activitySession.count.mockResolvedValue(0);
+    prisma.question.count.mockResolvedValue(0);
+    prisma.richClosedExercisePayload.count.mockResolvedValue(0);
+  };
 
   it('creates a document and pending processing job in one transaction', async () => {
     const { prisma, repository } = createRepository();
@@ -231,6 +291,7 @@ describe('PrismaDocumentsRepository', () => {
       where: {
         studentId: 'student-1',
         subjectId: 'subject-1',
+        archivedAt: null,
       },
       orderBy: { createdAt: 'asc' },
     });
@@ -267,6 +328,7 @@ describe('PrismaDocumentsRepository', () => {
       where: {
         id: 'document-1',
         studentId: 'student-1',
+        archivedAt: null,
       },
     });
     expect(document?.id).toBe('document-1');
@@ -307,10 +369,9 @@ describe('PrismaDocumentsRepository', () => {
     });
   });
 
-  it('deletes a document owned by a student after deleting document knowledge units', async () => {
+  it('deletes a safe document owned by a student without deleting learning history', async () => {
     const { prisma, repository } = createRepository();
-    prisma.document.findFirst.mockResolvedValue(record());
-    prisma.knowledgeUnit.deleteMany.mockResolvedValue({ count: 2 });
+    prisma.document.findFirst.mockResolvedValue(record({ status: 'FAILED' }));
     prisma.document.deleteMany.mockResolvedValue({ count: 1 });
 
     await expect(
@@ -328,15 +389,14 @@ describe('PrismaDocumentsRepository', () => {
       },
       select: {
         id: true,
+        studentId: true,
         subjectId: true,
+        courseId: true,
+        status: true,
+        archivedAt: true,
       },
     });
-    expect(prisma.knowledgeUnit.deleteMany).toHaveBeenCalledWith({
-      where: {
-        documentId: 'document-1',
-        subjectId: 'subject-1',
-      },
-    });
+    expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
     expect(prisma.document.deleteMany).toHaveBeenCalledWith({
       where: {
         id: 'document-1',
@@ -360,12 +420,95 @@ describe('PrismaDocumentsRepository', () => {
     expect(prisma.document.deleteMany).not.toHaveBeenCalled();
   });
 
-  it('deletes a course document only when it belongs to the requested course', async () => {
+  it('blocks deletion and recommends archive when a document has learning history', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record({ status: 'READY' }));
+    prisma.knowledgeUnit.count.mockResolvedValue(2);
+
+    await expect(
+      repository.deleteForStudent({
+        studentId: 'student-1',
+        documentId: 'document-1',
+      }),
+    ).rejects.toThrow(SourceDeleteBlockedError);
+
+    expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('returns a lifecycle decision for a source with learning dependencies', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.findFirst.mockResolvedValue(
-      record({ courseId: 'course-1' }),
+      record({ status: 'READY', courseId: 'course-1' }),
     );
-    prisma.knowledgeUnit.deleteMany.mockResolvedValue({ count: 2 });
+    prisma.documentChunk.count.mockResolvedValue(1);
+    prisma.revisionSession.count.mockResolvedValue(1);
+
+    await expect(
+      repository.getLifecycleDecisionForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+      }),
+    ).resolves.toMatchObject({
+      documentId: 'document-1',
+      courseId: 'course-1',
+      recommendedAction: 'ARCHIVE',
+      canDelete: false,
+      canArchive: true,
+      blockingReasons: ['HAS_DOCUMENT_CHUNKS', 'HAS_REVISION_SESSIONS'],
+    });
+  });
+
+  it('archives an active source without deleting dependents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(
+      record({ status: 'READY', courseId: 'course-1' }),
+    );
+    prisma.knowledgeUnit.count.mockResolvedValue(1);
+    prisma.document.updateMany.mockResolvedValue({ count: 1 });
+
+    const decision = await repository.archiveForStudent({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+      reason: 'USER_ARCHIVED_COURSE_SOURCE',
+    });
+
+    expect(decision).toMatchObject({
+      status: 'ARCHIVED',
+      recommendedAction: 'BLOCK',
+      canDelete: false,
+      canArchive: false,
+    });
+    expect(prisma.document.updateMany).toHaveBeenCalledTimes(1);
+    const updateManyCalls = prisma.document.updateMany.mock.calls as [
+      [
+        {
+          where: { id: string; studentId: string; archivedAt: null };
+          data: { archivedAt: unknown; archivedReason: string };
+        },
+      ],
+    ];
+    const updateInput = updateManyCalls[0][0];
+    expect(updateInput?.where).toEqual({
+      id: 'document-1',
+      studentId: 'student-1',
+      archivedAt: null,
+    });
+    expect(updateInput?.data.archivedAt).toBeInstanceOf(Date);
+    expect(updateInput?.data.archivedReason).toBe(
+      'USER_ARCHIVED_COURSE_SOURCE',
+    );
+    expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('deletes a safe course document only when it belongs to the requested course', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(
+      record({ courseId: 'course-1', status: 'FAILED' }),
+    );
     prisma.document.deleteMany.mockResolvedValue({ count: 1 });
 
     await expect(
@@ -384,15 +527,14 @@ describe('PrismaDocumentsRepository', () => {
       },
       select: {
         id: true,
+        studentId: true,
         subjectId: true,
+        courseId: true,
+        status: true,
+        archivedAt: true,
       },
     });
-    expect(prisma.knowledgeUnit.deleteMany).toHaveBeenCalledWith({
-      where: {
-        documentId: 'document-1',
-        subjectId: 'subject-1',
-      },
-    });
+    expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
     expect(prisma.document.deleteMany).toHaveBeenCalledWith({
       where: {
         id: 'document-1',
@@ -422,7 +564,11 @@ describe('PrismaDocumentsRepository', () => {
       },
       select: {
         id: true,
+        studentId: true,
         subjectId: true,
+        courseId: true,
+        status: true,
+        archivedAt: true,
       },
     });
     expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
@@ -907,6 +1053,7 @@ describe('PrismaDocumentsRepository', () => {
       where: {
         id: 'document-1',
         studentId: 'student-1',
+        archivedAt: null,
       },
     });
     expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({

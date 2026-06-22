@@ -15,7 +15,7 @@ Horizons autorisés : `FOUNDATION`, `MVP_STABLE`, `MVP_PLUS`, `POST_MVP`, `RELEA
 | STAB-01C | STAB-01 | MVP_STABLE | Possible | TODO | STAB-01B | Identifier les actions UX qui nécessitent une API. | Aucun bouton `NEEDS_API` sans lot backend. | À créer si API touchée |
 | STAB-02A | STAB-02 | MVP_STABLE | Aucun | TODO | STAB-01C | Aucun changement backend. | API inchangée. | Repo app |
 | STAB-02B | STAB-02 | MVP_STABLE | Aucun | TODO | STAB-02A | Aucun changement backend. | API inchangée. | Repo app |
-| CORE-09A | CORE-09 | MVP_STABLE | Oui | TODO | STAB-01A | Archive/delete semantics des sources. | Tests ownership, usage historique, 409/archive. | À créer |
+| CORE-09A | CORE-09 | MVP_STABLE | Oui | DONE | STAB-01A | Archive/delete semantics des sources. | Tests ownership, usage historique, 409/archive. | `docs/core/CORE_09A_SOURCE_LIFECYCLE_API_REPORT.md` |
 | CORE-09B | CORE-09 | MVP_STABLE | Oui | TODO | CORE-09A | Cleanup blob et abstraction storage. | Tests storage et cleanup. | À créer |
 | CORE-09C | CORE-09 | MVP_STABLE | Oui | TODO | CORE-09A | Lifecycle subject/course : rename/edit/archive si validé. | Tests auth/404/409/happy path. | À créer |
 | CORE-10A | CORE-10 | MVP_STABLE | Oui | TODO | CORE-09A | Async question bank readiness. | Jobs, retries, status readiness. | À créer |

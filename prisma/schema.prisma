@@ -94,18 +94,20 @@ model Course {
 }
 
 model Document {
-  id          String         @id @default(cuid())
-  studentId   String
-  subjectId   String
-  courseId    String?
-  kind        DocumentKind
-  fileName    String
-  storagePath String
-  mimeType    String
-  status      DocumentStatus @default(UPLOADED)
-  errorCode   String?
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+  id             String         @id @default(cuid())
+  studentId      String
+  subjectId      String
+  courseId       String?
+  kind           DocumentKind
+  fileName       String
+  storagePath    String
+  mimeType       String
+  status         DocumentStatus @default(UPLOADED)
+  errorCode      String?
+  archivedAt     DateTime?
+  archivedReason String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
   subject                Subject                 @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
   course                 Course?                 @relation(fields: [courseId], references: [id], onDelete: Restrict)
@@ -123,6 +125,7 @@ model Document {
   @@index([studentId])
   @@index([subjectId])
   @@index([courseId])
+  @@index([archivedAt])
 }
 
 model DocumentProcessingJob {

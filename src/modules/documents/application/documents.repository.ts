@@ -1,5 +1,6 @@
 import { StudentId } from '../../../shared/domain/student-id';
 import type { DocumentKind, DocumentStatus } from '../domain/document.entity';
+import type { SourceLifecycleDecision } from '../domain/source-lifecycle.entity';
 
 export type { DocumentKind, DocumentStatus };
 
@@ -14,6 +15,8 @@ export interface RevisionDocumentDto {
   mimeType: string;
   status: DocumentStatus;
   errorCode: string | null;
+  archivedAt?: Date | null;
+  archivedReason?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -111,6 +114,19 @@ export interface DocumentsRepository {
     studentId: StudentId;
     documentId: string;
   }): Promise<RevisionDocumentDto | null>;
+
+  getLifecycleDecisionForStudent(input: {
+    studentId: StudentId;
+    documentId: string;
+    courseId?: string | null;
+  }): Promise<SourceLifecycleDecision | null>;
+
+  archiveForStudent(input: {
+    studentId: StudentId;
+    documentId: string;
+    courseId?: string | null;
+    reason?: string | null;
+  }): Promise<SourceLifecycleDecision | null>;
 
   deleteForStudent(input: {
     studentId: StudentId;

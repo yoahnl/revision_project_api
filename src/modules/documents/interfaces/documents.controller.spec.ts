@@ -1,10 +1,19 @@
-import { BadRequestException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { DeleteDocumentUseCase } from '../application/delete-document.use-case';
 import { GetDocumentUseCase } from '../application/get-document.use-case';
 import { ListDocumentKnowledgeUnitsUseCase } from '../application/list-document-knowledge-units.use-case';
 import { ListSubjectDocumentsUseCase } from '../application/list-subject-documents.use-case';
 import { RegisterDocumentUseCase } from '../application/register-document.use-case';
+import {
+  ArchiveDocumentUseCase,
+  GetDocumentSourceLifecycleUseCase,
+} from '../application/source-lifecycle.use-case';
 import { UploadCoursePdfUseCase } from '../application/upload-course-pdf.use-case';
+import { SourceDeleteBlockedError } from '../domain/source-lifecycle.entity';
 import { DocumentsController } from './documents.controller';
 
 describe('DocumentsController', () => {
@@ -113,6 +122,26 @@ describe('DocumentsController', () => {
       execute: executeDelete,
     } as unknown as DeleteDocumentUseCase;
 
+    const executeLifecycle = jest
+      .fn()
+      .mockResolvedValue(sourceLifecycleDecision());
+
+    const getDocumentSourceLifecycle = {
+      execute: executeLifecycle,
+    } as unknown as GetDocumentSourceLifecycleUseCase;
+
+    const executeArchive = jest.fn().mockResolvedValue(
+      sourceLifecycleDecision({
+        status: 'ARCHIVED',
+        recommendedAction: 'BLOCK',
+        canArchive: false,
+      }),
+    );
+
+    const archiveDocument = {
+      execute: executeArchive,
+    } as unknown as ArchiveDocumentUseCase;
+
     return {
       controller: new DocumentsController(
         registerDocument,
@@ -121,6 +150,8 @@ describe('DocumentsController', () => {
         listDocumentKnowledgeUnits,
         uploadCoursePdf,
         deleteDocument,
+        getDocumentSourceLifecycle,
+        archiveDocument,
       ),
       execute,
       executeList,
@@ -128,6 +159,8 @@ describe('DocumentsController', () => {
       executeKnowledgeUnits,
       executeUpload,
       executeDelete,
+      executeLifecycle,
+      executeArchive,
     };
   }
 
@@ -332,6 +365,61 @@ describe('DocumentsController', () => {
     });
   });
 
+  it('maps lifecycle delete conflicts to 409', async () => {
+    const { controller, executeDelete } = createController();
+    executeDelete.mockRejectedValue(
+      new SourceDeleteBlockedError(sourceLifecycleDecision()),
+    );
+
+    await expect(controller.delete(student, 'document-1')).rejects.toThrow(
+      ConflictException,
+    );
+  });
+
+  it('loads lifecycle decisions for a document owned by the student', async () => {
+    const { controller, executeLifecycle } = createController();
+
+    await expect(
+      controller.getLifecycle(student, ' document-1 '),
+    ).resolves.toMatchObject({
+      documentId: 'document-1',
+      recommendedAction: 'ARCHIVE',
+    });
+
+    expect(executeLifecycle).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+  });
+
+  it('archives a document owned by the student', async () => {
+    const { controller, executeArchive } = createController();
+
+    await expect(
+      controller.archive(student, ' document-1 '),
+    ).resolves.toMatchObject({
+      documentId: 'document-1',
+      status: 'ARCHIVED',
+      recommendedAction: 'BLOCK',
+    });
+
+    expect(executeArchive).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      documentId: 'document-1',
+    });
+  });
+
+  it('maps missing lifecycle documents to 404', async () => {
+    const { controller, executeLifecycle } = createController();
+    executeLifecycle.mockRejectedValue(
+      new NotFoundException('Document not found'),
+    );
+
+    await expect(
+      controller.getLifecycle(student, 'missing-document'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
   it('rejects empty document ids while deleting', () => {
     const { controller } = createController();
 
@@ -466,3 +554,17 @@ describe('DocumentsController', () => {
     ).toThrow(BadRequestException);
   });
 });
+
+function sourceLifecycleDecision(overrides: Record<string, unknown> = {}) {
+  return {
+    documentId: 'document-1',
+    courseId: null,
+    status: 'ACTIVE',
+    recommendedAction: 'ARCHIVE',
+    canDelete: false,
+    canArchive: true,
+    blockingReasons: ['HAS_KNOWLEDGE_UNITS'],
+    userMessage: 'Cette source peut etre archivee.',
+    ...overrides,
+  };
+}

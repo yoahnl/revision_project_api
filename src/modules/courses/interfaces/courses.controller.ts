@@ -27,6 +27,10 @@ import {
   GetSubjectProgressUseCase,
 } from '../application/course-progress.use-case';
 import {
+  ArchiveCourseSourceUseCase,
+  GetCourseSourceLifecycleUseCase,
+} from '../application/course-source-lifecycle.use-case';
+import {
   QUICK_QUESTION_BANK_MAX_QUESTION_COUNT,
   QUICK_QUESTION_BANK_MIN_QUESTION_COUNT,
 } from '../../activities/application/question-bank.service';
@@ -51,6 +55,10 @@ import { GetCourseDetailUseCase } from '../application/get-course-detail.use-cas
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CourseContainsDocumentsError } from '../domain/course.entity';
+import {
+  SourceArchiveBlockedError,
+  SourceDeleteBlockedError,
+} from '../../documents/domain/source-lifecycle.entity';
 import type { CreateCourseRequest } from './create-course.request';
 import {
   toCourseDocumentResponse,
@@ -80,6 +88,8 @@ export class CoursesController {
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getCourseProgressUseCase: GetCourseProgressUseCase,
     private readonly getSubjectProgressUseCase: GetSubjectProgressUseCase,
+    private readonly getCourseSourceLifecycleUseCase: GetCourseSourceLifecycleUseCase,
+    private readonly archiveCourseSourceUseCase: ArchiveCourseSourceUseCase,
   ) {}
 
   @Get('subjects/:subjectId/courses')
@@ -198,6 +208,36 @@ export class CoursesController {
     @Param('documentId') documentId: string,
   ): Promise<void> {
     await this.deleteCourseDocumentUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        documentId: trimRequiredString(documentId, 'Document id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/sources/:documentId/lifecycle')
+  getCourseSourceLifecycle(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.getCourseSourceLifecycleUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        documentId: trimRequiredString(documentId, 'Document id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/sources/:documentId/archive')
+  archiveCourseSource(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Param('documentId') documentId: string,
+  ) {
+    return this.archiveCourseSourceUseCase
       .execute({
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
@@ -436,6 +476,17 @@ function normalizeCourseError(error: unknown): never {
 
   if (error instanceof CourseContainsDocumentsError) {
     throw new ConflictException('Course contains documents');
+  }
+
+  if (
+    error instanceof SourceDeleteBlockedError ||
+    error instanceof SourceArchiveBlockedError
+  ) {
+    throw new ConflictException({
+      code: error.code,
+      message: error.message,
+      decision: error.decision,
+    });
   }
 
   if (error instanceof CourseRevisionSheetSourceNotReadyError) {

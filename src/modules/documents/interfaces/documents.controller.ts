@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -23,8 +24,16 @@ import {
 import { ListDocumentKnowledgeUnitsUseCase } from '../application/list-document-knowledge-units.use-case';
 import { ListSubjectDocumentsUseCase } from '../application/list-subject-documents.use-case';
 import { RegisterDocumentUseCase } from '../application/register-document.use-case';
+import {
+  ArchiveDocumentUseCase,
+  GetDocumentSourceLifecycleUseCase,
+} from '../application/source-lifecycle.use-case';
 import { UploadCoursePdfUseCase } from '../application/upload-course-pdf.use-case';
 import { DOCUMENT_KINDS, type DocumentKind } from '../domain/document.entity';
+import {
+  SourceArchiveBlockedError,
+  SourceDeleteBlockedError,
+} from '../domain/source-lifecycle.entity';
 import {
   MAX_DOCUMENT_BYTES,
   type UploadedCoursePdfFile,
@@ -62,6 +71,8 @@ export class DocumentsController {
     private readonly listDocumentKnowledgeUnits: ListDocumentKnowledgeUnitsUseCase,
     private readonly uploadCoursePdfUseCase: UploadCoursePdfUseCase,
     private readonly deleteDocumentUseCase: DeleteDocumentUseCase,
+    private readonly getDocumentSourceLifecycleUseCase: GetDocumentSourceLifecycleUseCase,
+    private readonly archiveDocumentUseCase: ArchiveDocumentUseCase,
   ) {}
 
   @Post('documents')
@@ -180,10 +191,48 @@ export class DocumentsController {
       'Document id is required',
     );
 
-    return this.deleteDocumentUseCase.execute({
-      studentId: student.id,
-      documentId: validatedDocumentId,
-    });
+    return this.deleteDocumentUseCase
+      .execute({
+        studentId: student.id,
+        documentId: validatedDocumentId,
+      })
+      .catch(normalizeDocumentLifecycleError);
+  }
+
+  @Get('documents/:documentId/lifecycle')
+  getLifecycle(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('documentId') documentId: string,
+  ) {
+    const validatedDocumentId = trimRequiredString(
+      documentId,
+      'Document id is required',
+    );
+
+    return this.getDocumentSourceLifecycleUseCase
+      .execute({
+        studentId: student.id,
+        documentId: validatedDocumentId,
+      })
+      .catch(normalizeDocumentLifecycleError);
+  }
+
+  @Post('documents/:documentId/archive')
+  archive(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('documentId') documentId: string,
+  ) {
+    const validatedDocumentId = trimRequiredString(
+      documentId,
+      'Document id is required',
+    );
+
+    return this.archiveDocumentUseCase
+      .execute({
+        studentId: student.id,
+        documentId: validatedDocumentId,
+      })
+      .catch(normalizeDocumentLifecycleError);
   }
 }
 
@@ -355,6 +404,21 @@ function normalizeDocumentRegistrationError(error: unknown): never {
         'Exam images must use image/jpeg, image/png, or image/webp')
   ) {
     throw new BadRequestException(error.message);
+  }
+
+  throw error;
+}
+
+function normalizeDocumentLifecycleError(error: unknown): never {
+  if (
+    error instanceof SourceDeleteBlockedError ||
+    error instanceof SourceArchiveBlockedError
+  ) {
+    throw new ConflictException({
+      code: error.code,
+      message: error.message,
+      decision: error.decision,
+    });
   }
 
   throw error;

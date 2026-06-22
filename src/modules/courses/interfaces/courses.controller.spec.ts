@@ -24,10 +24,15 @@ import {
   GetCourseProgressUseCase,
   GetSubjectProgressUseCase,
 } from '../application/course-progress.use-case';
+import {
+  ArchiveCourseSourceUseCase,
+  GetCourseSourceLifecycleUseCase,
+} from '../application/course-source-lifecycle.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CoursesController } from './courses.controller';
+import { SourceDeleteBlockedError } from '../../documents/domain/source-lifecycle.entity';
 
 describe('CoursesController', () => {
   it('lists courses for the current student and subject', async () => {
@@ -229,6 +234,70 @@ describe('CoursesController', () => {
         'document-other',
       ),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it('loads source lifecycle for a course source', async () => {
+    const { controller, getCourseSourceLifecycle } = createController();
+    getCourseSourceLifecycle.execute.mockResolvedValue(
+      sourceLifecycleDecision(),
+    );
+
+    await expect(
+      controller.getCourseSourceLifecycle(
+        currentStudent,
+        ' course-1 ',
+        ' document-1 ',
+      ),
+    ).resolves.toMatchObject({
+      documentId: 'document-1',
+      recommendedAction: 'ARCHIVE',
+    });
+
+    expect(getCourseSourceLifecycle.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+    });
+  });
+
+  it('archives a course source', async () => {
+    const { controller, archiveCourseSource } = createController();
+    archiveCourseSource.execute.mockResolvedValue(
+      sourceLifecycleDecision({
+        status: 'ARCHIVED',
+        recommendedAction: 'BLOCK',
+        canArchive: false,
+      }),
+    );
+
+    await expect(
+      controller.archiveCourseSource(
+        currentStudent,
+        ' course-1 ',
+        ' document-1 ',
+      ),
+    ).resolves.toMatchObject({
+      documentId: 'document-1',
+      status: 'ARCHIVED',
+      recommendedAction: 'BLOCK',
+    });
+
+    expect(archiveCourseSource.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+    });
+  });
+
+  it('maps lifecycle delete conflicts to 409', async () => {
+    const { controller, deleteCourseDocument } = createController();
+    deleteCourseDocument.execute.mockRejectedValue(
+      new SourceDeleteBlockedError(sourceLifecycleDecision()),
+    );
+
+    await expect(
+      controller.deleteCourseDocument(currentStudent, 'course-1', 'document-1'),
+    ).rejects.toThrow(ConflictException);
   });
 
   it('uploads a course PDF with course-derived context only', async () => {
@@ -505,6 +574,8 @@ function createController() {
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getCourseProgress = { execute: jest.fn() };
   const getSubjectProgress = { execute: jest.fn() };
+  const getCourseSourceLifecycle = { execute: jest.fn() };
+  const archiveCourseSource = { execute: jest.fn() };
 
   return {
     controller: new CoursesController(
@@ -519,6 +590,8 @@ function createController() {
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getCourseProgress as unknown as GetCourseProgressUseCase,
       getSubjectProgress as unknown as GetSubjectProgressUseCase,
+      getCourseSourceLifecycle as unknown as GetCourseSourceLifecycleUseCase,
+      archiveCourseSource as unknown as ArchiveCourseSourceUseCase,
     ),
     createCourse,
     listCourses,
@@ -531,6 +604,8 @@ function createController() {
     startCourseQuickRevisionSession,
     getCourseProgress,
     getSubjectProgress,
+    getCourseSourceLifecycle,
+    archiveCourseSource,
   };
 }
 
@@ -605,6 +680,20 @@ function publicCourseProgress(overrides: Record<string, unknown> = {}) {
     failedSourceCount: 0,
     lastPracticedAt: '2026-06-18T12:00:00.000Z',
     state: 'PRACTICED',
+    ...overrides,
+  };
+}
+
+function sourceLifecycleDecision(overrides: Record<string, unknown> = {}) {
+  return {
+    documentId: 'document-1',
+    courseId: 'course-1',
+    status: 'ACTIVE',
+    recommendedAction: 'ARCHIVE',
+    canDelete: false,
+    canArchive: true,
+    blockingReasons: ['HAS_KNOWLEDGE_UNITS'],
+    userMessage: 'Cette source peut etre archivee.',
     ...overrides,
   };
 }

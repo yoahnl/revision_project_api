@@ -169,6 +169,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         studentId: input.studentId,
         courseId: { in: courses.map((course) => course.id) },
+        archivedAt: null,
       },
       select: {
         courseId: true,
@@ -219,6 +220,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         documents: {
           where: {
             studentId: input.studentId,
+            archivedAt: null,
           },
           orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
           select: {
@@ -275,6 +277,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         studentId: input.studentId,
         courseId: input.courseId,
         kind: DocumentKind.COURSE_PDF,
+        archivedAt: null,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -305,6 +308,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
                 courseId: course.id,
                 kind: DocumentKind.COURSE_PDF,
                 status: 'READY',
+                archivedAt: null,
               },
             },
             select: {
@@ -356,6 +360,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         subjectId: input.subjectId,
         courseId: { in: courseIds },
         kind: DocumentKind.COURSE_PDF,
+        archivedAt: null,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -387,6 +392,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
                 courseId: { in: courseIds },
                 kind: DocumentKind.COURSE_PDF,
                 status: 'READY',
+                archivedAt: null,
               },
             },
             select: {
@@ -486,6 +492,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         courseId: input.courseId,
         kind: DocumentKind.COURSE_PDF,
         status: 'READY',
+        archivedAt: null,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
@@ -521,6 +528,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
           courseId: input.courseId,
           kind: DocumentKind.COURSE_PDF,
           status: 'READY',
+          archivedAt: null,
         },
       },
       select: {
@@ -599,6 +607,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         kind: DocumentKind.COURSE_PDF,
         courseId: null,
+        archivedAt: null,
       },
       orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       select: {
