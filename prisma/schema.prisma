@@ -515,7 +515,7 @@ model Question {
   correctChoiceIds Json?
   explanation      String
 
-  session       ActivitySession   @relation(fields: [sessionId, knowledgeUnitId], references: [id, knowledgeUnitId], onDelete: Cascade)
+  session       ActivitySession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   bankQuestion  QuestionBankItem? @relation(fields: [bankQuestionId], references: [id], onDelete: NoAction)
   knowledgeUnit KnowledgeUnit     @relation(fields: [knowledgeUnitId], references: [id], onDelete: Cascade)
   sources       QuestionSource[]

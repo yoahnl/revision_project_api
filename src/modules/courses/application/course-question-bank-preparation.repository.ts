@@ -26,6 +26,12 @@ export interface CourseQuestionBankPreparationJobDto {
 }
 
 export interface CourseQuestionBankPreparationRepository {
+  findLatestForCourse(input: {
+    studentId: string;
+    courseId: string;
+    targetQuestionCount: number;
+  }): Promise<CourseQuestionBankPreparationJobDto | null>;
+
   findLatestForCourseContext(input: {
     studentId: string;
     courseId: string;

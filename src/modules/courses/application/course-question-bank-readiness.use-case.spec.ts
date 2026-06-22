@@ -53,8 +53,8 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
     coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
       courseDocument(),
     );
-    coursesRepository.findFirstQuickRevisionKnowledgeUnitForCourseDocument.mockResolvedValue(
-      knowledgeUnit(),
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [knowledgeUnit()],
     );
     questionBank.countActiveCourseQuickQuestions.mockResolvedValue(12);
 
@@ -82,11 +82,11 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
     coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
       courseDocument(),
     );
-    coursesRepository.findFirstQuickRevisionKnowledgeUnitForCourseDocument.mockResolvedValue(
-      knowledgeUnit(),
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [knowledgeUnit()],
     );
     questionBank.countActiveCourseQuickQuestions.mockResolvedValue(2);
-    preparationRepository.findLatestForCourseContext.mockResolvedValue(
+    preparationRepository.findLatestForCourse.mockResolvedValue(
       preparationJob({ status: 'PENDING' }),
     );
 
@@ -102,6 +102,47 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
       targetQuestionCount: 5,
       canStartQuickRevision: false,
       canPrepare: false,
+    });
+  });
+
+  it('reports ready from the total active question pool across multiple knowledge units', async () => {
+    const { coursesRepository, questionBank, useCase } =
+      createReadinessHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [
+        knowledgeUnit({ id: 'ku-1' }),
+        knowledgeUnit({ id: 'ku-2' }),
+        knowledgeUnit({ id: 'ku-3' }),
+      ],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(12);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 10,
+      }),
+    ).resolves.toMatchObject({
+      status: 'READY',
+      readyQuestionCount: 12,
+      targetQuestionCount: 10,
+      canStartQuickRevision: true,
+    });
+
+    expect(
+      questionBank.countActiveCourseQuickQuestions.mock.calls[0]?.[0],
+    ).toEqual({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      knowledgeUnitIds: ['ku-1', 'ku-2', 'ku-3'],
     });
   });
 });
@@ -121,14 +162,26 @@ describe('PrepareCourseQuestionBankUseCase', () => {
     coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
       courseDocument(),
     );
-    coursesRepository.findFirstQuickRevisionKnowledgeUnitForCourseDocument.mockResolvedValue(
-      knowledgeUnit(),
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [
+        knowledgeUnit({ id: 'ku-1', documentId: 'document-1' }),
+        knowledgeUnit({ id: 'ku-2', documentId: 'document-2' }),
+      ],
     );
     questionBank.countActiveCourseQuickQuestions.mockResolvedValue(1);
-    preparationRepository.findLatestForCourseContext.mockResolvedValue(null);
-    preparationRepository.ensurePendingForCourseContext.mockResolvedValue(
-      preparationJob({ id: 'prep-1', status: 'PENDING' }),
-    );
+    preparationRepository.findLatestForCourse.mockResolvedValue(null);
+    preparationRepository.ensurePendingForCourseContext
+      .mockResolvedValueOnce(
+        preparationJob({ id: 'prep-1', status: 'PENDING' }),
+      )
+      .mockResolvedValueOnce(
+        preparationJob({
+          id: 'prep-2',
+          documentId: 'document-2',
+          knowledgeUnitId: 'ku-2',
+          status: 'PENDING',
+        }),
+      );
 
     await expect(
       useCase.execute({
@@ -145,7 +198,7 @@ describe('PrepareCourseQuestionBankUseCase', () => {
 
     expect(
       preparationRepository.ensurePendingForCourseContext,
-    ).toHaveBeenCalledWith({
+    ).toHaveBeenNthCalledWith(1, {
       studentId: 'student-1',
       subjectId: 'subject-1',
       courseId: 'course-1',
@@ -153,8 +206,21 @@ describe('PrepareCourseQuestionBankUseCase', () => {
       knowledgeUnitId: 'ku-1',
       targetQuestionCount: 5,
     });
-    expect(preparationQueue.enqueue).toHaveBeenCalledWith({
+    expect(
+      preparationRepository.ensurePendingForCourseContext,
+    ).toHaveBeenNthCalledWith(2, {
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-2',
+      knowledgeUnitId: 'ku-2',
+      targetQuestionCount: 5,
+    });
+    expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(1, {
       preparationJobId: 'prep-1',
+    });
+    expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(2, {
+      preparationJobId: 'prep-2',
     });
   });
 });
@@ -204,12 +270,13 @@ function createCoursesRepositoryMock() {
   return {
     findCourseOwnershipContext: jest.fn(),
     findFirstReadyCoursePdfDocumentForCourse: jest.fn(),
-    findFirstQuickRevisionKnowledgeUnitForCourseDocument: jest.fn(),
+    findReadyQuickRevisionKnowledgeUnitsForCourse: jest.fn(),
   } as unknown as jest.Mocked<CoursesRepository>;
 }
 
 function createPreparationRepositoryMock() {
   return {
+    findLatestForCourse: jest.fn(),
     findLatestForCourseContext: jest.fn(),
     ensurePendingForCourseContext: jest.fn(),
     claimNextPending: jest.fn(),

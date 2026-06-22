@@ -43,8 +43,7 @@ describe('StartCourseQuickRevisionSessionUseCase', () => {
     ).rejects.toThrow(CourseQuickRevisionSourceNotReadyError);
 
     const knowledgeUnitLookupCalls =
-      repository.findFirstQuickRevisionKnowledgeUnitForCourseDocument.mock
-        .calls;
+      repository.findReadyQuickRevisionKnowledgeUnitsForCourse.mock.calls;
     expect(knowledgeUnitLookupCalls).toHaveLength(0);
     expect(startRevisionSession.execute.mock.calls).toHaveLength(0);
   });
@@ -55,8 +54,8 @@ describe('StartCourseQuickRevisionSessionUseCase', () => {
     repository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
       courseDocument(),
     );
-    repository.findFirstQuickRevisionKnowledgeUnitForCourseDocument.mockResolvedValue(
-      null,
+    repository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [],
     );
 
     await expect(
@@ -73,9 +72,10 @@ describe('StartCourseQuickRevisionSessionUseCase', () => {
     repository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
       courseDocument({ documentId: 'document-ready-1' }),
     );
-    repository.findFirstQuickRevisionKnowledgeUnitForCourseDocument.mockResolvedValue(
-      knowledgeUnit({ id: 'unit-ready-1' }),
-    );
+    repository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue([
+      knowledgeUnit({ id: 'unit-ready-1', documentId: 'document-ready-1' }),
+      knowledgeUnit({ id: 'unit-ready-2', documentId: 'document-ready-2' }),
+    ]);
     questionBank.countActiveCourseQuickQuestions.mockResolvedValue(12);
     questionBank.createCourseQuickDiagnosticQuiz.mockResolvedValue(
       diagnosticQuizActivity({ questionCount: 12 }),
@@ -89,13 +89,12 @@ describe('StartCourseQuickRevisionSessionUseCase', () => {
     });
 
     expect(
-      repository.findFirstQuickRevisionKnowledgeUnitForCourseDocument.mock
+      repository.findReadyQuickRevisionKnowledgeUnitsForCourse.mock
         .calls[0]?.[0],
     ).toEqual({
       studentId: 'student-1',
       courseId: 'course-1',
       subjectId: 'subject-1',
-      documentId: 'document-ready-1',
     });
     expect(
       questionBank.countActiveCourseQuickQuestions.mock.calls[0]?.[0],
@@ -103,7 +102,7 @@ describe('StartCourseQuickRevisionSessionUseCase', () => {
       studentId: 'student-1',
       subjectId: 'subject-1',
       courseId: 'course-1',
-      knowledgeUnitId: 'unit-ready-1',
+      knowledgeUnitIds: ['unit-ready-1', 'unit-ready-2'],
     });
     expect(
       questionBank.createCourseQuickDiagnosticQuiz.mock.calls[0]?.[0],
@@ -113,6 +112,10 @@ describe('StartCourseQuickRevisionSessionUseCase', () => {
       courseId: 'course-1',
       documentId: 'document-ready-1',
       knowledgeUnitId: 'unit-ready-1',
+      knowledgeUnits: [
+        { id: 'unit-ready-1', documentId: 'document-ready-1' },
+        { id: 'unit-ready-2', documentId: 'document-ready-2' },
+      ],
       questionCount: 12,
     });
     expect(startRevisionSession.execute.mock.calls[0]?.[0]).toEqual({
@@ -140,9 +143,9 @@ describe('StartCourseQuickRevisionSessionUseCase', () => {
     repository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
       courseDocument({ documentId: 'document-ready-1' }),
     );
-    repository.findFirstQuickRevisionKnowledgeUnitForCourseDocument.mockResolvedValue(
+    repository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue([
       knowledgeUnit({ id: 'unit-ready-1' }),
-    );
+    ]);
     questionBank.countActiveCourseQuickQuestions.mockResolvedValue(2);
     prepareQuestionBank.execute.mockResolvedValue({
       courseId: 'course-1',
@@ -186,6 +189,7 @@ function createHarness() {
     findCourseOwnershipContext: jest.fn(),
     findFirstReadyCoursePdfDocumentForCourse: jest.fn(),
     findFirstQuickRevisionKnowledgeUnitForCourseDocument: jest.fn(),
+    findReadyQuickRevisionKnowledgeUnitsForCourse: jest.fn(),
     attachDocumentToCourse: jest.fn(),
     backfillFromExistingDocumentsDryRun: jest.fn(),
     backfillFromExistingDocuments: jest.fn(),

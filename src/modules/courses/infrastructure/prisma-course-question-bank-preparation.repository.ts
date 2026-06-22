@@ -9,6 +9,25 @@ import type {
 export class PrismaCourseQuestionBankPreparationRepository implements CourseQuestionBankPreparationRepository {
   constructor(private readonly prisma: PrismaService) {}
 
+  async findLatestForCourse(input: {
+    studentId: string;
+    courseId: string;
+    targetQuestionCount: number;
+  }): Promise<CourseQuestionBankPreparationJobDto | null> {
+    const job = await this.prisma.courseQuestionBankPreparationJob.findFirst({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        targetQuestionCount: {
+          gte: input.targetQuestionCount,
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    });
+
+    return job ? toDto(job) : null;
+  }
+
   async findLatestForCourseContext(input: {
     studentId: string;
     courseId: string;

@@ -563,6 +563,78 @@ describe('PrismaCoursesRepository', () => {
     });
   });
 
+  it('returns all quick revision knowledge units from READY course documents', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      knowledgeUnitRecord({
+        id: 'unit-strong',
+        documentId: 'document-ready-1',
+        displayOrder: 0,
+        mastery: [{ score: 0.8, lastPracticedAt: null }],
+      }),
+      knowledgeUnitRecord({
+        id: 'unit-weak',
+        documentId: 'document-ready-2',
+        displayOrder: 1,
+        mastery: [
+          {
+            score: 0.2,
+            lastPracticedAt: new Date('2026-06-10T10:00:00.000Z'),
+          },
+        ],
+      }),
+    ]);
+
+    await expect(
+      repository.findReadyQuickRevisionKnowledgeUnitsForCourse({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        subjectId: 'subject-1',
+      }),
+    ).resolves.toEqual([
+      {
+        id: 'unit-weak',
+        subjectId: 'subject-1',
+        documentId: 'document-ready-2',
+        title: 'Contrôle parlementaire',
+      },
+      {
+        id: 'unit-strong',
+        subjectId: 'subject-1',
+        documentId: 'document-ready-1',
+        title: 'Contrôle parlementaire',
+      },
+    ]);
+
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        subjectId: 'subject-1',
+        subject: { studentId: 'student-1', archivedAt: null },
+        document: {
+          studentId: 'student-1',
+          subjectId: 'subject-1',
+          courseId: 'course-1',
+          kind: 'COURSE_PDF',
+          status: 'READY',
+          archivedAt: null,
+        },
+      },
+      select: {
+        id: true,
+        subjectId: true,
+        documentId: true,
+        title: true,
+        displayOrder: true,
+        createdAt: true,
+        mastery: {
+          where: { studentId: 'student-1' },
+          select: { score: true, lastPracticedAt: true },
+          take: 1,
+        },
+      },
+    });
+  });
+
   it('returns null when a READY course document has no knowledge unit', async () => {
     const { prisma, repository } = createRepository();
     prisma.knowledgeUnit.findMany.mockResolvedValue([]);

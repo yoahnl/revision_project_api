@@ -206,6 +206,12 @@ export interface CoursesRepository {
     documentId: string;
   }): Promise<CourseQuickRevisionKnowledgeUnitDto | null>;
 
+  findReadyQuickRevisionKnowledgeUnitsForCourse(input: {
+    studentId: string;
+    courseId: string;
+    subjectId: string;
+  }): Promise<CourseQuickRevisionKnowledgeUnitDto[]>;
+
   attachDocumentToCourse(input: {
     studentId: string;
     courseId: string;

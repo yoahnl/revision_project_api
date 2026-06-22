@@ -79,8 +79,6 @@ export class StartCourseQuickRevisionSessionUseCase {
       throw new Error('Course not found');
     }
 
-    // CORE-05 keeps quick revision single-source. The client submits only
-    // courseId; the backend chooses the first READY course PDF deterministically.
     const readySource =
       await this.coursesRepository.findFirstReadyCoursePdfDocumentForCourse(
         input,
@@ -90,17 +88,17 @@ export class StartCourseQuickRevisionSessionUseCase {
       throw new CourseQuickRevisionSourceNotReadyError();
     }
 
-    const knowledgeUnit =
-      await this.coursesRepository.findFirstQuickRevisionKnowledgeUnitForCourseDocument(
+    const knowledgeUnits =
+      await this.coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse(
         {
           studentId: input.studentId,
           courseId: course.courseId,
           subjectId: course.subjectId,
-          documentId: readySource.documentId,
         },
       );
+    const [primaryKnowledgeUnit] = knowledgeUnits;
 
-    if (!knowledgeUnit) {
+    if (!primaryKnowledgeUnit) {
       throw new CourseQuickRevisionKnowledgeUnitNotReadyError();
     }
 
@@ -124,7 +122,7 @@ export class StartCourseQuickRevisionSessionUseCase {
         studentId: input.studentId,
         subjectId: course.subjectId,
         courseId: course.courseId,
-        knowledgeUnitId: knowledgeUnit.id,
+        knowledgeUnitIds: knowledgeUnits.map((unit) => unit.id),
       });
 
     if (readyQuestionCount < questionCount) {
@@ -143,8 +141,12 @@ export class StartCourseQuickRevisionSessionUseCase {
           studentId: input.studentId,
           subjectId: course.subjectId,
           courseId: course.courseId,
-          documentId: readySource.documentId,
-          knowledgeUnitId: knowledgeUnit.id,
+          documentId: primaryKnowledgeUnit.documentId,
+          knowledgeUnitId: primaryKnowledgeUnit.id,
+          knowledgeUnits: knowledgeUnits.map((unit) => ({
+            id: unit.id,
+            documentId: unit.documentId,
+          })),
           questionCount,
         });
 
@@ -152,8 +154,8 @@ export class StartCourseQuickRevisionSessionUseCase {
         studentId: input.studentId,
         subjectId: course.subjectId,
         courseId: course.courseId,
-        documentId: readySource.documentId,
-        knowledgeUnitId: knowledgeUnit.id,
+        documentId: primaryKnowledgeUnit.documentId,
+        knowledgeUnitId: primaryKnowledgeUnit.id,
         preferredAction: 'diagnostic_quiz',
         diagnosticQuizActivity,
       });

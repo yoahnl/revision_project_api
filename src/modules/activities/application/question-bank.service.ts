@@ -46,6 +46,27 @@ type QuestionBankItemWithRelations = Prisma.QuestionBankItemGetPayload<{
   };
 }>;
 
+type CourseQuickQuestionKnowledgeUnitInput = {
+  id: string;
+  documentId: string;
+};
+
+type CourseQuickQuestionContext = {
+  primaryDocumentId: string;
+  primaryKnowledgeUnitId: string;
+  knowledgeUnits: CourseQuickQuestionKnowledgeUnitInput[];
+};
+
+type CourseQuickReservationInput = {
+  studentId: string;
+  subjectId: string;
+  courseId: string;
+  knowledgeUnits: CourseQuickQuestionKnowledgeUnitInput[];
+  questionCount: number;
+};
+
+const QUICK_QUESTION_BANK_RESERVATION_MAX_ATTEMPTS = 3;
+
 @Injectable()
 export class QuestionBankService {
   constructor(
@@ -60,30 +81,21 @@ export class QuestionBankService {
     studentId: string;
     subjectId: string;
     courseId: string;
-    documentId: string;
-    knowledgeUnitId: string;
+    documentId?: string;
+    knowledgeUnitId?: string;
+    knowledgeUnits?: CourseQuickQuestionKnowledgeUnitInput[];
     questionCount?: number;
   }): Promise<DiagnosticQuizActivity> {
     const questionCount = resolveQuickQuestionBankQuestionCount(
       input.questionCount,
     );
-    const context =
-      await this.activitiesRepository.findDiagnosticQuizGenerationContext({
-        studentId: input.studentId,
-        subjectId: input.subjectId,
-        knowledgeUnitId: input.knowledgeUnitId,
-      });
-
-    if (
-      !context ||
-      context.documentId !== input.documentId ||
-      context.chunks.length === 0
-    ) {
-      throw new Error(QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY);
-    }
+    const quickContext = resolveCourseQuickQuestionContext(input);
 
     const selectedQuestions = await this.reserveQuestions({
-      ...input,
+      studentId: input.studentId,
+      subjectId: input.subjectId,
+      courseId: input.courseId,
+      knowledgeUnits: quickContext.knowledgeUnits,
       questionCount,
     });
 
@@ -94,8 +106,8 @@ export class QuestionBankService {
     return this.activitiesRepository.createDiagnosticQuiz({
       studentId: input.studentId,
       subjectId: input.subjectId,
-      knowledgeUnitId: input.knowledgeUnitId,
-      documentId: input.documentId,
+      knowledgeUnitId: quickContext.primaryKnowledgeUnitId,
+      documentId: quickContext.primaryDocumentId,
       quiz: toGeneratedQuiz(selectedQuestions),
     });
   }
@@ -137,7 +149,8 @@ export class QuestionBankService {
     studentId: string;
     subjectId: string;
     courseId: string;
-    knowledgeUnitId: string;
+    knowledgeUnitId?: string;
+    knowledgeUnitIds?: string[];
   }): Promise<number> {
     return this.countActiveQuestions(input);
   }
@@ -199,14 +212,20 @@ export class QuestionBankService {
     studentId: string;
     subjectId: string;
     courseId: string;
-    knowledgeUnitId: string;
+    knowledgeUnitId?: string;
+    knowledgeUnitIds?: string[];
   }) {
+    const knowledgeUnitIds = resolveKnowledgeUnitIds(input);
+
     return this.prisma.questionBankItem.count({
       where: {
         studentId: input.studentId,
         subjectId: input.subjectId,
         courseId: input.courseId,
-        knowledgeUnitId: input.knowledgeUnitId,
+        knowledgeUnitId:
+          knowledgeUnitIds.length === 1
+            ? knowledgeUnitIds[0]
+            : { in: knowledgeUnitIds },
         status: QuestionBankItemStatus.ACTIVE,
       },
     });
@@ -312,20 +331,39 @@ export class QuestionBankService {
     }
   }
 
-  private async reserveQuestions(input: {
-    studentId: string;
-    subjectId: string;
-    courseId: string;
-    knowledgeUnitId: string;
-    questionCount: number;
-  }): Promise<QuestionBankItemWithRelations[]> {
+  private async reserveQuestions(
+    input: CourseQuickReservationInput,
+  ): Promise<QuestionBankItemWithRelations[]> {
+    for (
+      let attempt = 0;
+      attempt < QUICK_QUESTION_BANK_RESERVATION_MAX_ATTEMPTS;
+      attempt += 1
+    ) {
+      const reserved = await this.tryReserveQuestions(input);
+
+      if (reserved.length === input.questionCount) {
+        return reserved;
+      }
+    }
+
+    return [];
+  }
+
+  private async tryReserveQuestions(
+    input: CourseQuickReservationInput,
+  ): Promise<QuestionBankItemWithRelations[]> {
+    const knowledgeUnitIds = input.knowledgeUnits.map((unit) => unit.id);
+
     return this.prisma.$transaction(async (tx) => {
       const available = await tx.questionBankItem.findMany({
         where: {
           studentId: input.studentId,
           subjectId: input.subjectId,
           courseId: input.courseId,
-          knowledgeUnitId: input.knowledgeUnitId,
+          knowledgeUnitId:
+            knowledgeUnitIds.length === 1
+              ? knowledgeUnitIds[0]
+              : { in: knowledgeUnitIds },
           status: QuestionBankItemStatus.ACTIVE,
         },
         include: {
@@ -342,29 +380,43 @@ export class QuestionBankService {
           { createdAt: 'asc' },
           { id: 'asc' },
         ],
-        take: input.questionCount,
       });
 
-      const selectedIds = available.map((question) => question.id);
+      const selectedQuestions = selectBalancedQuestions({
+        questions: available,
+        knowledgeUnitIds,
+        questionCount: input.questionCount,
+      });
 
-      if (selectedIds.length > 0) {
-        await tx.questionBankItem.updateMany({
+      if (selectedQuestions.length < input.questionCount) {
+        return [];
+      }
+
+      const reservedAt = new Date();
+
+      for (const question of selectedQuestions) {
+        const result = await tx.questionBankItem.updateMany({
           where: {
-            id: {
-              in: selectedIds,
-            },
+            id: question.id,
             studentId: input.studentId,
+            askedCount: question.askedCount,
+            lastAskedAt: question.lastAskedAt,
+            status: QuestionBankItemStatus.ACTIVE,
           },
           data: {
             askedCount: {
               increment: 1,
             },
-            lastAskedAt: new Date(),
+            lastAskedAt: reservedAt,
           },
         });
+
+        if (result.count !== 1) {
+          return [];
+        }
       }
 
-      return available;
+      return selectedQuestions;
     });
   }
 }
@@ -386,6 +438,113 @@ export function resolveQuickQuestionBankQuestionCount(
   return resolvedQuestionCount;
 }
 
+function resolveCourseQuickQuestionContext(input: {
+  documentId?: string;
+  knowledgeUnitId?: string;
+  knowledgeUnits?: CourseQuickQuestionKnowledgeUnitInput[];
+}): CourseQuickQuestionContext {
+  const knowledgeUnits = dedupeKnowledgeUnits([
+    ...(input.knowledgeUnits ?? []),
+    ...(input.knowledgeUnitId && input.documentId
+      ? [{ id: input.knowledgeUnitId, documentId: input.documentId }]
+      : []),
+  ]);
+
+  const [primaryKnowledgeUnit] = knowledgeUnits;
+
+  if (!primaryKnowledgeUnit) {
+    throw new Error(QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY);
+  }
+
+  return {
+    primaryDocumentId: primaryKnowledgeUnit.documentId,
+    primaryKnowledgeUnitId: primaryKnowledgeUnit.id,
+    knowledgeUnits,
+  };
+}
+
+function resolveKnowledgeUnitIds(input: {
+  knowledgeUnitId?: string;
+  knowledgeUnitIds?: string[];
+}): string[] {
+  const knowledgeUnitIds = dedupeStrings([
+    ...(input.knowledgeUnitIds ?? []),
+    ...(input.knowledgeUnitId ? [input.knowledgeUnitId] : []),
+  ]);
+
+  if (knowledgeUnitIds.length === 0) {
+    throw new Error(QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY);
+  }
+
+  return knowledgeUnitIds;
+}
+
+function dedupeKnowledgeUnits(
+  knowledgeUnits: CourseQuickQuestionKnowledgeUnitInput[],
+): CourseQuickQuestionKnowledgeUnitInput[] {
+  const byId = new Map<string, CourseQuickQuestionKnowledgeUnitInput>();
+
+  for (const knowledgeUnit of knowledgeUnits) {
+    if (
+      knowledgeUnit.id.length === 0 ||
+      knowledgeUnit.documentId.length === 0
+    ) {
+      continue;
+    }
+
+    byId.set(knowledgeUnit.id, knowledgeUnit);
+  }
+
+  return [...byId.values()];
+}
+
+function selectBalancedQuestions(input: {
+  questions: QuestionBankItemWithRelations[];
+  knowledgeUnitIds: string[];
+  questionCount: number;
+}): QuestionBankItemWithRelations[] {
+  const groupedByKnowledgeUnitId = new Map<
+    string,
+    QuestionBankItemWithRelations[]
+  >();
+
+  for (const knowledgeUnitId of input.knowledgeUnitIds) {
+    groupedByKnowledgeUnitId.set(knowledgeUnitId, []);
+  }
+
+  for (const question of input.questions) {
+    groupedByKnowledgeUnitId.get(question.knowledgeUnitId)?.push(question);
+  }
+
+  const selectedQuestions: QuestionBankItemWithRelations[] = [];
+
+  while (selectedQuestions.length < input.questionCount) {
+    let addedInPass = false;
+
+    for (const knowledgeUnitId of input.knowledgeUnitIds) {
+      const questions = groupedByKnowledgeUnitId.get(knowledgeUnitId);
+      const nextQuestion = questions?.shift();
+
+      if (!nextQuestion) {
+        continue;
+      }
+
+      selectedQuestions.push(nextQuestion);
+      addedInPass = true;
+
+      if (selectedQuestions.length === input.questionCount) {
+        break;
+      }
+    }
+
+    if (!addedInPass) {
+      break;
+    }
+  }
+
+  return selectedQuestions;
+}
+
 function toGeneratedQuiz(
   questions: QuestionBankItemWithRelations[],
 ): GeneratedDiagnosticQuiz {
@@ -401,6 +560,8 @@ function toGeneratedQuestion(
 ): GeneratedDiagnosticQuizQuestion {
   return {
     bankQuestionId: question.id,
+    documentId: question.documentId,
+    knowledgeUnitId: question.knowledgeUnitId,
     prompt: question.prompt,
     difficulty: question.difficulty,
     choices: toGeneratedChoices(question.choices),

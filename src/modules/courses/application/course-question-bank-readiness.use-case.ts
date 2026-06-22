@@ -23,6 +23,8 @@ import {
   type CoursesRepository,
 } from './courses.repository';
 
+const QUICK_QUESTION_BANK_PREPARATION_MIN_PER_KU = 5;
+
 @Injectable()
 export class GetCourseQuestionBankReadinessUseCase {
   constructor(
@@ -57,7 +59,7 @@ export class GetCourseQuestionBankReadinessUseCase {
     readiness: CourseQuestionBankReadiness;
     subjectId: string | null;
     document: CourseDocumentDto | null;
-    knowledgeUnit: CourseQuickRevisionKnowledgeUnitDto | null;
+    knowledgeUnits: CourseQuickRevisionKnowledgeUnitDto[];
   }> {
     const course =
       await this.coursesRepository.findCourseOwnershipContext(input);
@@ -81,21 +83,20 @@ export class GetCourseQuestionBankReadinessUseCase {
         }),
         subjectId: course.subjectId,
         document: null,
-        knowledgeUnit: null,
+        knowledgeUnits: [],
       };
     }
 
-    const knowledgeUnit =
-      await this.coursesRepository.findFirstQuickRevisionKnowledgeUnitForCourseDocument(
+    const knowledgeUnits =
+      await this.coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse(
         {
           studentId: input.studentId,
           courseId: course.courseId,
           subjectId: course.subjectId,
-          documentId: document.documentId,
         },
       );
 
-    if (!knowledgeUnit) {
+    if (knowledgeUnits.length === 0) {
       return {
         readiness: buildCourseQuestionBankReadiness({
           courseId: input.courseId,
@@ -105,7 +106,7 @@ export class GetCourseQuestionBankReadinessUseCase {
         }),
         subjectId: course.subjectId,
         document,
-        knowledgeUnit: null,
+        knowledgeUnits: [],
       };
     }
 
@@ -114,7 +115,7 @@ export class GetCourseQuestionBankReadinessUseCase {
         studentId: input.studentId,
         subjectId: course.subjectId,
         courseId: course.courseId,
-        knowledgeUnitId: knowledgeUnit.id,
+        knowledgeUnitIds: knowledgeUnits.map((unit) => unit.id),
       });
 
     if (readyQuestionCount >= input.targetQuestionCount) {
@@ -127,15 +128,13 @@ export class GetCourseQuestionBankReadinessUseCase {
         }),
         subjectId: course.subjectId,
         document,
-        knowledgeUnit,
+        knowledgeUnits,
       };
     }
 
-    const job = await this.preparationRepository.findLatestForCourseContext({
+    const job = await this.preparationRepository.findLatestForCourse({
       studentId: input.studentId,
       courseId: course.courseId,
-      documentId: document.documentId,
-      knowledgeUnitId: knowledgeUnit.id,
       targetQuestionCount: input.targetQuestionCount,
     });
 
@@ -148,7 +147,7 @@ export class GetCourseQuestionBankReadinessUseCase {
       }),
       subjectId: course.subjectId,
       document,
-      knowledgeUnit,
+      knowledgeUnits,
     };
   }
 }
@@ -188,20 +187,28 @@ export class PrepareCourseQuestionBankUseCase {
       return context.readiness;
     }
 
-    if (!context.subjectId || !context.document || !context.knowledgeUnit) {
+    if (!context.subjectId || context.knowledgeUnits.length === 0) {
       return context.readiness;
     }
 
-    const job = await this.preparationRepository.ensurePendingForCourseContext({
-      studentId: input.studentId,
-      subjectId: context.subjectId,
-      courseId: input.courseId,
-      documentId: context.document.documentId,
-      knowledgeUnitId: context.knowledgeUnit.id,
-      targetQuestionCount,
-    });
+    const targetQuestionCountPerKnowledgeUnit = Math.max(
+      QUICK_QUESTION_BANK_PREPARATION_MIN_PER_KU,
+      Math.ceil(targetQuestionCount / context.knowledgeUnits.length),
+    );
 
-    await this.preparationQueue.enqueue({ preparationJobId: job.id });
+    for (const knowledgeUnit of context.knowledgeUnits) {
+      const job =
+        await this.preparationRepository.ensurePendingForCourseContext({
+          studentId: input.studentId,
+          subjectId: context.subjectId,
+          courseId: input.courseId,
+          documentId: knowledgeUnit.documentId,
+          knowledgeUnitId: knowledgeUnit.id,
+          targetQuestionCount: targetQuestionCountPerKnowledgeUnit,
+        });
+
+      await this.preparationQueue.enqueue({ preparationJobId: job.id });
+    }
 
     return buildCourseQuestionBankReadiness({
       courseId: input.courseId,

@@ -35,6 +35,8 @@ export interface GeneratedDiagnosticQuizChoice {
 
 export interface GeneratedDiagnosticQuizQuestion {
   bankQuestionId?: string;
+  documentId?: string | null;
+  knowledgeUnitId?: string;
   prompt: string;
   difficulty?: DiagnosticQuizDifficulty | null;
   choices: GeneratedDiagnosticQuizChoice[];

@@ -39,33 +39,71 @@ export class SubmitActivityResultUseCase {
     const masteryStates = await this.revisionRepository.findMasteryStates(
       input.studentId,
     );
-    const currentMastery =
-      masteryStates.find(
-        (masteryState) =>
-          masteryState.knowledgeUnitId === result.knowledgeUnitId,
-      ) ??
-      new MasteryState({
-        studentId: input.studentId,
-        knowledgeUnitId: result.knowledgeUnitId,
-        score: 0,
-        lastPracticedAt: null,
-      });
-    const nextMastery = currentMastery.applyQuizResult(
-      result.correctAnswers,
-      result.totalQuestions,
-      practicedAt,
+    const masteryByKnowledgeUnitId = new Map(
+      masteryStates.map((masteryState) => [
+        masteryState.knowledgeUnitId,
+        masteryState,
+      ]),
     );
+    const quizResultsByKnowledgeUnitId = groupQuizItemsByKnowledgeUnit(result);
 
-    await this.revisionRepository.upsertMastery({
-      studentId: nextMastery.studentId,
-      knowledgeUnitId: nextMastery.knowledgeUnitId,
-      score: nextMastery.score,
-      lastPracticedAt: nextMastery.lastPracticedAt ?? practicedAt,
-    });
+    for (const [knowledgeUnitId, quizResult] of quizResultsByKnowledgeUnitId) {
+      const currentMastery =
+        masteryByKnowledgeUnitId.get(knowledgeUnitId) ??
+        new MasteryState({
+          studentId: input.studentId,
+          knowledgeUnitId,
+          score: 0,
+          lastPracticedAt: null,
+        });
+      const nextMastery = currentMastery.applyQuizResult(
+        quizResult.correctAnswers,
+        quizResult.totalQuestions,
+        practicedAt,
+      );
+
+      await this.revisionRepository.upsertMastery({
+        studentId: nextMastery.studentId,
+        knowledgeUnitId: nextMastery.knowledgeUnitId,
+        score: nextMastery.score,
+        lastPracticedAt: nextMastery.lastPracticedAt ?? practicedAt,
+      });
+    }
 
     const { knowledgeUnitId, ...publicResult } = result;
     void knowledgeUnitId;
 
     return publicResult;
   }
+}
+
+function groupQuizItemsByKnowledgeUnit(
+  result: DiagnosticQuizSubmissionResult,
+): Map<string, { correctAnswers: number; totalQuestions: number }> {
+  const grouped = new Map<
+    string,
+    { correctAnswers: number; totalQuestions: number }
+  >();
+
+  for (const item of result.items) {
+    const knowledgeUnitId = item.knowledgeUnitId ?? result.knowledgeUnitId;
+    const group = grouped.get(knowledgeUnitId) ?? {
+      correctAnswers: 0,
+      totalQuestions: 0,
+    };
+
+    grouped.set(knowledgeUnitId, {
+      correctAnswers: group.correctAnswers + (item.isCorrect ? 1 : 0),
+      totalQuestions: group.totalQuestions + 1,
+    });
+  }
+
+  if (grouped.size === 0) {
+    grouped.set(result.knowledgeUnitId, {
+      correctAnswers: result.correctAnswers,
+      totalQuestions: result.totalQuestions,
+    });
+  }
+
+  return grouped;
 }

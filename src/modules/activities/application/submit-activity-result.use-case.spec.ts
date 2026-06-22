@@ -32,26 +32,13 @@ describe('SubmitActivityResultUseCase', () => {
       totalQuestions: 10,
       score: 0.8,
       knowledgeUnitId: 'unit-1',
-      items: [
-        {
-          questionId: 'question-1',
+      items: Array.from({ length: 10 }, (_, index) =>
+        resultItem({
+          questionId: `question-${index + 1}`,
           knowledgeUnitId: 'unit-1',
-          prompt: 'Question ?',
-          selectedChoiceId: 'a',
-          correctChoiceId: 'a',
-          isCorrect: true,
-          explanation: 'Explication.',
-          choiceFeedback: [{ choiceId: 'a', feedback: 'Bien.' }],
-          sources: [
-            {
-              chunkId: 'chunk-1',
-              text: 'Extrait source.',
-              pageNumber: null,
-              index: 0,
-            },
-          ],
-        },
-      ],
+          isCorrect: index < 8,
+        }),
+      ),
     });
     revisionRepository.findMasteryStates.mockResolvedValue([
       new MasteryState({
@@ -100,29 +87,119 @@ describe('SubmitActivityResultUseCase', () => {
       correctAnswers: 8,
       totalQuestions: 10,
       score: 0.8,
-      items: [
-        {
-          questionId: 'question-1',
+      items: Array.from({ length: 10 }, (_, index) =>
+        resultItem({
+          questionId: `question-${index + 1}`,
           knowledgeUnitId: 'unit-1',
-          prompt: 'Question ?',
-          selectedChoiceId: 'a',
-          correctChoiceId: 'a',
-          isCorrect: true,
-          explanation: 'Explication.',
-          choiceFeedback: [{ choiceId: 'a', feedback: 'Bien.' }],
-          sources: [
-            {
-              chunkId: 'chunk-1',
-              text: 'Extrait source.',
-              pageNumber: null,
-              index: 0,
-            },
-          ],
-        },
-      ],
+          isCorrect: index < 8,
+        }),
+      ),
     });
   });
+
+  it('updates mastery per knowledge unit when a quick quiz spans multiple notions', async () => {
+    const practicedAt = new Date('2026-06-12T10:00:00.000Z');
+    const activitiesRepository = createActivitiesRepository();
+    const revisionRepository = createRevisionRepository();
+    activitiesRepository.submitResult.mockResolvedValue({
+      correctAnswers: 3,
+      totalQuestions: 4,
+      score: 0.75,
+      knowledgeUnitId: 'unit-1',
+      items: [
+        resultItem({
+          questionId: 'question-1',
+          knowledgeUnitId: 'unit-1',
+          isCorrect: true,
+        }),
+        resultItem({
+          questionId: 'question-2',
+          knowledgeUnitId: 'unit-1',
+          isCorrect: false,
+        }),
+        resultItem({
+          questionId: 'question-3',
+          knowledgeUnitId: 'unit-2',
+          isCorrect: true,
+        }),
+        resultItem({
+          questionId: 'question-4',
+          knowledgeUnitId: 'unit-2',
+          isCorrect: true,
+        }),
+      ],
+    });
+    revisionRepository.findMasteryStates.mockResolvedValue([
+      new MasteryState({
+        studentId: 'student-1',
+        knowledgeUnitId: 'unit-1',
+        score: 0.4,
+        lastPracticedAt: null,
+      }),
+      new MasteryState({
+        studentId: 'student-1',
+        knowledgeUnitId: 'unit-2',
+        score: 0.2,
+        lastPracticedAt: null,
+      }),
+    ]);
+    revisionRepository.upsertMastery.mockImplementation((input) =>
+      Promise.resolve(new MasteryState(input)),
+    );
+
+    const useCase = new SubmitActivityResultUseCase(
+      activitiesRepository,
+      revisionRepository,
+      () => practicedAt,
+    );
+
+    await useCase.execute({
+      studentId: 'student-1',
+      sessionId: 'session-1',
+      answers: [
+        { questionId: 'question-1', choiceId: 'a' },
+        { questionId: 'question-2', choiceId: 'b' },
+        { questionId: 'question-3', choiceId: 'a' },
+        { questionId: 'question-4', choiceId: 'a' },
+      ],
+    });
+
+    expect(
+      revisionRepository.upsertMastery.mock.calls.map(([input]) => input),
+    ).toEqual([
+      {
+        studentId: 'student-1',
+        knowledgeUnitId: 'unit-1',
+        score: 0.435,
+        lastPracticedAt: practicedAt,
+      },
+      {
+        studentId: 'student-1',
+        knowledgeUnitId: 'unit-2',
+        score: 0.48,
+        lastPracticedAt: practicedAt,
+      },
+    ]);
+  });
 });
+
+function resultItem(overrides: {
+  questionId: string;
+  knowledgeUnitId: string;
+  isCorrect: boolean;
+}) {
+  return {
+    questionId: overrides.questionId,
+    knowledgeUnitId: overrides.knowledgeUnitId,
+    prompt: 'Question ?',
+    selectedChoiceId: overrides.isCorrect ? 'a' : 'b',
+    correctChoiceId: 'a',
+    isCorrect: overrides.isCorrect,
+    explanation: 'Explication.',
+    choiceFeedback: [],
+    sources: [],
+  };
+}
 
 function createActivitiesRepository(): MockedActivitiesRepository {
   return {

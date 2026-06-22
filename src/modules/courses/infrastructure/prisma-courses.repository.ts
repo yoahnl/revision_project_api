@@ -670,6 +670,47 @@ export class PrismaCoursesRepository implements CoursesRepository {
     return selected ? toCourseQuickRevisionKnowledgeUnitDto(selected) : null;
   }
 
+  async findReadyQuickRevisionKnowledgeUnitsForCourse(input: {
+    studentId: string;
+    courseId: string;
+    subjectId: string;
+  }): Promise<CourseQuickRevisionKnowledgeUnitDto[]> {
+    const knowledgeUnits = (await this.prisma.knowledgeUnit.findMany({
+      where: {
+        subjectId: input.subjectId,
+        subject: {
+          studentId: input.studentId,
+          archivedAt: null,
+        },
+        document: {
+          studentId: input.studentId,
+          subjectId: input.subjectId,
+          courseId: input.courseId,
+          kind: DocumentKind.COURSE_PDF,
+          status: 'READY',
+          archivedAt: null,
+        },
+      },
+      select: {
+        id: true,
+        subjectId: true,
+        documentId: true,
+        title: true,
+        displayOrder: true,
+        createdAt: true,
+        mastery: {
+          where: { studentId: input.studentId },
+          select: { score: true, lastPracticedAt: true },
+          take: 1,
+        },
+      },
+    })) as QuickRevisionKnowledgeUnitRecord[];
+
+    return knowledgeUnits
+      .sort(compareQuickRevisionKnowledgeUnits)
+      .map(toCourseQuickRevisionKnowledgeUnitDto);
+  }
+
   async attachDocumentToCourse(input: {
     studentId: string;
     courseId: string;

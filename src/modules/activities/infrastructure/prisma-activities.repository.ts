@@ -288,6 +288,7 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
       }
 
       const sourceChunkIds = collectQuizSourceChunkIds(input.quiz.questions);
+      const questionDocumentIds = collectQuizDocumentIds(input.quiz.questions);
       const sourceChunks =
         sourceChunkIds.length === 0
           ? []
@@ -297,7 +298,11 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
                   in: sourceChunkIds,
                 },
                 subjectId: input.subjectId,
-                ...(input.documentId ? { documentId: input.documentId } : {}),
+                ...(questionDocumentIds.length > 0
+                  ? { documentId: { in: questionDocumentIds } }
+                  : input.documentId
+                    ? { documentId: input.documentId }
+                    : {}),
               },
               select: {
                 id: true,
@@ -328,8 +333,8 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
           data: buildQuestionCreateData({
             sessionId: session.id,
             subjectId: input.subjectId,
-            documentId: input.documentId ?? null,
-            knowledgeUnitId: input.knowledgeUnitId,
+            documentId: question.documentId ?? input.documentId ?? null,
+            knowledgeUnitId: question.knowledgeUnitId ?? input.knowledgeUnitId,
             question,
             index,
             isSourcedVersion: (input.quiz.version ?? 1) > 1,
@@ -1153,7 +1158,7 @@ function buildQuestionCreateData(input: {
   const data: Prisma.QuestionUncheckedCreateInput = {
     sessionId: input.sessionId,
     bankQuestionId: input.question.bankQuestionId,
-    knowledgeUnitId: input.knowledgeUnitId,
+    knowledgeUnitId: input.question.knowledgeUnitId ?? input.knowledgeUnitId,
     prompt: input.question.prompt,
     choices: toQuestionChoicesJson(input.question.choices),
     correctChoiceId:
@@ -1174,7 +1179,7 @@ function buildQuestionCreateData(input: {
 
   if (input.isSourcedVersion) {
     data.subjectId = input.subjectId;
-    data.documentId = input.documentId;
+    data.documentId = input.question.documentId ?? input.documentId;
     data.difficulty = input.question.difficulty ?? null;
     data.displayOrder = input.index;
   }
@@ -2092,6 +2097,18 @@ function collectQuizSourceChunkIds(
       ...(question.sourceChunkIds ?? []),
       ...(question.visuals ?? []).flatMap((visual) => visual.sourceChunkIds),
     ]),
+  );
+}
+
+function collectQuizDocumentIds(
+  questions: GeneratedDiagnosticQuizQuestion[],
+): string[] {
+  return dedupeStrings(
+    questions
+      .map((question) => question.documentId)
+      .filter(
+        (documentId): documentId is string => typeof documentId === 'string',
+      ),
   );
 }
 
