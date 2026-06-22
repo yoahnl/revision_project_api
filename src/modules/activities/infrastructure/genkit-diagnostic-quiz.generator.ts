@@ -386,6 +386,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           metadata: {
             provider: metadata.provider,
             model: metadata.model,
+            fallbackUsed: index > 0,
             generationVersion,
             inputSize,
           },
@@ -1140,6 +1141,7 @@ function normalizeGeneratedQuiz(input: {
     model: string;
     generationVersion: DiagnosticQuizGenerationVersion;
     inputSize: number;
+    fallbackUsed?: boolean;
   };
 }): GeneratedDiagnosticQuiz {
   if (
@@ -1354,6 +1356,7 @@ function buildDiagnosticQuizContextLog(input: {
     visualsEnabled: input.input.visualsEnabled === true,
     inputSize: input.inputSize,
     documentId: input.input.documentId ?? undefined,
+    correlationId: input.input.correlationId,
     subjectId: input.input.subjectId ?? input.input.knowledgeUnit.subjectId,
     knowledgeUnitId: input.input.knowledgeUnit.id,
   };
@@ -1382,6 +1385,7 @@ function buildDiagnosticQuizOutputLog(input: {
     visualQuestionCount: summary.visualQuestionCount,
     basicPromptHeuristicCount: summary.basicPromptHeuristicCount,
     documentId: input.input.documentId ?? undefined,
+    correlationId: input.input.correlationId,
     subjectId: input.input.subjectId ?? input.input.knowledgeUnit.subjectId,
     knowledgeUnitId: input.input.knowledgeUnit.id,
   };
@@ -1407,6 +1411,7 @@ function buildDiagnosticQuizErrorLog(input: {
     errorProviderCode: input.diagnostics.errorProviderCode,
     errorSummary: input.diagnostics.errorSummary,
     documentId: input.input.documentId ?? undefined,
+    correlationId: input.input.correlationId,
     subjectId: input.input.subjectId ?? input.input.knowledgeUnit.subjectId,
     knowledgeUnitId: input.input.knowledgeUnit.id,
   };

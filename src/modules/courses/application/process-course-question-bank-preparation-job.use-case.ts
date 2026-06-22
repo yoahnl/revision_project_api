@@ -1,9 +1,13 @@
 import { createHash } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { QuestionBankService } from '../../activities/application/question-bank.service';
+import {
+  type CourseQuickQuestionBankPreparationStats,
+  QuestionBankService,
+} from '../../activities/application/question-bank.service';
 import {
   COURSE_QUESTION_BANK_PREPARATION_REPOSITORY,
   type CourseQuestionBankPreparationRepository,
+  resolveCourseQuestionBankPreparationStaleAfterMs,
 } from './course-question-bank-preparation.repository';
 
 const DEFAULT_PREPARATION_MAX_ATTEMPTS = 3;
@@ -33,6 +37,9 @@ export class ProcessCourseQuestionBankPreparationJobUseCase {
     const job = await this.preparationRepository.claimNextPending({
       preparationJobId: input.preparationJobId,
       maxAttempts,
+      staleBefore: new Date(
+        Date.now() - resolveCourseQuestionBankPreparationStaleAfterMs(),
+      ),
     });
 
     if (!job) {
@@ -49,13 +56,14 @@ export class ProcessCourseQuestionBankPreparationJobUseCase {
     try {
       const readyBefore =
         await this.questionBank.countActiveCourseQuickQuestions(job);
-      let stats = {
+      let stats: CourseQuickQuestionBankPreparationStats = {
         activeBefore: readyBefore,
         activeAfter: readyBefore,
         generatedCount: 0,
         persistedCount: 0,
         duplicateSkippedCount: 0,
         structureSkippedCount: 0,
+        aiGenerations: [],
       };
 
       this.logger.log({
@@ -75,6 +83,7 @@ export class ProcessCourseQuestionBankPreparationJobUseCase {
           courseId: job.courseId,
           documentId: job.documentId,
           knowledgeUnitId: job.knowledgeUnitId,
+          preparationJobId: job.id,
           questionCount: job.targetQuestionCount,
         });
       }
@@ -104,6 +113,7 @@ export class ProcessCourseQuestionBankPreparationJobUseCase {
         persistedCount: stats.persistedCount,
         duplicateSkippedCount: stats.duplicateSkippedCount,
         structureSkippedCount: stats.structureSkippedCount,
+        aiGenerations: stats.aiGenerations,
         status: 'COMPLETED',
       });
 

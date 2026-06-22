@@ -1,5 +1,43 @@
 import { PrismaCourseQuestionBankPreparationRepository } from './prisma-course-question-bank-preparation.repository';
 
+type PreparationJobRecord = {
+  id: string;
+  studentId: string;
+  subjectId: string;
+  courseId: string;
+  documentId: string;
+  knowledgeUnitId: string;
+  targetQuestionCount: number;
+  status: 'PENDING' | 'RUNNING' | 'COMPLETED' | 'FAILED';
+  attempts: number;
+  lastError: string | null;
+  lockedAt: Date | null;
+  completedAt: Date | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+type TransactionCallback = (tx: PrismaPreparationMock) => unknown;
+
+type PrismaPreparationMock = {
+  courseQuestionBankPreparationJob: {
+    create: jest.Mock<Promise<PreparationJobRecord>, [unknown]>;
+    findFirst: jest.Mock<Promise<PreparationJobRecord | null>, [unknown]>;
+    findMany: jest.Mock<Promise<PreparationJobRecord[]>, [unknown]>;
+    findUnique: jest.Mock<Promise<PreparationJobRecord | null>, [unknown]>;
+    updateMany: jest.Mock<Promise<{ count: number }>, [unknown]>;
+  };
+  $transaction: jest.Mock<Promise<unknown>, [TransactionCallback]>;
+};
+
+type ClaimInput = {
+  where?: {
+    id?: string;
+    attempts?: { lt: number };
+    OR?: unknown;
+  };
+};
+
 describe('PrismaCourseQuestionBankPreparationRepository', () => {
   it('finds the latest preparation job for a course-level readiness check', async () => {
     const { prisma, repository } = createRepository();
@@ -110,19 +148,86 @@ describe('PrismaCourseQuestionBankPreparationRepository', () => {
       job: { id: 'prep-created' },
     });
   });
+
+  it('claims a stale running job atomically when BullMQ redelivers it', async () => {
+    const { prisma, repository } = createRepository();
+    const staleBefore = new Date('2026-06-22T10:00:00.000Z');
+    const staleJob = preparationJobRecord({
+      id: 'prep-stale',
+      status: 'RUNNING',
+      attempts: 1,
+      lockedAt: new Date('2026-06-22T09:00:00.000Z'),
+    });
+    prisma.courseQuestionBankPreparationJob.findFirst.mockResolvedValue(
+      staleJob,
+    );
+    prisma.courseQuestionBankPreparationJob.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    prisma.courseQuestionBankPreparationJob.findUnique.mockResolvedValue({
+      ...staleJob,
+      lockedAt: new Date('2026-06-22T10:01:00.000Z'),
+    });
+
+    await expect(
+      repository.claimNextPending({
+        preparationJobId: 'prep-stale',
+        maxAttempts: 3,
+        staleBefore,
+      }),
+    ).resolves.toMatchObject({
+      id: 'prep-stale',
+      status: 'RUNNING',
+    });
+
+    const findFirstInput = prisma.courseQuestionBankPreparationJob.findFirst
+      .mock.calls[0]?.[0] as ClaimInput | undefined;
+    const updateManyInput = prisma.courseQuestionBankPreparationJob.updateMany
+      .mock.calls[0]?.[0] as ClaimInput | undefined;
+
+    expect(findFirstInput?.where).toMatchObject({
+      id: 'prep-stale',
+      attempts: { lt: 3 },
+    });
+    expect(findFirstInput?.where?.OR).toEqual(
+      expect.arrayContaining([
+        { status: 'PENDING' },
+        {
+          status: 'RUNNING',
+          lockedAt: { lt: staleBefore },
+        },
+      ]),
+    );
+    expect(updateManyInput?.where).toMatchObject({
+      id: 'prep-stale',
+      attempts: { lt: 3 },
+    });
+    expect(updateManyInput?.where?.OR).toEqual(
+      expect.arrayContaining([
+        { status: 'PENDING' },
+        {
+          status: 'RUNNING',
+          lockedAt: { lt: staleBefore },
+        },
+      ]),
+    );
+  });
 });
 
 function createRepository() {
-  const prisma = {
+  const prisma: PrismaPreparationMock = {
     courseQuestionBankPreparationJob: {
-      create: jest.fn(),
-      findFirst: jest.fn(),
-      findMany: jest.fn(),
-      findUnique: jest.fn(),
-      updateMany: jest.fn(),
+      create: jest.fn<Promise<PreparationJobRecord>, [unknown]>(),
+      findFirst: jest.fn<Promise<PreparationJobRecord | null>, [unknown]>(),
+      findMany: jest.fn<Promise<PreparationJobRecord[]>, [unknown]>(),
+      findUnique: jest.fn<Promise<PreparationJobRecord | null>, [unknown]>(),
+      updateMany: jest.fn<Promise<{ count: number }>, [unknown]>(),
     },
-    $transaction: jest.fn(),
+    $transaction: jest.fn<Promise<unknown>, [TransactionCallback]>(),
   };
+  prisma.$transaction.mockImplementation((callback) =>
+    Promise.resolve(callback(prisma)),
+  );
 
   return {
     prisma,
@@ -132,7 +237,9 @@ function createRepository() {
   };
 }
 
-function preparationJobRecord(overrides: Record<string, unknown> = {}) {
+function preparationJobRecord(
+  overrides: Partial<PreparationJobRecord> = {},
+): PreparationJobRecord {
   return {
     id: 'prep-1',
     studentId: 'student-1',

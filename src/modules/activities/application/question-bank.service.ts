@@ -74,6 +74,15 @@ export interface CourseQuickQuestionBankPreparationStats {
   persistedCount: number;
   duplicateSkippedCount: number;
   structureSkippedCount: number;
+  aiGenerations: CourseQuickQuestionBankPreparationAiGenerationStats[];
+}
+
+export interface CourseQuickQuestionBankPreparationAiGenerationStats {
+  provider: string;
+  model: string;
+  fallbackUsed: boolean;
+  generatedCount: number;
+  persistedCount: number;
 }
 
 @Injectable()
@@ -129,6 +138,7 @@ export class QuestionBankService {
     courseId: string;
     documentId: string;
     knowledgeUnitId: string;
+    preparationJobId?: string;
     questionCount?: number;
   }): Promise<CourseQuickQuestionBankPreparationStats> {
     const questionCount = resolveQuickQuestionBankQuestionCount(
@@ -137,6 +147,7 @@ export class QuestionBankService {
     this.logger.log({
       event: 'course_question_bank_prepare_service_start',
       courseId: input.courseId,
+      preparationJobId: input.preparationJobId,
       knowledgeUnitId: input.knowledgeUnitId,
       studentRef: safeStudentRef(input.studentId),
       questionCount,
@@ -179,6 +190,7 @@ export class QuestionBankService {
     courseId: string;
     documentId: string;
     knowledgeUnitId: string;
+    preparationJobId?: string;
     questionCount: number;
     context: DiagnosticQuizGenerationContext;
   }): Promise<CourseQuickQuestionBankPreparationStats> {
@@ -191,6 +203,7 @@ export class QuestionBankService {
       persistedCount: 0,
       duplicateSkippedCount: 0,
       structureSkippedCount: 0,
+      aiGenerations: [],
     };
 
     while (
@@ -206,6 +219,7 @@ export class QuestionBankService {
       const generatedQuiz = await this.diagnosticQuizGenerator.generate({
         subjectId: input.subjectId,
         documentId: input.documentId,
+        correlationId: input.preparationJobId,
         knowledgeUnit: input.context.knowledgeUnit,
         chunks: input.context.chunks,
         questionCount: batchSize,
@@ -221,6 +235,12 @@ export class QuestionBankService {
       stats.persistedCount += persistenceStats.persistedCount;
       stats.duplicateSkippedCount += persistenceStats.duplicateSkippedCount;
       stats.structureSkippedCount += persistenceStats.structureSkippedCount;
+      recordAiGenerationStats({
+        stats,
+        quiz: generatedQuiz,
+        generatedCount: generatedQuiz.questions.length,
+        persistedCount: persistenceStats.persistedCount,
+      });
       const nextActiveKnowledgeUnitCount =
         await this.countActiveQuestions(input);
       const nextActiveCourseCount =
@@ -230,6 +250,7 @@ export class QuestionBankService {
       this.logger.log({
         event: 'course_question_bank_prepare_batch',
         courseId: input.courseId,
+        preparationJobId: input.preparationJobId,
         knowledgeUnitId: input.knowledgeUnitId,
         studentRef: safeStudentRef(input.studentId),
         targetQuestionCount: input.questionCount,
@@ -255,6 +276,7 @@ export class QuestionBankService {
     this.logger.log({
       event: 'course_question_bank_prepare_service_done',
       courseId: input.courseId,
+      preparationJobId: input.preparationJobId,
       knowledgeUnitId: input.knowledgeUnitId,
       studentRef: safeStudentRef(input.studentId),
       targetQuestionCount: input.questionCount,
@@ -501,6 +523,40 @@ export class QuestionBankService {
       return selectedQuestions;
     });
   }
+}
+
+function recordAiGenerationStats(input: {
+  stats: CourseQuickQuestionBankPreparationStats;
+  quiz: GeneratedDiagnosticQuiz;
+  generatedCount: number;
+  persistedCount: number;
+}) {
+  const metadata = input.quiz.metadata;
+
+  if (!metadata) {
+    return;
+  }
+
+  const existing = input.stats.aiGenerations.find(
+    (generation) =>
+      generation.provider === metadata.provider &&
+      generation.model === metadata.model &&
+      generation.fallbackUsed === (metadata.fallbackUsed === true),
+  );
+
+  if (existing) {
+    existing.generatedCount += input.generatedCount;
+    existing.persistedCount += input.persistedCount;
+    return;
+  }
+
+  input.stats.aiGenerations.push({
+    provider: metadata.provider,
+    model: metadata.model,
+    fallbackUsed: metadata.fallbackUsed === true,
+    generatedCount: input.generatedCount,
+    persistedCount: input.persistedCount,
+  });
 }
 
 export function resolveQuickQuestionBankQuestionCount(

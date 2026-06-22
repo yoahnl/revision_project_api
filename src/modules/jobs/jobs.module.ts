@@ -1,5 +1,5 @@
 import { BullModule } from '@nestjs/bullmq';
-import { Module } from '@nestjs/common';
+import { Injectable, Logger, Module, OnModuleInit } from '@nestjs/common';
 import type { ConnectionOptions } from 'bullmq';
 import { AiModule } from '../ai/ai.module';
 import { ACTIVITIES_REPOSITORY } from '../activities/application/activities.repository';
@@ -68,6 +68,23 @@ class NoopDocumentFileCleanupQueue implements DocumentFileCleanupQueue {
 
 class NoopCourseQuestionBankPreparationQueue implements CourseQuestionBankPreparationQueue {
   async enqueue(): Promise<void> {}
+}
+
+@Injectable()
+class JobsRuntimeConfigurationLogger implements OnModuleInit {
+  private readonly logger = new Logger(JobsRuntimeConfigurationLogger.name);
+
+  onModuleInit() {
+    this.logger.log({
+      event: 'course_question_bank_worker_runtime_configuration',
+      nodeEnv: process.env.NODE_ENV ?? null,
+      queueDisabled: isQueueDisabled,
+      questionBankWorkerEnabled: isCourseQuestionBankPreparationWorkerEnabled,
+      redisConfigured: Boolean(process.env.REDIS_URL || process.env.REDIS_HOST),
+      redisConnectionMode: process.env.REDIS_URL ? 'url' : 'host-port',
+      consumerRegistered: isCourseQuestionBankPreparationWorkerEnabled,
+    });
+  }
 }
 
 const isDocumentProcessingWorkerEnabled =
@@ -204,6 +221,7 @@ const courseQuestionBankPreparationWorkerImports =
     ...documentProcessingConsumerProviders,
     ...documentFileCleanupConsumerProviders,
     ...courseQuestionBankPreparationConsumerProviders,
+    JobsRuntimeConfigurationLogger,
   ],
   exports: [
     DOCUMENT_PROCESSING_QUEUE,

@@ -58,6 +58,7 @@ describe('QuestionBankService', () => {
       persistedCount: 6,
       duplicateSkippedCount: 0,
       structureSkippedCount: 0,
+      aiGenerations: [],
     });
 
     expect(generator.generate.mock.calls).toHaveLength(3);
@@ -103,6 +104,7 @@ describe('QuestionBankService', () => {
       persistedCount: 1,
       duplicateSkippedCount: 0,
       structureSkippedCount: 0,
+      aiGenerations: [],
     });
 
     expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(1);
@@ -136,6 +138,7 @@ describe('QuestionBankService', () => {
       persistedCount: 0,
       duplicateSkippedCount: 1,
       structureSkippedCount: 0,
+      aiGenerations: [],
     });
 
     expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(0);
@@ -172,6 +175,7 @@ describe('QuestionBankService', () => {
       persistedCount: 0,
       duplicateSkippedCount: 0,
       structureSkippedCount: 1,
+      aiGenerations: [],
     });
 
     expect(mocks.questionBankItemFindUnique.mock.calls).toHaveLength(0);

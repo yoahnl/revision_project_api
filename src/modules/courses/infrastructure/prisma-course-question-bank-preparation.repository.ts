@@ -1,4 +1,6 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '../../../generated/prisma/client';
+import { JobStatus } from '../../../generated/prisma/enums';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import type {
   CourseQuestionBankPreparationEnsureResult,
@@ -110,14 +112,12 @@ export class PrismaCourseQuestionBankPreparationRepository implements CourseQues
   async claimNextPending(input: {
     preparationJobId?: string;
     maxAttempts: number;
+    staleBefore?: Date;
   }): Promise<CourseQuestionBankPreparationJobDto | null> {
     return this.prisma.$transaction(async (tx) => {
+      const claimableWhere = buildClaimableJobWhere(input);
       const job = await tx.courseQuestionBankPreparationJob.findFirst({
-        where: {
-          ...(input.preparationJobId ? { id: input.preparationJobId } : {}),
-          status: 'PENDING',
-          attempts: { lt: input.maxAttempts },
-        },
+        where: claimableWhere,
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
       });
 
@@ -127,9 +127,8 @@ export class PrismaCourseQuestionBankPreparationRepository implements CourseQues
 
       const result = await tx.courseQuestionBankPreparationJob.updateMany({
         where: {
+          ...claimableWhere,
           id: job.id,
-          status: 'PENDING',
-          attempts: { lt: input.maxAttempts },
         },
         data: {
           status: 'RUNNING',
@@ -193,6 +192,28 @@ export class PrismaCourseQuestionBankPreparationRepository implements CourseQues
       },
     });
   }
+}
+
+function buildClaimableJobWhere(input: {
+  preparationJobId?: string;
+  maxAttempts: number;
+  staleBefore?: Date;
+}): Prisma.CourseQuestionBankPreparationJobWhereInput {
+  return {
+    ...(input.preparationJobId ? { id: input.preparationJobId } : {}),
+    attempts: { lt: input.maxAttempts },
+    OR: [
+      { status: JobStatus.PENDING },
+      ...(input.staleBefore
+        ? [
+            {
+              status: JobStatus.RUNNING,
+              lockedAt: { lt: input.staleBefore },
+            },
+          ]
+        : []),
+    ],
+  };
 }
 
 function toDto(

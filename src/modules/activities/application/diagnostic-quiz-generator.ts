@@ -19,6 +19,7 @@ export interface DiagnosticQuizGenerationKnowledgeUnit extends KnowledgeUnit {
 export interface DiagnosticQuizGenerationInput {
   subjectId?: string;
   documentId?: string | null;
+  correlationId?: string;
   knowledgeUnit: DiagnosticQuizGenerationKnowledgeUnit;
   chunks?: DiagnosticQuizGenerationChunk[];
   questionCount?: number;
@@ -97,6 +98,7 @@ export interface GeneratedDiagnosticQuizMetadata {
   flowName: string;
   provider: string;
   model: string;
+  fallbackUsed?: boolean;
   promptVersion: string;
   schemaVersion: string;
   inputSize: number;

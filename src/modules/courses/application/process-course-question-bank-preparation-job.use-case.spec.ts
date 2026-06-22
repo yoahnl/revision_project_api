@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import type { QuestionBankService } from '../../activities/application/question-bank.service';
 import type {
   CourseQuestionBankPreparationRepository,
@@ -28,6 +29,7 @@ describe('ProcessCourseQuestionBankPreparationJobUseCase', () => {
       courseId: 'course-1',
       documentId: 'document-1',
       knowledgeUnitId: 'ku-1',
+      preparationJobId: 'prep-1',
       questionCount: 5,
     });
     expect(preparationRepository.markCompleted).toHaveBeenCalledWith({
@@ -125,6 +127,52 @@ describe('ProcessCourseQuestionBankPreparationJobUseCase', () => {
       'Question bank preparation did not reach target: readyAfter=4; target=5; persisted=0; duplicateSkipped=0; structureSkipped=1',
     );
   });
+
+  it('logs AI provider and model metadata when a job completes', async () => {
+    const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+    const { preparationRepository, questionBank, useCase } = createHarness();
+    preparationRepository.claimNextPending.mockResolvedValue(preparationJob());
+    questionBank.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(5);
+    questionBank.prepareCourseQuickQuestionBank.mockResolvedValue({
+      activeBefore: 2,
+      activeAfter: 5,
+      generatedCount: 3,
+      persistedCount: 3,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
+      aiGenerations: [
+        {
+          provider: 'mistral',
+          model: 'mistral-large-latest',
+          fallbackUsed: false,
+          generatedCount: 3,
+          persistedCount: 3,
+        },
+      ],
+    });
+
+    await useCase.execute({ preparationJobId: 'prep-1' });
+
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'course_question_bank_worker_completed',
+        preparationJobId: 'prep-1',
+        aiGenerations: [
+          {
+            provider: 'mistral',
+            model: 'mistral-large-latest',
+            fallbackUsed: false,
+            generatedCount: 3,
+            persistedCount: 3,
+          },
+        ],
+      }),
+    );
+
+    logSpy.mockRestore();
+  });
 });
 
 function createHarness() {
@@ -148,6 +196,7 @@ function createHarness() {
       persistedCount: 3,
       duplicateSkippedCount: 0,
       structureSkippedCount: 0,
+      aiGenerations: [],
     }),
   } as unknown as jest.Mocked<QuestionBankService>;
 

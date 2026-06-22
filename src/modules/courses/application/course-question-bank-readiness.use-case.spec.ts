@@ -251,6 +251,86 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
     });
   });
 
+  it('reports not prepared when only stale active jobs remain below the requested target', async () => {
+    const { coursesRepository, preparationRepository, questionBank, useCase } =
+      createReadinessHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [
+        knowledgeUnit({ id: 'ku-1' }),
+        knowledgeUnit({ id: 'ku-2' }),
+        knowledgeUnit({ id: 'ku-3' }),
+      ],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(9);
+    preparationRepository.findRecentForCourse.mockResolvedValue([
+      preparationJob({
+        id: 'prep-stale-pending',
+        status: 'PENDING',
+        updatedAt: new Date('2026-06-22T08:00:00.000Z'),
+      }),
+      preparationJob({
+        id: 'prep-stale-running',
+        status: 'RUNNING',
+        lockedAt: new Date('2026-06-22T08:00:00.000Z'),
+        updatedAt: new Date('2026-06-22T08:00:00.000Z'),
+      }),
+    ]);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 10,
+      }),
+    ).resolves.toMatchObject({
+      status: 'NOT_PREPARED',
+      readyQuestionCount: 9,
+      targetQuestionCount: 10,
+      canPrepare: true,
+    });
+  });
+
+  it('ignores stale failed jobs when deciding whether preparation can be retried', async () => {
+    const { coursesRepository, preparationRepository, questionBank, useCase } =
+      createReadinessHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [knowledgeUnit()],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(4);
+    preparationRepository.findRecentForCourse.mockResolvedValue([
+      preparationJob({
+        id: 'prep-old-failed',
+        status: 'FAILED',
+        updatedAt: new Date('2026-06-22T08:00:00.000Z'),
+      }),
+    ]);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 5,
+      }),
+    ).resolves.toMatchObject({
+      status: 'NOT_PREPARED',
+      readyQuestionCount: 4,
+      targetQuestionCount: 5,
+      canPrepare: true,
+    });
+  });
+
   it('reports ready when enough questions exist even if older failed jobs remain', async () => {
     const { coursesRepository, preparationRepository, questionBank, useCase } =
       createReadinessHarness();
@@ -519,6 +599,8 @@ function knowledgeUnit(
 function preparationJob(
   overrides: Partial<CourseQuestionBankPreparationJobDto> = {},
 ): CourseQuestionBankPreparationJobDto {
+  const now = new Date();
+
   return {
     id: 'prep-1',
     studentId: 'student-1',
@@ -532,8 +614,8 @@ function preparationJob(
     lastError: null,
     lockedAt: null,
     completedAt: null,
-    createdAt: new Date('2026-06-22T09:00:00.000Z'),
-    updatedAt: new Date('2026-06-22T09:00:00.000Z'),
+    createdAt: now,
+    updatedAt: now,
     ...overrides,
   };
 }

@@ -16,6 +16,7 @@ import {
   COURSE_QUESTION_BANK_PREPARATION_REPOSITORY,
   type CourseQuestionBankPreparationJobDto,
   type CourseQuestionBankPreparationRepository,
+  resolveCourseQuestionBankPreparationStaleAfterMs,
 } from './course-question-bank-preparation.repository';
 import {
   COURSES_REPOSITORY,
@@ -86,6 +87,7 @@ export class GetCourseQuestionBankReadinessUseCase {
         readyQuestionCount: 0,
         activeJobCount: 0,
         failedJobCount: 0,
+        staleJobCount: 0,
         status: 'NO_READY_SOURCE',
       });
       return {
@@ -118,6 +120,7 @@ export class GetCourseQuestionBankReadinessUseCase {
         readyQuestionCount: 0,
         activeJobCount: 0,
         failedJobCount: 0,
+        staleJobCount: 0,
         status: 'NO_KNOWLEDGE_UNITS',
       });
       return {
@@ -149,6 +152,7 @@ export class GetCourseQuestionBankReadinessUseCase {
         readyQuestionCount,
         activeJobCount: 0,
         failedJobCount: 0,
+        staleJobCount: 0,
         status: 'READY',
       });
       return {
@@ -168,22 +172,28 @@ export class GetCourseQuestionBankReadinessUseCase {
       studentId: input.studentId,
       courseId: course.courseId,
     });
-    const status = readinessStatusFromJobs(jobs);
+    const staleAfterMs = resolveCourseQuestionBankPreparationStaleAfterMs();
+    const jobSummary = summarizePreparationJobs({
+      jobs,
+      now: new Date(),
+      staleAfterMs,
+    });
 
     this.logReadiness({
       studentId: input.studentId,
       courseId: course.courseId,
       targetQuestionCount: input.targetQuestionCount,
       readyQuestionCount,
-      activeJobCount: jobs.filter(isActivePreparationJob).length,
-      failedJobCount: jobs.filter((job) => job.status === 'FAILED').length,
-      status,
+      activeJobCount: jobSummary.activeJobCount,
+      failedJobCount: jobSummary.failedJobCount,
+      staleJobCount: jobSummary.staleJobCount,
+      status: jobSummary.status,
     });
 
     return {
       readiness: buildCourseQuestionBankReadiness({
         courseId: input.courseId,
-        status,
+        status: jobSummary.status,
         readyQuestionCount,
         targetQuestionCount: input.targetQuestionCount,
       }),
@@ -200,6 +210,7 @@ export class GetCourseQuestionBankReadinessUseCase {
     readyQuestionCount: number;
     activeJobCount: number;
     failedJobCount: number;
+    staleJobCount: number;
     status: string;
   }) {
     this.logger.log({
@@ -210,6 +221,7 @@ export class GetCourseQuestionBankReadinessUseCase {
       readyQuestionCount: input.readyQuestionCount,
       activeJobCount: input.activeJobCount,
       failedJobCount: input.failedJobCount,
+      staleJobCount: input.staleJobCount,
       status: input.status,
     });
   }
@@ -304,20 +316,64 @@ export class PrepareCourseQuestionBankUseCase {
   }
 }
 
-function readinessStatusFromJobs(jobs: CourseQuestionBankPreparationJobDto[]) {
-  if (jobs.some(isActivePreparationJob)) {
-    return 'PREPARING';
+function summarizePreparationJobs(input: {
+  jobs: CourseQuestionBankPreparationJobDto[];
+  now: Date;
+  staleAfterMs: number;
+}) {
+  let activeJobCount = 0;
+  let failedJobCount = 0;
+  let staleJobCount = 0;
+
+  for (const job of input.jobs) {
+    if (isStalePreparationJob(job, input.now, input.staleAfterMs)) {
+      staleJobCount += 1;
+      continue;
+    }
+
+    if (isActivePreparationJob(job)) {
+      activeJobCount += 1;
+      continue;
+    }
+
+    if (job.status === 'FAILED') {
+      failedJobCount += 1;
+    }
   }
 
-  if (jobs.some((job) => job.status === 'FAILED')) {
-    return 'FAILED';
-  }
-
-  return 'NOT_PREPARED';
+  return {
+    activeJobCount,
+    failedJobCount,
+    staleJobCount,
+    status:
+      activeJobCount > 0
+        ? 'PREPARING'
+        : failedJobCount > 0
+          ? 'FAILED'
+          : 'NOT_PREPARED',
+  } as const;
 }
 
 function isActivePreparationJob(job: CourseQuestionBankPreparationJobDto) {
   return job.status === 'PENDING' || job.status === 'RUNNING';
+}
+
+function isStalePreparationJob(
+  job: CourseQuestionBankPreparationJobDto,
+  now: Date,
+  staleAfterMs: number,
+) {
+  if (job.status === 'COMPLETED') {
+    return false;
+  }
+
+  const reference = job.status === 'RUNNING' ? job.lockedAt : job.updatedAt;
+
+  if (!reference) {
+    return false;
+  }
+
+  return now.getTime() - reference.getTime() >= staleAfterMs;
 }
 
 function safeStudentRef(studentId: string) {

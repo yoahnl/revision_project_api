@@ -62,6 +62,7 @@ export interface CourseQuestionBankPreparationRepository {
   claimNextPending(input: {
     preparationJobId?: string;
     maxAttempts: number;
+    staleBefore?: Date;
   }): Promise<CourseQuestionBankPreparationJobDto | null>;
 
   markCompleted(input: { preparationJobId: string }): Promise<void>;
@@ -71,4 +72,19 @@ export interface CourseQuestionBankPreparationRepository {
     error: unknown;
     maxAttempts: number;
   }): Promise<void>;
+}
+
+export const DEFAULT_COURSE_QUESTION_BANK_PREPARATION_STALE_AFTER_MS =
+  15 * 60 * 1000;
+
+export function resolveCourseQuestionBankPreparationStaleAfterMs(): number {
+  const parsed = Number(
+    process.env.COURSE_QUESTION_BANK_PREPARATION_STALE_AFTER_MS,
+  );
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    return DEFAULT_COURSE_QUESTION_BANK_PREPARATION_STALE_AFTER_MS;
+  }
+
+  return parsed;
 }
