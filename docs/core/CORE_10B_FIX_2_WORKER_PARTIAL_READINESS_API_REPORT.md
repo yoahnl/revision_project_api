@@ -4,7 +4,16 @@
 
 Ce micro-lot durcit le correctif CORE-10B autour de trois points : readiness partielle, jobs de preparation stale, et observabilite worker/IA.
 
-Le code API est corrige et valide localement. Le lot reste toutefois `BLOCKED` au sens roadmap, car la preuve runtime complete demandee n'est pas disponible : le backend Dokploy actuellement deployee n'inclut pas ce correctif local, et la session Flutter macOS Neralune n'expose pas l'extension Marionette.
+Le code API est corrige, valide localement, deploye via `main`, puis verifie en runtime via Dokploy et l'app macOS instrumentee Marionette.
+
+Preuve runtime obtenue le 2026-06-22 :
+
+```text
+POST /courses/:courseId/question-bank/prepare questionCount=20
+-> readiness PREPARING avec readyQuestionCount 10 puis 12 puis 17 puis 19
+-> readiness READY avec readyQuestionCount 20
+-> session quick demarree cote app : Question 1 sur 20
+```
 
 ## 2. Diagnostic exact
 
@@ -135,20 +144,57 @@ La readiness reste course-level et target-aware via `questionCount`.
 
 MCP Dokploy disponible.
 
-Resultats exploitables :
+Resultats exploitables initiaux :
 
 - application backend identifiee : `backEnd`;
 - application id utilisee : `anJtJajEdotxzlbqyA9ob`;
 - logs applicatifs lisibles via `application.readLogs` sans filtre;
 - les recherches filtrees `application.readLogs` avec `search` ont retourne une erreur 500 cote outil;
-- le tail brut montre encore des readiness `9/10` en `PREPARING` avec `activeJobCount=5`;
-- aucun evenement `course_question_bank_worker_runtime_configuration` ou `course_question_bank_worker_started` n'apparait dans le tail brut consulte, car le backend deployee ne contient pas le correctif local fix-2.
+- le tail brut montrait encore des readiness `9/10` en `PREPARING` avec `activeJobCount=5`;
+- avant deploiement du correctif, aucun evenement `course_question_bank_worker_runtime_configuration` ou `course_question_bank_worker_started` n'apparaissait dans le tail brut consulte.
 
 Aucune variable secrete ou URL credentialee n'est reportee dans ce document.
 
-Aucune modification Dokploy n'a ete effectuee.
+Aucune modification Dokploy manuelle n'a ete effectuee.
 
-Conclusion Dokploy : preuve runtime incomplete. Le backend deployee doit recevoir ce correctif avant de pouvoir valider worker liveness, provider/model correles et passage effectif `9/10 -> 10/10`.
+Apres push/deploiement du correctif, les logs Dokploy montrent :
+
+```text
+course_question_bank_prepare_requested
+questionCount: 20
+readyQuestionCount: 10
+candidateKnowledgeUnitCount: 6
+createdJobCount: 6
+status: PREPARING
+
+course_question_bank_readiness_resolved
+targetQuestionCount: 20
+readyQuestionCount: 12
+activeJobCount: 5
+status: PREPARING
+
+course_question_bank_readiness_resolved
+targetQuestionCount: 20
+readyQuestionCount: 17
+activeJobCount: 4
+status: PREPARING
+
+course_question_bank_readiness_resolved
+targetQuestionCount: 20
+readyQuestionCount: 19
+activeJobCount: 4
+status: PREPARING
+
+course_question_bank_readiness_resolved
+targetQuestionCount: 20
+readyQuestionCount: 20
+activeJobCount: 0
+status: READY
+```
+
+Les logs worker montrent aussi des generations Mimo correlees au `preparationJobId`, des `persistedCount`, des `structureSkippedCount`, puis un retry BullMQ reussi sur une KU qui etait restee a `readyAfter=4/5` apres un filtrage structure. Cela valide la liveness worker, la retryability et la progression reelle de la banque.
+
+Conclusion Dokploy : preuve runtime obtenue.
 
 ## 10. Marionette macOS
 
@@ -167,7 +213,7 @@ Connexion Marionette tentee :
 ws://127.0.0.1:55354/QiFNi8J3CPY=/ws
 ```
 
-Resultat :
+Resultat initial avant instrumentation :
 
 ```text
 Failed to connect to app: No isolate found with ext.flutter.marionette.getLogs extension.
@@ -175,6 +221,30 @@ Make sure the Flutter app has marionette_flutter initialized.
 ```
 
 Conclusion Marionette : app Neralune debug presente, mais non instrumentee Marionette. Les scenarios macOS A/B/C/D n'ont pas pu etre executes sans modifier l'app pour initialiser `marionette_flutter`.
+
+L'entree debug cote app `dev/marionette_main.dart` a ete utilisee, sans impact runtime par defaut. La validation macOS a alors pu etre executee :
+
+```text
+flutter run -t dev/marionette_main.dart -d macos
+VM service: ws://127.0.0.1:65078/aSIxppKOVKU=/ws
+Marionette connect: success
+```
+
+Scenario observe :
+
+```text
+Course detail "test"
+-> 10 questions prêtes
+-> selection 20 questions
+-> CTA Préparer 20 questions
+-> Dokploy: readiness PREPARING puis READY target 20
+-> feuille quick rouverte
+-> 20 questions Prêt, 30 questions À préparer
+-> Démarrer
+-> écran session: Question 1 sur 20
+```
+
+La generation IA visible dans les logs apres le demarrage quick appartient au backlog worker asynchrone deja en cours, pas a la requete quick. La session etait deja ouverte en `Question 1 sur 20`.
 
 ## 11. Tests API executes
 
@@ -235,22 +305,21 @@ Resultat : occurrences attendues dans les modules activities/courses/jobs et leu
 
 ## 15. Limites restantes
 
-- Le backend Dokploy actuellement deployee ne contient pas encore le correctif local fix-2.
-- Les logs runtime fix-2 `course_question_bank_worker_runtime_configuration` et `course_question_bank_worker_started` ne peuvent donc pas etre observes en production avant deploiement.
-- L'app macOS Neralune est lancee en debug mais n'initialise pas l'extension Marionette.
-- Le scenario strict `9 questions -> prepare 10 -> worker completed -> readiness READY -> quick 10` n'a pas pu etre prouve runtime dans cet environnement.
+- La verification runtime a ete realisee sur un cours reel avec `10 -> 20` questions, pas exactement sur le cas historique `9 -> 10`. Les tests automatises couvrent le cas `9/10` avec jobs per-KU.
+- Un job worker restant a continue a preparer une KU apres que le seuil course-level 20 etait deja atteint. Cela ne bloque pas le quick, mais CORE-10C devra optimiser l'annulation ou l'arret des jobs superflus.
+- Les logs Dokploy `application.readLogs` avec filtre `search` retournent encore une erreur 500 cote outil ; la verification a donc ete faite via tail brut.
 
 ## 16. Roadmap
 
 Etat conserve :
 
 ```text
-CORE-10B = BLOCKED
+CORE-10B = DONE
 CORE-10 = IN_PROGRESS
 CORE-10C = TODO
 ```
 
-Raison : validations locales OK, mais definition de done runtime non satisfaite.
+Raison : validations locales, CI GitHub, preuve Dokploy et preuve Marionette macOS obtenues.
 
 ## 17. Auto-review
 
@@ -262,11 +331,10 @@ Raison : validations locales OK, mais definition de done runtime non satisfaite.
 - Jobs stale testes.
 - Claim stale RUNNING atomique teste.
 - Provider/model/fallback IA remontes dans les metriques internes.
-- Dokploy consulte mais preuve worker fix-2 non disponible.
-- Marionette tente mais non connectable faute d'extension app.
-- Aucun commit effectue.
+- Dokploy consulte avec preuve worker fix-2 disponible.
+- Marionette macOS execute apres instrumentation debug explicite.
+- Commit/push final effectue uniquement sur demande explicite de Yoahn.
 
 ## 18. Critique du prompt
 
-La demande de preuve Marionette est pertinente pour fermer le lot, mais elle suppose que l'app initialise deja `marionette_flutter`. Ce n'est pas le cas dans la session Neralune detectee. Ajouter cette instrumentation pourrait etre un micro-lot QA separe, car le faire ici aurait modifie le runtime app au-dela du strict fix.
-
+La demande de preuve Marionette etait pertinente pour fermer le lot. Le choix final a ete d'utiliser l'entree strictement debug `dev/marionette_main.dart`, ce qui permet la verification sans modifier le comportement utilisateur normal.
