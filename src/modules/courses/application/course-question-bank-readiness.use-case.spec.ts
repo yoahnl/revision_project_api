@@ -203,6 +203,58 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
     });
   });
 
+  it('ignores active per-KU jobs that are too small for the requested course-level target', async () => {
+    const { coursesRepository, preparationRepository, questionBank, useCase } =
+      createReadinessHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [
+        knowledgeUnit({ id: 'ku-1' }),
+        knowledgeUnit({ id: 'ku-2' }),
+        knowledgeUnit({ id: 'ku-3' }),
+      ],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(9);
+    preparationRepository.findRecentForCourse.mockResolvedValue([
+      preparationJob({
+        id: 'prep-1',
+        knowledgeUnitId: 'ku-1',
+        targetQuestionCount: 5,
+        status: 'PENDING',
+      }),
+      preparationJob({
+        id: 'prep-2',
+        knowledgeUnitId: 'ku-2',
+        targetQuestionCount: 5,
+        status: 'PENDING',
+      }),
+      preparationJob({
+        id: 'prep-3',
+        knowledgeUnitId: 'ku-3',
+        targetQuestionCount: 5,
+        status: 'PENDING',
+      }),
+    ]);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 30,
+      }),
+    ).resolves.toMatchObject({
+      status: 'NOT_PREPARED',
+      readyQuestionCount: 9,
+      targetQuestionCount: 30,
+      canPrepare: true,
+    });
+  });
+
   it('reports failed when only failed per-KU jobs exist below the requested course-level target', async () => {
     const { coursesRepository, preparationRepository, questionBank, useCase } =
       createReadinessHarness();

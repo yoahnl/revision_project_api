@@ -8,6 +8,7 @@ import { ACTIVITIES_REPOSITORY } from './application/activities.repository';
 import { DIAGNOSTIC_QUIZ_GENERATOR } from './application/diagnostic-quiz-generator';
 import { OPEN_ANSWER_EVALUATOR } from './application/open-answer-evaluator';
 import { OPEN_QUESTION_GENERATOR } from './application/open-question-generator';
+import { QUESTION_BANK_REPOSITORY } from './application/question-bank.repository';
 import { GetRichClosedExerciseResultUseCase } from './application/rich-closed-questions/get-rich-closed-exercise-result.use-case';
 import { GetRichClosedExerciseUseCase } from './application/rich-closed-questions/get-rich-closed-exercise.use-case';
 import { RICH_CLOSED_QUESTION_GENERATOR } from './application/rich-closed-questions/rich-closed-question-generator';
@@ -23,6 +24,7 @@ import { GenkitOpenAnswerEvaluator } from './infrastructure/genkit-open-answer.e
 import { GenkitOpenQuestionGenerator } from './infrastructure/genkit-open-question.generator';
 import { GenkitRichClosedQuestionGenerator } from './infrastructure/genkit-rich-closed-question.generator';
 import { PrismaActivitiesRepository } from './infrastructure/prisma-activities.repository';
+import { PrismaQuestionBankRepository } from './infrastructure/prisma-question-bank.repository';
 import { ActivitiesController } from './interfaces/activities.controller';
 
 @Module({
@@ -42,6 +44,10 @@ import { ActivitiesController } from './interfaces/activities.controller';
     {
       provide: ACTIVITIES_REPOSITORY,
       useClass: PrismaActivitiesRepository,
+    },
+    {
+      provide: QUESTION_BANK_REPOSITORY,
+      useClass: PrismaQuestionBankRepository,
     },
     {
       provide: DIAGNOSTIC_QUIZ_GENERATOR,
@@ -64,6 +70,7 @@ import { ActivitiesController } from './interfaces/activities.controller';
     StartNextActivityUseCase,
     StartOpenQuestionActivityUseCase,
     QuestionBankService,
+    QUESTION_BANK_REPOSITORY,
   ],
 })
 export class ActivitiesModule {}

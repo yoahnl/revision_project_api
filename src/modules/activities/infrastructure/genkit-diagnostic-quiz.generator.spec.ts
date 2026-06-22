@@ -219,7 +219,12 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(generateInput?.prompt).toContain('correctChoiceId');
     expect(generateInput?.prompt).toContain('exactement 10 questions');
     expect(generateInput?.output.schema).toBeDefined();
-    expect(quiz).toEqual(generatedQuiz());
+    expect(quiz.questions).toEqual(generatedQuiz().questions);
+    expect(quiz.metadata).toMatchObject({
+      provider: 'mistral',
+      model: 'mistral/mistral-medium-latest',
+      fallbackUsed: false,
+    });
   });
 
   it('logs bounded Genkit raw output diagnostics with correlation id', async () => {
@@ -287,7 +292,12 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       plugins: [mockMistralPlugin],
       model: 'mimo/mimo-v2.5-pro',
     });
-    expect(quiz).toEqual(generatedQuiz());
+    expect(quiz.questions).toEqual(generatedQuiz().questions);
+    expect(quiz.metadata).toMatchObject({
+      provider: 'mimo',
+      model: 'mimo/mimo-v2.5-pro',
+      fallbackUsed: false,
+    });
   });
 
   it('uses direct non-streaming chat completions for MiMo outside the legacy Genkit transport', async () => {
@@ -340,7 +350,12 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       response_format: { type: 'json_object' },
     });
     expect(body.messages[1]?.content).toContain('Revision constitutionnelle');
-    expect(quiz).toEqual(generatedQuiz());
+    expect(quiz.questions).toEqual(generatedQuiz().questions);
+    expect(quiz.metadata).toMatchObject({
+      provider: 'mimo',
+      model: 'mimo/mimo-v2.5-pro',
+      fallbackUsed: false,
+    });
 
     fetchSpy.mockRestore();
   });
@@ -608,7 +623,12 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       model: 'mistral/mistral-large-latest',
       status: 'success',
     });
-    expect(quiz).toEqual(generatedQuiz());
+    expect(quiz.questions).toEqual(generatedQuiz().questions);
+    expect(quiz.metadata).toMatchObject({
+      provider: 'mistral',
+      model: 'mistral/mistral-large-latest',
+      fallbackUsed: true,
+    });
   });
 
   it('asks for deeper questions before labeling a question high difficulty', async () => {
@@ -758,6 +778,7 @@ describe('GenkitDiagnosticQuizGenerator', () => {
         promptVersion: 'diagnostic-quiz-v2',
         schemaVersion: 'diagnostic-quiz-v2',
         inputSize: generateInput?.prompt.length,
+        fallbackUsed: false,
       },
     });
 
@@ -827,7 +848,12 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       }),
     });
 
-    expect(quiz).toEqual(generatedQuiz());
+    expect(quiz.questions).toEqual(generatedQuiz().questions);
+    expect(quiz.metadata).toMatchObject({
+      provider: 'google-genai',
+      model: 'googleai/gemini-2.5-flash',
+      fallbackUsed: false,
+    });
   });
 
   it('generates a sourced v3 quiz with multiple answers and bounded visuals', async () => {
@@ -1408,7 +1434,12 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       }),
     });
 
-    expect(quiz).toEqual(generatedQuiz());
+    expect(quiz.questions).toEqual(generatedQuiz().questions);
+    expect(quiz.metadata).toMatchObject({
+      provider: 'mistral',
+      model: 'mistral/mistral-large-latest',
+      fallbackUsed: true,
+    });
     expect(mockGoogleAI).toHaveBeenCalledTimes(1);
     expect(mockOpenAICompatible).toHaveBeenCalledWith({
       name: 'mistral',

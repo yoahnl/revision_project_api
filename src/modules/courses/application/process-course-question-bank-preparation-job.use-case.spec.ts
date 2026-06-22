@@ -128,7 +128,7 @@ describe('ProcessCourseQuestionBankPreparationJobUseCase', () => {
     );
   });
 
-  it('logs AI provider and model metadata when a job completes', async () => {
+  it('logs AI provider model and fallback metadata when a job completes', async () => {
     const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     const { preparationRepository, questionBank, useCase } = createHarness();
     preparationRepository.claimNextPending.mockResolvedValue(preparationJob());
@@ -146,7 +146,7 @@ describe('ProcessCourseQuestionBankPreparationJobUseCase', () => {
         {
           provider: 'mistral',
           model: 'mistral-large-latest',
-          fallbackUsed: false,
+          fallbackUsed: true,
           generatedCount: 3,
           persistedCount: 3,
         },
@@ -163,7 +163,7 @@ describe('ProcessCourseQuestionBankPreparationJobUseCase', () => {
           {
             provider: 'mistral',
             model: 'mistral-large-latest',
-            fallbackUsed: false,
+            fallbackUsed: true,
             generatedCount: 3,
             persistedCount: 3,
           },

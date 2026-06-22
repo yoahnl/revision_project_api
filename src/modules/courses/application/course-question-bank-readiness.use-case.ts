@@ -177,6 +177,8 @@ export class GetCourseQuestionBankReadinessUseCase {
       jobs,
       now: new Date(),
       staleAfterMs,
+      targetQuestionCount: input.targetQuestionCount,
+      knowledgeUnitCount: knowledgeUnits.length,
     });
 
     this.logReadiness({
@@ -320,12 +322,24 @@ function summarizePreparationJobs(input: {
   jobs: CourseQuestionBankPreparationJobDto[];
   now: Date;
   staleAfterMs: number;
+  targetQuestionCount: number;
+  knowledgeUnitCount: number;
 }) {
   let activeJobCount = 0;
   let failedJobCount = 0;
   let staleJobCount = 0;
+  const expectedJobTargetQuestionCount = Math.max(
+    QUICK_QUESTION_BANK_PREPARATION_MIN_PER_KU,
+    Math.ceil(
+      input.targetQuestionCount / Math.max(input.knowledgeUnitCount, 1),
+    ),
+  );
 
   for (const job of input.jobs) {
+    if (job.targetQuestionCount < expectedJobTargetQuestionCount) {
+      continue;
+    }
+
     if (isStalePreparationJob(job, input.now, input.staleAfterMs)) {
       staleJobCount += 1;
       continue;

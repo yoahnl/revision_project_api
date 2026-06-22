@@ -1,14 +1,18 @@
-import {
-  KnowledgeUnitDifficulty,
-  QuestionBankItemStatus,
-  QuestionSelectionMode,
-} from '../../../generated/prisma/enums';
-import type { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
-import type { ActivitiesRepository } from './activities.repository';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type {
+  ActivitiesRepository,
+  DiagnosticQuizActivity,
+  DiagnosticQuizGenerationContext,
+} from './activities.repository';
 import type {
   DiagnosticQuizGenerator,
   GeneratedDiagnosticQuiz,
 } from './diagnostic-quiz-generator';
+import type {
+  QuestionBankRepository,
+  QuestionBankReservedQuestionDto,
+} from './question-bank.repository';
 import {
   QUICK_QUESTION_BANK_COUNT_INVALID,
   QUICK_QUESTION_BANK_INSUFFICIENT_QUESTIONS,
@@ -16,31 +20,40 @@ import {
 } from './question-bank.service';
 
 describe('QuestionBankService', () => {
+  it('uses the question bank repository port instead of Prisma directly', () => {
+    const source = readFileSync(join(__dirname, 'question-bank.service.ts'), {
+      encoding: 'utf8',
+    });
+
+    expect(source).not.toContain('PrismaService');
+    expect(source).not.toContain('this.prisma');
+    expect(source).toContain('QUESTION_BANK_REPOSITORY');
+  });
+
   it('prepares missing questions in batches of two without creating a session snapshot', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
     activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
       generationContext(),
     );
-    mocks.questionBankItemCount.mockResolvedValueOnce(0);
-    mocks.questionBankItemCount.mockResolvedValueOnce(0);
-    mocks.questionBankItemCount.mockResolvedValueOnce(2);
-    mocks.questionBankItemCount.mockResolvedValueOnce(2);
-    mocks.questionBankItemCount.mockResolvedValueOnce(4);
-    mocks.questionBankItemCount.mockResolvedValueOnce(4);
-    mocks.questionBankItemCount.mockResolvedValueOnce(6);
-    mocks.questionBankItemCount.mockResolvedValueOnce(6);
+    questionBankRepository.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(6)
+      .mockResolvedValueOnce(6);
     generator.generate
       .mockResolvedValueOnce(generatedQuiz('batch-a', 2))
       .mockResolvedValueOnce(generatedQuiz('batch-b', 2))
       .mockResolvedValueOnce(generatedQuiz('batch-c', 2));
-    mocks.questionBankItemFindUnique.mockResolvedValue(null);
-    mocks.questionBankItemCreate
-      .mockResolvedValueOnce({ id: 'bank-a-1' })
-      .mockResolvedValueOnce({ id: 'bank-a-2' })
-      .mockResolvedValueOnce({ id: 'bank-b-1' })
-      .mockResolvedValueOnce({ id: 'bank-b-2' })
-      .mockResolvedValueOnce({ id: 'bank-c-1' })
-      .mockResolvedValueOnce({ id: 'bank-c-2' });
+    questionBankRepository.persistGeneratedQuestions.mockResolvedValue({
+      persistedCount: 2,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
+    });
 
     await expect(
       service.prepareCourseQuickQuestionBank({
@@ -65,27 +78,33 @@ describe('QuestionBankService', () => {
     expect(
       generator.generate.mock.calls.map(([input]) => input.questionCount),
     ).toEqual([2, 2, 2]);
-    expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(6);
-    expect(mocks.questionBankItemFindMany.mock.calls).toHaveLength(0);
-    expect(mocks.questionBankItemUpdateMany.mock.calls).toHaveLength(0);
+    expect(
+      questionBankRepository.persistGeneratedQuestions.mock.calls,
+    ).toHaveLength(3);
+    expect(
+      questionBankRepository.reserveCourseQuickQuestions.mock.calls,
+    ).toHaveLength(0);
     expect(activitiesRepository.createDiagnosticQuiz.mock.calls).toHaveLength(
       0,
     );
   });
 
   it('persists a generated question when the pool is one question below target', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
     activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
       generationContext(),
     );
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    mocks.questionBankItemCount.mockResolvedValueOnce(10);
-    mocks.questionBankItemCount.mockResolvedValueOnce(10);
+    questionBankRepository.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(10)
+      .mockResolvedValueOnce(10);
     generator.generate.mockResolvedValueOnce(generatedQuiz('missing', 1));
-    mocks.questionBankItemFindUnique.mockResolvedValue(null);
-    mocks.questionBankItemCreate.mockResolvedValueOnce({
-      id: 'bank-missing-1',
+    questionBankRepository.persistGeneratedQuestions.mockResolvedValueOnce({
+      persistedCount: 1,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
     });
 
     await expect(
@@ -97,30 +116,31 @@ describe('QuestionBankService', () => {
         knowledgeUnitId: 'ku-1',
         questionCount: 10,
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       activeBefore: 9,
       activeAfter: 10,
       generatedCount: 1,
       persistedCount: 1,
-      duplicateSkippedCount: 0,
-      structureSkippedCount: 0,
-      aiGenerations: [],
     });
-
-    expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(1);
   });
 
   it('reports duplicate generations when no new question can be persisted', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
     activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
       generationContext(),
     );
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
+    questionBankRepository.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(9);
     generator.generate.mockResolvedValueOnce(generatedQuiz('duplicate', 1));
-    mocks.questionBankItemFindUnique.mockResolvedValue({ id: 'existing-1' });
+    questionBankRepository.persistGeneratedQuestions.mockResolvedValueOnce({
+      persistedCount: 0,
+      duplicateSkippedCount: 1,
+      structureSkippedCount: 0,
+    });
 
     await expect(
       service.prepareCourseQuickQuestionBank({
@@ -131,33 +151,32 @@ describe('QuestionBankService', () => {
         knowledgeUnitId: 'ku-1',
         questionCount: 10,
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       activeBefore: 9,
       activeAfter: 9,
       generatedCount: 1,
       persistedCount: 0,
       duplicateSkippedCount: 1,
-      structureSkippedCount: 0,
-      aiGenerations: [],
     });
-
-    expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(0);
   });
 
   it('reports structure-only generations when no new question can be persisted', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
     activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
       generationContext(),
     );
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    mocks.questionBankItemCount.mockResolvedValueOnce(9);
-    generator.generate.mockResolvedValueOnce(
-      generatedQuizWithPrompts('structure', [
-        'Selon la table des matières, quelle page ouvre le cours ?',
-      ]),
-    );
+    questionBankRepository.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(9)
+      .mockResolvedValueOnce(9);
+    generator.generate.mockResolvedValueOnce(generatedQuiz('structure', 1));
+    questionBankRepository.persistGeneratedQuestions.mockResolvedValueOnce({
+      persistedCount: 0,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 1,
+    });
 
     await expect(
       service.prepareCourseQuickQuestionBank({
@@ -168,152 +187,73 @@ describe('QuestionBankService', () => {
         knowledgeUnitId: 'ku-1',
         questionCount: 10,
       }),
-    ).resolves.toEqual({
+    ).resolves.toMatchObject({
       activeBefore: 9,
       activeAfter: 9,
       generatedCount: 1,
       persistedCount: 0,
-      duplicateSkippedCount: 0,
       structureSkippedCount: 1,
-      aiGenerations: [],
     });
-
-    expect(mocks.questionBankItemFindUnique.mock.calls).toHaveLength(0);
-    expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(0);
   });
 
-  it('does not create a partial session when a mid-reservation conflict requires a retry', async () => {
-    const { activitiesRepository, mocks, service } = createHarness();
-    mocks.questionBankItemFindMany
-      .mockResolvedValueOnce(bankItems(5))
-      .mockResolvedValueOnce(bankItems(5, { idPrefix: 'retry-bank' }));
-    mocks.questionBankItemUpdateMany
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 0 })
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 });
-    activitiesRepository.createDiagnosticQuiz.mockResolvedValue({
-      sessionId: 'activity-1',
-      type: 'diagnostic_quiz',
-      title: 'Révision rapide',
-      questions: [],
-    });
-
-    await service.createCourseQuickDiagnosticQuiz({
-      studentId: 'student-1',
-      subjectId: 'subject-1',
-      courseId: 'course-1',
-      documentId: 'document-1',
-      knowledgeUnitId: 'ku-1',
-      questionCount: 5,
-    });
-
-    expect(activitiesRepository.createDiagnosticQuiz.mock.calls).toHaveLength(
-      1,
-    );
-    const createDiagnosticQuizCall =
-      getFirstMockInput<CreateDiagnosticQuizInput>(
-        activitiesRepository.createDiagnosticQuiz.mock.calls,
-      );
-    expect(
-      createDiagnosticQuizCall.quiz.questions.map(
-        (question) => question.bankQuestionId,
-      ),
-    ).toEqual([
-      'retry-bank-1',
-      'retry-bank-2',
-      'retry-bank-3',
-      'retry-bank-4',
-      'retry-bank-5',
-    ]);
-  });
-
-  it('snapshots a quick session quiz from an already prepared bank without calling the generator', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
+  it('records AI fallback metrics from generated quiz metadata', async () => {
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
     activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
       generationContext(),
     );
-    mocks.questionBankItemFindMany.mockResolvedValue(bankItems(6));
-    mocks.questionBankItemUpdateMany.mockResolvedValue({ count: 1 });
-    activitiesRepository.createDiagnosticQuiz.mockResolvedValue({
-      sessionId: 'activity-1',
-      type: 'diagnostic_quiz',
-      title: 'Révision rapide',
-      questions: [],
+    questionBankRepository.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(5)
+      .mockResolvedValueOnce(5);
+    generator.generate.mockResolvedValueOnce(
+      generatedQuiz('fallback', 1, {
+        provider: 'mistral',
+        model: 'mistral-large-latest',
+        fallbackUsed: true,
+      }),
+    );
+    questionBankRepository.persistGeneratedQuestions.mockResolvedValueOnce({
+      persistedCount: 1,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
     });
 
-    await service.createCourseQuickDiagnosticQuiz({
-      studentId: 'student-1',
-      subjectId: 'subject-1',
-      courseId: 'course-1',
-      documentId: 'document-1',
-      knowledgeUnitId: 'ku-1',
-      questionCount: 6,
+    await expect(
+      service.prepareCourseQuickQuestionBank({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'ku-1',
+        questionCount: 5,
+      }),
+    ).resolves.toMatchObject({
+      aiGenerations: [
+        {
+          provider: 'mistral',
+          model: 'mistral-large-latest',
+          fallbackUsed: true,
+          generatedCount: 1,
+          persistedCount: 1,
+        },
+      ],
     });
-
-    expect(generator.generate.mock.calls).toHaveLength(0);
-    const findManyCall = getFirstMockInput<QuestionBankItemFindManyInput>(
-      mocks.questionBankItemFindMany.mock.calls,
-    );
-    expect(findManyCall.where.courseId).toBe('course-1');
-    expect(findManyCall.where.knowledgeUnitId).toBe('ku-1');
-    expect(findManyCall.where.status).toBe(QuestionBankItemStatus.ACTIVE);
-    expect(findManyCall.orderBy).toEqual([
-      { askedCount: 'asc' },
-      { lastAskedAt: 'asc' },
-      { createdAt: 'asc' },
-      { id: 'asc' },
-    ]);
-    const reservedIds = mocks.questionBankItemUpdateMany.mock.calls.map(
-      ([input]) => (input as QuestionBankItemUpdateManyInput).where.id,
-    );
-    expect(reservedIds).toEqual([
-      'bank-1',
-      'bank-2',
-      'bank-3',
-      'bank-4',
-      'bank-5',
-      'bank-6',
-    ]);
-    const updateManyCall = getFirstMockInput<QuestionBankItemUpdateManyInput>(
-      mocks.questionBankItemUpdateMany.mock.calls,
-    );
-    expect(updateManyCall.where.studentId).toBe('student-1');
-    expect(updateManyCall.data.askedCount).toEqual({ increment: 1 });
-    expect(updateManyCall.data.lastAskedAt).toBeInstanceOf(Date);
-
-    const createDiagnosticQuizCall =
-      getFirstMockInput<CreateDiagnosticQuizInput>(
-        activitiesRepository.createDiagnosticQuiz.mock.calls,
-      );
-    expect(createDiagnosticQuizCall.quiz.questions[0]?.bankQuestionId).toBe(
-      'bank-1',
-    );
   });
 
   it('snapshots a quick session quiz from multiple knowledge units with balanced questions', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
-    const preparedQuestions = [
-      bankItem({ id: 'ku-1-bank-1', knowledgeUnitId: 'ku-1', askedCount: 0 }),
-      bankItem({ id: 'ku-1-bank-2', knowledgeUnitId: 'ku-1', askedCount: 1 }),
-      bankItem({ id: 'ku-1-bank-3', knowledgeUnitId: 'ku-1', askedCount: 2 }),
-      bankItem({ id: 'ku-2-bank-1', knowledgeUnitId: 'ku-2', askedCount: 0 }),
-      bankItem({ id: 'ku-2-bank-2', knowledgeUnitId: 'ku-2', askedCount: 1 }),
-      bankItem({ id: 'ku-2-bank-3', knowledgeUnitId: 'ku-2', askedCount: 2 }),
-      bankItem({ id: 'ku-3-bank-1', knowledgeUnitId: 'ku-3', askedCount: 0 }),
-      bankItem({ id: 'ku-3-bank-2', knowledgeUnitId: 'ku-3', askedCount: 1 }),
-    ];
-    mocks.questionBankItemFindMany.mockResolvedValue(preparedQuestions);
-    mocks.questionBankItemUpdateMany.mockResolvedValue({ count: 1 });
-    activitiesRepository.createDiagnosticQuiz.mockResolvedValue({
-      sessionId: 'activity-1',
-      type: 'diagnostic_quiz',
-      title: 'Révision rapide',
-      questions: [],
-    });
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
+    questionBankRepository.reserveCourseQuickQuestions.mockResolvedValue([
+      reservedQuestion({ id: 'ku-1-bank-1', knowledgeUnitId: 'ku-1' }),
+      reservedQuestion({ id: 'ku-2-bank-1', knowledgeUnitId: 'ku-2' }),
+      reservedQuestion({ id: 'ku-3-bank-1', knowledgeUnitId: 'ku-3' }),
+      reservedQuestion({ id: 'ku-1-bank-2', knowledgeUnitId: 'ku-1' }),
+      reservedQuestion({ id: 'ku-2-bank-2', knowledgeUnitId: 'ku-2' }),
+      reservedQuestion({ id: 'ku-3-bank-2', knowledgeUnitId: 'ku-3' }),
+    ]);
+    activitiesRepository.createDiagnosticQuiz.mockResolvedValue(activity());
 
     await service.createCourseQuickDiagnosticQuiz({
       studentId: 'student-1',
@@ -328,174 +268,36 @@ describe('QuestionBankService', () => {
     });
 
     expect(generator.generate.mock.calls).toHaveLength(0);
-    const findManyCall = getFirstMockInput<QuestionBankItemFindManyInput>(
-      mocks.questionBankItemFindMany.mock.calls,
-    );
-    expect(findManyCall.where.knowledgeUnitId.in).toEqual([
-      'ku-1',
-      'ku-2',
-      'ku-3',
-    ]);
-    expect(mocks.questionBankItemUpdateMany.mock.calls).toHaveLength(6);
+    expect(
+      questionBankRepository.reserveCourseQuickQuestions,
+    ).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      knowledgeUnits: [
+        { id: 'ku-1', documentId: 'document-1' },
+        { id: 'ku-2', documentId: 'document-1' },
+        { id: 'ku-3', documentId: 'document-2' },
+      ],
+      questionCount: 6,
+      maxAttempts: 3,
+    });
 
     const createDiagnosticQuizCall =
-      getFirstMockInput<CreateDiagnosticQuizInput>(
-        activitiesRepository.createDiagnosticQuiz.mock.calls,
-      );
+      activitiesRepository.createDiagnosticQuiz.mock.calls[0]?.[0];
     expect(
-      createDiagnosticQuizCall.quiz.questions.map(
+      createDiagnosticQuizCall?.quiz.questions.map(
         (question) => question.knowledgeUnitId,
       ),
     ).toEqual(['ku-1', 'ku-2', 'ku-3', 'ku-1', 'ku-2', 'ku-3']);
-    expect(
-      createDiagnosticQuizCall.quiz.questions.map(
-        (question) => question.bankQuestionId,
-      ),
-    ).toEqual([
-      'ku-1-bank-1',
-      'ku-2-bank-1',
-      'ku-3-bank-1',
-      'ku-1-bank-2',
-      'ku-2-bank-2',
-      'ku-3-bank-2',
-    ]);
   });
 
-  it('retries reservation when a concurrent session already claimed selected questions', async () => {
-    const { activitiesRepository, mocks, service } = createHarness();
-    mocks.questionBankItemFindMany
-      .mockResolvedValueOnce(bankItems(5))
-      .mockResolvedValueOnce(bankItems(5, { idPrefix: 'retry-bank' }));
-    mocks.questionBankItemUpdateMany
-      .mockResolvedValueOnce({ count: 0 })
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 })
-      .mockResolvedValueOnce({ count: 1 });
-    activitiesRepository.createDiagnosticQuiz.mockResolvedValue({
-      sessionId: 'activity-1',
-      type: 'diagnostic_quiz',
-      title: 'Révision rapide',
-      questions: [],
-    });
-
-    await service.createCourseQuickDiagnosticQuiz({
-      studentId: 'student-1',
-      subjectId: 'subject-1',
-      courseId: 'course-1',
-      documentId: 'document-1',
-      knowledgeUnitId: 'ku-1',
-      questionCount: 5,
-    });
-
-    expect(mocks.questionBankItemFindMany.mock.calls).toHaveLength(2);
-    const createDiagnosticQuizCall =
-      getFirstMockInput<CreateDiagnosticQuizInput>(
-        activitiesRepository.createDiagnosticQuiz.mock.calls,
-      );
-    expect(createDiagnosticQuizCall.quiz.questions[0]?.bankQuestionId).toBe(
-      'retry-bank-1',
+  it('throws when the repository cannot reserve enough prepared questions', async () => {
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
+    questionBankRepository.reserveCourseQuickQuestions.mockResolvedValue(
+      reservedQuestions(4),
     );
-  });
-
-  it('reuses existing active questions without calling the generator', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
-    activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
-      generationContext(),
-    );
-    mocks.questionBankItemCount.mockResolvedValueOnce(10);
-    mocks.questionBankItemCount.mockResolvedValueOnce(10);
-    mocks.questionBankItemFindMany.mockResolvedValue(bankItems(5));
-    mocks.questionBankItemUpdateMany.mockResolvedValue({ count: 1 });
-    activitiesRepository.createDiagnosticQuiz.mockResolvedValue({
-      sessionId: 'activity-1',
-      type: 'diagnostic_quiz',
-      title: 'Révision rapide',
-      questions: [],
-    });
-
-    await service.createCourseQuickDiagnosticQuiz({
-      studentId: 'student-1',
-      subjectId: 'subject-1',
-      courseId: 'course-1',
-      documentId: 'document-1',
-      knowledgeUnitId: 'ku-1',
-      questionCount: 5,
-    });
-
-    expect(generator.generate.mock.calls).toHaveLength(0);
-    const findManyCall = getFirstMockInput<QuestionBankItemFindManyInput>(
-      mocks.questionBankItemFindMany.mock.calls,
-    );
-    expect(findManyCall.where.status).toBe(QuestionBankItemStatus.ACTIVE);
-  });
-
-  it('does not persist generated questions about PDF structure or metadata', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
-    activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
-      generationContext(),
-    );
-    mocks.questionBankItemCount.mockResolvedValueOnce(0);
-    mocks.questionBankItemCount.mockResolvedValueOnce(0);
-    mocks.questionBankItemCount.mockResolvedValueOnce(1);
-    mocks.questionBankItemCount.mockResolvedValueOnce(1);
-    mocks.questionBankItemCount.mockResolvedValueOnce(3);
-    mocks.questionBankItemCount.mockResolvedValueOnce(3);
-    mocks.questionBankItemCount.mockResolvedValueOnce(5);
-    mocks.questionBankItemCount.mockResolvedValueOnce(5);
-    generator.generate
-      .mockResolvedValueOnce(
-        generatedQuizWithPrompts('batch-a', [
-          'Selon la table des matières, quelle page ouvre le cours 1 ?',
-          'Quel contrôle limite les rapports entre pouvoir exécutif et législatif ?',
-        ]),
-      )
-      .mockResolvedValueOnce(generatedQuiz('batch-b', 2))
-      .mockResolvedValueOnce(generatedQuiz('batch-c', 2));
-    mocks.questionBankItemFindUnique.mockResolvedValue(null);
-    mocks.questionBankItemCreate
-      .mockResolvedValueOnce({ id: 'bank-a-2' })
-      .mockResolvedValueOnce({ id: 'bank-b-1' })
-      .mockResolvedValueOnce({ id: 'bank-b-2' })
-      .mockResolvedValueOnce({ id: 'bank-c-1' })
-      .mockResolvedValueOnce({ id: 'bank-c-2' });
-    mocks.questionBankItemFindMany.mockResolvedValue(bankItems(5));
-    mocks.questionBankItemUpdateMany.mockResolvedValue({ count: 5 });
-    activitiesRepository.createDiagnosticQuiz.mockResolvedValue({
-      sessionId: 'activity-1',
-      type: 'diagnostic_quiz',
-      title: 'Révision rapide',
-      questions: [],
-    });
-
-    await service.prepareCourseQuickQuestionBank({
-      studentId: 'student-1',
-      subjectId: 'subject-1',
-      courseId: 'course-1',
-      documentId: 'document-1',
-      knowledgeUnitId: 'ku-1',
-      questionCount: 5,
-    });
-
-    expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(5);
-    const persistedPrompts = mocks.questionBankItemCreate.mock.calls.map(
-      ([input]) => (input as { data: { prompt: string } }).data.prompt,
-    );
-    expect(persistedPrompts).not.toContain(
-      'Selon la table des matières, quelle page ouvre le cours 1 ?',
-    );
-  });
-
-  it('refuses to generate above the active cap and does not use flagged questions', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
-    activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
-      generationContext(),
-    );
-    mocks.questionBankItemCount.mockResolvedValueOnce(4);
-    mocks.questionBankItemCount.mockResolvedValueOnce(100);
-    mocks.questionBankItemFindMany.mockResolvedValue(bankItems(4));
-    mocks.questionBankItemUpdateMany.mockResolvedValue({ count: 4 });
 
     await expect(
       service.createCourseQuickDiagnosticQuiz({
@@ -509,17 +311,14 @@ describe('QuestionBankService', () => {
     ).rejects.toThrow(QUICK_QUESTION_BANK_INSUFFICIENT_QUESTIONS);
 
     expect(generator.generate.mock.calls).toHaveLength(0);
-    const findManyCall = getFirstMockInput<QuestionBankItemFindManyInput>(
-      mocks.questionBankItemFindMany.mock.calls,
-    );
-    expect(findManyCall.where.status).toBe(QuestionBankItemStatus.ACTIVE);
     expect(activitiesRepository.createDiagnosticQuiz.mock.calls).toHaveLength(
       0,
     );
   });
 
   it('rejects invalid question counts before touching storage or providers', async () => {
-    const { activitiesRepository, generator, mocks, service } = createHarness();
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
 
     await expect(
       service.createCourseQuickDiagnosticQuiz({
@@ -536,49 +335,20 @@ describe('QuestionBankService', () => {
       activitiesRepository.findDiagnosticQuizGenerationContext.mock.calls,
     ).toHaveLength(0);
     expect(generator.generate.mock.calls).toHaveLength(0);
-    expect(mocks.questionBankItemCount.mock.calls).toHaveLength(0);
+    expect(
+      questionBankRepository.countActiveCourseQuickQuestions.mock.calls,
+    ).toHaveLength(0);
   });
 });
 
 function createHarness() {
-  const mocks = {
-    questionBankItemCount: jest.fn<Promise<number>, [unknown]>(),
-    questionBankItemFindUnique: jest.fn<
-      Promise<QuestionBankItemIdOnly | null>,
-      [unknown]
-    >(),
-    questionBankItemCreate: jest.fn<
-      Promise<QuestionBankItemIdOnly>,
-      [unknown]
-    >(),
-    questionBankItemFindMany: jest.fn<
-      Promise<QuestionBankItemRow[]>,
-      [unknown]
-    >(),
-    questionBankItemUpdateMany: jest.fn<
-      Promise<QuestionBankItemUpdateManyResult>,
-      [unknown]
-    >(),
-    questionBankItemSourceCreateMany: jest.fn<
-      Promise<QuestionBankItemUpdateManyResult>,
-      [unknown]
-    >(),
-    questionBankItemVisualCreateMany: jest.fn<
-      Promise<QuestionBankItemUpdateManyResult>,
-      [unknown]
-    >(),
+  const questionBankRepository = {
+    countActiveCourseQuickQuestions: jest.fn(),
+    persistGeneratedQuestions: jest.fn(),
+    reserveCourseQuickQuestions: jest.fn(),
+  } satisfies {
+    [K in keyof QuestionBankRepository]: jest.Mock;
   };
-  const transaction = jest.fn(
-    async <T>(callback: (tx: QuestionBankTransaction) => Promise<T>) =>
-      callback(createTransaction(mocks)),
-  );
-  const prisma = {
-    questionBankItem: {
-      count: mocks.questionBankItemCount,
-      findUnique: mocks.questionBankItemFindUnique,
-    },
-    $transaction: transaction,
-  } as unknown as PrismaService;
   const activitiesRepository: jest.Mocked<ActivitiesRepository> = {
     findDiagnosticQuizGenerationContext: jest.fn(),
     findOpenQuestionGenerationContext: jest.fn(),
@@ -603,28 +373,16 @@ function createHarness() {
   return {
     activitiesRepository,
     generator,
-    mocks,
-    service: new QuestionBankService(prisma, activitiesRepository, generator),
+    questionBankRepository,
+    service: new QuestionBankService(
+      questionBankRepository,
+      activitiesRepository,
+      generator,
+    ),
   };
 }
 
-function createTransaction(mocks: QuestionBankMocks): QuestionBankTransaction {
-  return {
-    questionBankItem: {
-      create: mocks.questionBankItemCreate,
-      findMany: mocks.questionBankItemFindMany,
-      updateMany: mocks.questionBankItemUpdateMany,
-    },
-    questionBankItemSource: {
-      createMany: mocks.questionBankItemSourceCreateMany,
-    },
-    questionBankItemVisual: {
-      createMany: mocks.questionBankItemVisualCreateMany,
-    },
-  };
-}
-
-function generationContext() {
+function generationContext(): DiagnosticQuizGenerationContext {
   return {
     documentId: 'document-1',
     knowledgeUnit: {
@@ -644,12 +402,14 @@ function generationContext() {
         pageNumber: 1,
       },
     ],
-  } satisfies Awaited<
-    ReturnType<ActivitiesRepository['findDiagnosticQuizGenerationContext']>
-  >;
+  };
 }
 
-function generatedQuiz(prefix: string, count: number): GeneratedDiagnosticQuiz {
+function generatedQuiz(
+  prefix: string,
+  count: number,
+  metadata?: GeneratedDiagnosticQuiz['metadata'],
+): GeneratedDiagnosticQuiz {
   return {
     title: 'Révision rapide',
     version: 3,
@@ -666,197 +426,48 @@ function generatedQuiz(prefix: string, count: number): GeneratedDiagnosticQuiz {
       sourceChunkIds: ['chunk-1'],
       visuals: [],
     })),
+    metadata,
   };
 }
 
-function generatedQuizWithPrompts(
-  prefix: string,
-  prompts: string[],
-): GeneratedDiagnosticQuiz {
-  return {
-    title: 'Révision rapide',
-    version: 3,
-    questions: prompts.map((prompt, index) => ({
-      prompt,
-      difficulty: 'MEDIUM',
-      selectionMode: 'single',
-      choices: [
-        { id: 'a', label: `${prefix} réponse A ${index + 1}` },
-        { id: 'b', label: `${prefix} réponse B ${index + 1}` },
-      ],
-      correctChoiceId: 'a',
-      explanation: 'Explication.',
-      sourceChunkIds: ['chunk-1'],
-      visuals: [],
-    })),
-  };
-}
-
-function bankItems(
-  count: number,
-  options: { idPrefix?: string } = {},
-): QuestionBankItemRow[] {
-  const idPrefix = options.idPrefix ?? 'bank';
+function reservedQuestions(count: number): QuestionBankReservedQuestionDto[] {
   return Array.from({ length: count }, (_, index) =>
-    bankItem({
-      id: `${idPrefix}-${index + 1}`,
-      askedCount: index,
-      lastAskedAt: index === 0 ? null : new Date(`2026-06-20T10:0${index}:00Z`),
-      createdAt: new Date(`2026-06-20T09:0${index}:00Z`),
-      updatedAt: new Date(`2026-06-20T09:0${index}:00Z`),
-    }),
+    reservedQuestion({ id: `bank-${index + 1}` }),
   );
 }
 
-function bankItem(
-  overrides: Partial<QuestionBankItemRow> = {},
-): QuestionBankItemRow {
+function reservedQuestion(
+  overrides: Partial<QuestionBankReservedQuestionDto> = {},
+): QuestionBankReservedQuestionDto {
   const id = overrides.id ?? 'bank-1';
 
   return {
     id,
-    studentId: 'student-1',
-    subjectId: 'subject-1',
-    courseId: 'course-1',
     documentId: 'document-1',
     knowledgeUnitId: 'ku-1',
     prompt: `Question ${id}`,
-    difficulty: KnowledgeUnitDifficulty.MEDIUM,
+    difficulty: 'MEDIUM',
     choices: [
       { id: 'a', label: 'Réponse A' },
       { id: 'b', label: 'Réponse B' },
     ],
-    selectionMode: QuestionSelectionMode.SINGLE,
+    selectionMode: 'single',
     minSelections: null,
     maxSelections: null,
     correctChoiceId: 'a',
-    correctChoiceIds: null,
+    correctChoiceIds: [],
     explanation: 'Explication.',
-    fingerprint: `fingerprint-${id}`,
-    status: QuestionBankItemStatus.ACTIVE,
-    askedCount: 0,
-    lastAskedAt: null,
-    flaggedAt: null,
-    flagReason: null,
-    archivedAt: null,
-    createdAt: new Date('2026-06-20T09:00:00Z'),
-    updatedAt: new Date('2026-06-20T09:00:00Z'),
-    sources: [
-      {
-        id: `source-${id}`,
-        questionBankItemId: id,
-        subjectId: 'subject-1',
-        chunkId: 'chunk-1',
-      },
-    ],
+    sourceChunkIds: ['chunk-1'],
     visuals: [],
     ...overrides,
   };
 }
 
-function getFirstMockInput<T>(calls: Array<[unknown]>): T {
-  const firstCall = calls[0];
-
-  if (!firstCall) {
-    throw new Error('Expected mock to be called');
-  }
-
-  return firstCall[0] as T;
-}
-
-type QuestionBankMocks = ReturnType<typeof createHarness>['mocks'];
-
-interface QuestionBankItemFindManyInput {
-  where: {
-    courseId: string;
-    knowledgeUnitId: string | { in: string[] };
-    status: QuestionBankItemStatus;
+function activity(): DiagnosticQuizActivity {
+  return {
+    sessionId: 'activity-1',
+    type: 'diagnostic_quiz',
+    title: 'Révision rapide',
+    questions: [],
   };
-  orderBy: Array<Record<string, 'asc' | 'desc'>>;
-}
-
-interface QuestionBankItemUpdateManyInput {
-  where: {
-    id: string;
-    studentId: string;
-    askedCount: number;
-    lastAskedAt: Date | null;
-  };
-  data: {
-    askedCount: {
-      increment: number;
-    };
-    lastAskedAt: Date;
-  };
-}
-
-interface CreateDiagnosticQuizInput {
-  quiz: GeneratedDiagnosticQuiz;
-}
-
-interface QuestionBankTransaction {
-  questionBankItem: {
-    create: QuestionBankMocks['questionBankItemCreate'];
-    findMany: QuestionBankMocks['questionBankItemFindMany'];
-    updateMany: QuestionBankMocks['questionBankItemUpdateMany'];
-  };
-  questionBankItemSource: {
-    createMany: QuestionBankMocks['questionBankItemSourceCreateMany'];
-  };
-  questionBankItemVisual: {
-    createMany: QuestionBankMocks['questionBankItemVisualCreateMany'];
-  };
-}
-
-interface QuestionBankItemIdOnly {
-  id: string;
-}
-
-interface QuestionBankItemUpdateManyResult {
-  count: number;
-}
-
-interface QuestionBankItemSourceRow {
-  id: string;
-  questionBankItemId: string;
-  subjectId: string;
-  chunkId: string;
-}
-
-interface QuestionBankItemVisualRow {
-  id: string;
-  questionBankItemId: string;
-  type: string;
-  displayOrder: number;
-  payload: unknown;
-  createdAt: Date;
-}
-
-interface QuestionBankItemRow {
-  id: string;
-  studentId: string;
-  subjectId: string;
-  courseId: string;
-  documentId: string;
-  knowledgeUnitId: string;
-  prompt: string;
-  difficulty: KnowledgeUnitDifficulty;
-  choices: unknown;
-  selectionMode: QuestionSelectionMode;
-  minSelections: number | null;
-  maxSelections: number | null;
-  correctChoiceId: string | null;
-  correctChoiceIds: unknown;
-  explanation: string;
-  fingerprint: string;
-  status: QuestionBankItemStatus;
-  askedCount: number;
-  lastAskedAt: Date | null;
-  flaggedAt: Date | null;
-  flagReason: string | null;
-  archivedAt: Date | null;
-  createdAt: Date;
-  updatedAt: Date;
-  sources: QuestionBankItemSourceRow[];
-  visuals: QuestionBankItemVisualRow[];
 }

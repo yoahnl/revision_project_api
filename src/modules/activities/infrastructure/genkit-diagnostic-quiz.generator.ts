@@ -1195,8 +1195,21 @@ function normalizeGeneratedQuiz(input: {
     throw new Error(QUESTION_COUNT_INVALID_ERROR_CODE);
   }
 
+  const metadata = {
+    flowName: FLOW_NAME,
+    provider: input.metadata.provider,
+    model: input.metadata.model,
+    promptVersion: input.metadata.generationVersion,
+    schemaVersion: input.metadata.generationVersion,
+    inputSize: input.metadata.inputSize,
+    fallbackUsed: input.metadata.fallbackUsed === true,
+  };
+
   if (input.chunks.length === 0) {
-    return input.output;
+    return {
+      ...input.output,
+      metadata,
+    };
   }
 
   const knownChunkIds = new Set(input.chunks.map((chunk) => chunk.id));
@@ -1212,14 +1225,7 @@ function normalizeGeneratedQuiz(input: {
         allowedSelectionModes: input.allowedSelectionModes,
       }),
     ),
-    metadata: {
-      flowName: FLOW_NAME,
-      provider: input.metadata.provider,
-      model: input.metadata.model,
-      promptVersion: input.metadata.generationVersion,
-      schemaVersion: input.metadata.generationVersion,
-      inputSize: input.metadata.inputSize,
-    },
+    metadata,
   };
 }
 
