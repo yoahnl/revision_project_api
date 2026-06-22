@@ -34,6 +34,22 @@ export class CourseQuestionBankPreparationConsumer extends WorkerHost {
       );
     }
 
-    await this.processPreparationJob.execute({ preparationJobId });
+    this.logger.log({
+      event: 'course_question_bank_worker_received',
+      preparationJobId,
+      queueName: COURSE_QUESTION_BANK_PREPARATION_QUEUE_NAME,
+      bullJobId: job.id ? String(job.id) : null,
+    });
+
+    const result = await this.processPreparationJob.execute({
+      preparationJobId,
+    });
+
+    this.logger.log({
+      event: 'course_question_bank_worker_processed',
+      preparationJobId,
+      queueName: COURSE_QUESTION_BANK_PREPARATION_QUEUE_NAME,
+      processed: result.processed,
+    });
   }
 }

@@ -1,7 +1,18 @@
+import { Logger } from '@nestjs/common';
 import { ProcessCourseQuestionBankPreparationJobUseCase } from '../../courses/application/process-course-question-bank-preparation-job.use-case';
 import { CourseQuestionBankPreparationConsumer } from './course-question-bank-preparation.consumer';
 
 describe('CourseQuestionBankPreparationConsumer', () => {
+  let logSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
+  });
+
+  afterEach(() => {
+    logSpy.mockRestore();
+  });
+
   it('delegates valid BullMQ payloads to the preparation use case', async () => {
     const processPreparationJob = {
       execute: jest.fn().mockResolvedValue({ processed: true }),
@@ -12,6 +23,13 @@ describe('CourseQuestionBankPreparationConsumer', () => {
 
     await consumer.process({ data: { preparationJobId: 'prep-1' } } as never);
 
+    expect(logSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'course_question_bank_worker_received',
+        preparationJobId: 'prep-1',
+        queueName: 'course-question-bank-preparation',
+      }),
+    );
     expect(processPreparationJob.execute.mock.calls[0]?.[0]).toEqual({
       preparationJobId: 'prep-1',
     });

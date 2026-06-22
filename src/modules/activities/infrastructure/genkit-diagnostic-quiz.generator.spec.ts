@@ -114,6 +114,8 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     process.env.DIAGNOSTIC_QUIZ_MAX_QUESTION_COUNT;
   const originalOpenAiCompatTransport =
     process.env.DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT;
+  const originalAiResponsePreviewChars =
+    process.env.DIAGNOSTIC_QUIZ_AI_RESPONSE_PREVIEW_CHARS;
   let loggerLogSpy: jest.SpyInstance;
   let loggerWarnSpy: jest.SpyInstance;
 
@@ -156,6 +158,10 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     restoreEnv(
       'DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT',
       originalOpenAiCompatTransport,
+    );
+    restoreEnv(
+      'DIAGNOSTIC_QUIZ_AI_RESPONSE_PREVIEW_CHARS',
+      originalAiResponsePreviewChars,
     );
     mockOpenAICompatible.mockClear();
     mockGoogleAI.mockClear();
@@ -214,6 +220,42 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(generateInput?.prompt).toContain('exactement 10 questions');
     expect(generateInput?.output.schema).toBeDefined();
     expect(quiz).toEqual(generatedQuiz());
+  });
+
+  it('logs bounded Genkit raw output diagnostics with correlation id', async () => {
+    process.env.AI_PROVIDER = 'mistral';
+    process.env.MISTRAL_API_KEY = 'test-mistral-key';
+    process.env.DIAGNOSTIC_QUIZ_AI_RESPONSE_PREVIEW_CHARS = '48';
+    mockGenerate.mockResolvedValue({
+      output: generatedQuiz(),
+    });
+
+    await new GenkitDiagnosticQuizGenerator().generate({
+      correlationId: 'prep-1',
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-constitution',
+        subjectId: 'subject-constitutional-law',
+        title: 'Revision constitutionnelle',
+        summary:
+          'La Constitution de 1958 encadre la procedure de revision et protege la forme republicaine du gouvernement.',
+      }),
+    });
+
+    const outputLog = readJsonLog(
+      loggerLogSpy,
+      'diagnostic.quiz.genkit.raw_output',
+    );
+    expect(outputLog).toMatchObject({
+      event: 'diagnostic.quiz.genkit.raw_output',
+      provider: 'mistral',
+      model: 'mistral/mistral-medium-latest',
+      correlationId: 'prep-1',
+      outputKind: 'object',
+    });
+    expect(typeof outputLog.outputHash).toBe('string');
+    expect(
+      readStringLogField(outputLog, 'outputPreview').length,
+    ).toBeLessThanOrEqual(48);
   });
 
   it('generates a MiMo-backed quiz when AI_PROVIDER is mimo', async () => {
@@ -301,6 +343,56 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     expect(quiz).toEqual(generatedQuiz());
 
     fetchSpy.mockRestore();
+  });
+
+  it('logs bounded direct provider response diagnostics before parsing', async () => {
+    process.env.AI_PROVIDER = 'mimo';
+    process.env.MIMO_API_KEY = 'test-mimo-key';
+    process.env.DIAGNOSTIC_QUIZ_AI_RESPONSE_PREVIEW_CHARS = '64';
+    delete process.env.DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT;
+    jest.spyOn(global, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [
+            {
+              message: {
+                content: JSON.stringify(generatedQuiz()),
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    await new GenkitDiagnosticQuizGenerator().generate({
+      correlationId: 'prep-direct',
+      knowledgeUnit: new KnowledgeUnit({
+        id: 'unit-constitution',
+        subjectId: 'subject-constitutional-law',
+        title: 'Revision constitutionnelle',
+        summary:
+          'La Constitution de 1958 encadre la procedure de revision et protege la forme republicaine du gouvernement.',
+      }),
+    });
+
+    const responseLog = readJsonLog(
+      loggerLogSpy,
+      'diagnostic.quiz.openai_compatible.response',
+    );
+    expect(responseLog).toMatchObject({
+      event: 'diagnostic.quiz.openai_compatible.response',
+      provider: 'mimo',
+      model: 'mimo/mimo-v2.5-pro',
+      correlationId: 'prep-direct',
+      httpStatus: 200,
+      choiceCount: 1,
+    });
+    expect(typeof responseLog.contentLength).toBe('number');
+    expect(typeof responseLog.contentHash).toBe('string');
+    expect(
+      readStringLogField(responseLog, 'contentPreview').length,
+    ).toBeLessThanOrEqual(64);
   });
 
   it('normalizes common direct provider JSON variants before schema validation', async () => {
@@ -1654,6 +1746,36 @@ function restoreEnv(name: string, value: string | undefined): void {
   } else {
     process.env[name] = value;
   }
+}
+
+function readJsonLog(
+  logSpy: jest.SpyInstance,
+  event: string,
+): Record<string, unknown> {
+  for (const [message] of logSpy.mock.calls) {
+    if (typeof message !== 'string') {
+      continue;
+    }
+
+    const parsed = JSON.parse(message) as Record<string, unknown>;
+    if (parsed['event'] === event) {
+      return parsed;
+    }
+  }
+
+  throw new Error(`Expected log event ${event}`);
+}
+
+function readStringLogField(
+  log: Record<string, unknown>,
+  field: string,
+): string {
+  const value = log[field];
+  if (typeof value !== 'string') {
+    throw new Error(`Expected string log field ${field}`);
+  }
+
+  return value;
 }
 
 type TestAiGenerationObserver = {

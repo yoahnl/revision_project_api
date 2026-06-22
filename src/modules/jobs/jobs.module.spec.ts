@@ -12,9 +12,33 @@ import {
   DOCUMENT_PROCESSING_QUEUE,
   type DocumentProcessingQueue,
 } from './application/document-processing.queue';
-import { JobsModule } from './jobs.module';
+import {
+  JobsModule,
+  resolveCourseQuestionBankPreparationWorkerEnabled,
+} from './jobs.module';
 
 describe('JobsModule', () => {
+  it('enables the course question bank worker by default when queues are enabled', () => {
+    expect(
+      resolveCourseQuestionBankPreparationWorkerEnabled({
+        queueDisabled: false,
+        envValue: undefined,
+      }),
+    ).toBe(true);
+    expect(
+      resolveCourseQuestionBankPreparationWorkerEnabled({
+        queueDisabled: false,
+        envValue: 'false',
+      }),
+    ).toBe(false);
+    expect(
+      resolveCourseQuestionBankPreparationWorkerEnabled({
+        queueDisabled: true,
+        envValue: 'true',
+      }),
+    ).toBe(false);
+  });
+
   it('logs safe queue runtime configuration on startup', async () => {
     const logSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation();
     const module = await Test.createTestingModule({
@@ -29,6 +53,7 @@ describe('JobsModule', () => {
         nodeEnv: 'test',
         queueDisabled: true,
         questionBankWorkerEnabled: false,
+        questionBankWorkerEnvValue: 'unset',
         redisConfigured: false,
         redisConnectionMode: 'host-port',
         consumerRegistered: false,

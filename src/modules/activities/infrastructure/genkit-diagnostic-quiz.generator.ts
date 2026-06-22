@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { googleAI } from '@genkit-ai/google-genai';
 import { genkit, z } from 'genkit';
@@ -63,6 +64,10 @@ const MAX_DIAGRAM_NODES = 12;
 const MAX_DIAGRAM_EDGES = 20;
 const OPENAI_COMPAT_DIAGNOSTIC_QUIZ_TRANSPORT_ENV =
   'DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT';
+const AI_RESPONSE_PREVIEW_CHARS_ENV =
+  'DIAGNOSTIC_QUIZ_AI_RESPONSE_PREVIEW_CHARS';
+const DEFAULT_AI_RESPONSE_PREVIEW_CHARS = 1500;
+const MAX_AI_RESPONSE_PREVIEW_CHARS = 4000;
 
 const NonEmptyStringSchema = z.string().trim().min(1);
 const DiagnosticQuizDifficultySchema = z.enum(['LOW', 'MEDIUM', 'HIGH']);
@@ -288,6 +293,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           metadata,
           prompt,
           outputSchema,
+          correlationId: input.correlationId,
         });
       } catch (error) {
         const errorCode = resolveDiagnosticQuizGenerationErrorCode(error);
@@ -469,11 +475,14 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     metadata: ResolvedGenkitMetadata;
     prompt: string;
     outputSchema: z.ZodTypeAny;
+    correlationId?: string;
   }): Promise<unknown> {
     if (shouldUseDirectOpenAiCompatibleGeneration(input.metadata)) {
       return generateOpenAiCompatibleDiagnosticQuizJson({
         metadata: input.metadata.openAiCompatible,
         prompt: input.prompt,
+        correlationId: input.correlationId,
+        logger: this.logger,
       });
     }
 
@@ -483,6 +492,16 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
         schema: input.outputSchema,
       },
     })) as { output?: unknown };
+
+    this.logger.log(
+      JSON.stringify(
+        buildDiagnosticQuizRawOutputLog({
+          metadata: input.metadata,
+          correlationId: input.correlationId,
+          output: result.output,
+        }),
+      ),
+    );
 
     return result.output;
   }
@@ -569,6 +588,8 @@ function shouldUseDirectOpenAiCompatibleGeneration(
 async function generateOpenAiCompatibleDiagnosticQuizJson(input: {
   metadata: ResolvedOpenAiCompatibleProvider;
   prompt: string;
+  correlationId?: string;
+  logger: Logger;
 }): Promise<unknown> {
   if (!input.metadata.apiKey) {
     throw new Error(`${input.metadata.apiKeyEnv} is required`);
@@ -591,16 +612,39 @@ async function generateOpenAiCompatibleDiagnosticQuizJson(input: {
   const payload = await readOpenAiCompatibleResponsePayload(response);
 
   if (!response.ok) {
+    input.logger.warn(
+      JSON.stringify(
+        buildOpenAiCompatibleProviderResponseLog({
+          metadata: input.metadata,
+          correlationId: input.correlationId,
+          httpStatus: response.status,
+          payload,
+          content: null,
+          providerErrorCode: readProviderErrorCode(payload),
+        }),
+      ),
+    );
     throw new OpenAiCompatibleDiagnosticQuizError({
       status: response.status,
       code: readProviderErrorCode(payload),
     });
   }
 
-  return normalizeOpenAiCompatibleDiagnosticQuizOutput(
-    parseOpenAiCompatibleJsonContent(
-      extractOpenAiCompatibleMessageContent(payload),
+  const content = extractOpenAiCompatibleMessageContent(payload);
+  input.logger.log(
+    JSON.stringify(
+      buildOpenAiCompatibleProviderResponseLog({
+        metadata: input.metadata,
+        correlationId: input.correlationId,
+        httpStatus: response.status,
+        payload,
+        content,
+      }),
     ),
+  );
+
+  return normalizeOpenAiCompatibleDiagnosticQuizOutput(
+    parseOpenAiCompatibleJsonContent(content),
   );
 }
 
@@ -1391,6 +1435,69 @@ function buildDiagnosticQuizOutputLog(input: {
   };
 }
 
+function buildDiagnosticQuizRawOutputLog(input: {
+  metadata: ResolvedGenkitMetadata;
+  correlationId?: string;
+  output: unknown;
+}) {
+  const serialized = serializeDiagnosticValue(input.output);
+  const preview = serializeDiagnosticValue(
+    summarizeDiagnosticPayloadForPreview(input.output),
+  );
+
+  return {
+    event: 'diagnostic.quiz.genkit.raw_output',
+    flowName: FLOW_NAME,
+    provider: input.metadata.provider,
+    model: input.metadata.model,
+    correlationId: input.correlationId,
+    outputKind: diagnosticValueKind(input.output),
+    outputLength: serialized.length,
+    outputHash: hashDiagnosticText(serialized),
+    outputPreview: previewDiagnosticText(preview),
+  };
+}
+
+function buildOpenAiCompatibleProviderResponseLog(input: {
+  metadata: ResolvedOpenAiCompatibleProvider;
+  correlationId?: string;
+  httpStatus: number;
+  payload: unknown;
+  content: string | null;
+  providerErrorCode?: string;
+}) {
+  const payloadSerialized = serializeDiagnosticValue(input.payload);
+  const content = input.content ?? '';
+  const choices = isRecord(input.payload)
+    ? input.payload['choices']
+    : undefined;
+  const preview =
+    content.length > 0
+      ? serializeDiagnosticValue(
+          summarizeDiagnosticPayloadForPreview(
+            parseJsonIfPossible(stripMarkdownJsonFence(content.trim())),
+          ),
+        )
+      : '';
+
+  return {
+    event: 'diagnostic.quiz.openai_compatible.response',
+    flowName: FLOW_NAME,
+    provider: input.metadata.provider,
+    model: input.metadata.model,
+    correlationId: input.correlationId,
+    httpStatus: input.httpStatus,
+    providerErrorCode: input.providerErrorCode,
+    payloadKind: diagnosticValueKind(input.payload),
+    payloadLength: payloadSerialized.length,
+    payloadHash: hashDiagnosticText(payloadSerialized),
+    choiceCount: Array.isArray(choices) ? choices.length : 0,
+    contentLength: content.length,
+    contentHash: content.length > 0 ? hashDiagnosticText(content) : null,
+    contentPreview: content.length > 0 ? previewDiagnosticText(preview) : '',
+  };
+}
+
 function buildDiagnosticQuizErrorLog(input: {
   input: DiagnosticQuizGenerationInput;
   metadata: ResolvedGenkitMetadata;
@@ -1470,6 +1577,114 @@ function summarizeDiagnosticQuizOutput(quiz: GeneratedDiagnosticQuiz) {
     visualQuestionCount,
     basicPromptHeuristicCount,
   };
+}
+
+function serializeDiagnosticValue(value: unknown): string {
+  try {
+    const serialized = JSON.stringify(value);
+    return typeof serialized === 'string' ? serialized : String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function parseJsonIfPossible(value: string): unknown {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
+function summarizeDiagnosticPayloadForPreview(value: unknown): unknown {
+  const unwrapped = unwrapOpenAiCompatibleQuizPayload(value);
+  if (!isRecord(unwrapped)) {
+    return {
+      kind: diagnosticValueKind(unwrapped),
+      length: typeof unwrapped === 'string' ? unwrapped.length : undefined,
+    };
+  }
+
+  const questions = Array.isArray(unwrapped['questions'])
+    ? unwrapped['questions']
+    : [];
+  const firstQuestion = questions.find(isRecord);
+  const choices =
+    firstQuestion && Array.isArray(firstQuestion['choices'])
+      ? firstQuestion['choices']
+      : [];
+  const visuals =
+    firstQuestion && Array.isArray(firstQuestion['visuals'])
+      ? firstQuestion['visuals']
+      : [];
+  const sourceChunkIds =
+    firstQuestion && Array.isArray(firstQuestion['sourceChunkIds'])
+      ? firstQuestion['sourceChunkIds']
+      : [];
+
+  return {
+    kind: 'object',
+    topLevelKeys: Object.keys(unwrapped).slice(0, 12),
+    questionCount: questions.length,
+    firstQuestion: firstQuestion
+      ? {
+          promptLength:
+            typeof firstQuestion['prompt'] === 'string'
+              ? firstQuestion['prompt'].length
+              : undefined,
+          explanationLength:
+            typeof firstQuestion['explanation'] === 'string'
+              ? firstQuestion['explanation'].length
+              : undefined,
+          difficulty:
+            typeof firstQuestion['difficulty'] === 'string'
+              ? firstQuestion['difficulty']
+              : undefined,
+          selectionMode:
+            typeof firstQuestion['selectionMode'] === 'string'
+              ? firstQuestion['selectionMode']
+              : undefined,
+          choiceCount: choices.length,
+          visualCount: visuals.length,
+          sourceChunkCount: sourceChunkIds.length,
+        }
+      : null,
+  };
+}
+
+function diagnosticValueKind(value: unknown): string {
+  if (Array.isArray(value)) {
+    return 'array';
+  }
+
+  if (value === null) {
+    return 'null';
+  }
+
+  return typeof value;
+}
+
+function previewDiagnosticText(value: string): string {
+  const limit = resolveAiResponsePreviewChars();
+  if (limit <= 0) {
+    return '';
+  }
+
+  return value.replace(/\s+/g, ' ').trim().slice(0, limit);
+}
+
+function hashDiagnosticText(value: string): string {
+  return createHash('sha256').update(value).digest('hex').slice(0, 16);
+}
+
+function resolveAiResponsePreviewChars(): number {
+  const parsed = Number(process.env[AI_RESPONSE_PREVIEW_CHARS_ENV]);
+
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    return DEFAULT_AI_RESPONSE_PREVIEW_CHARS;
+  }
+
+  return Math.min(parsed, MAX_AI_RESPONSE_PREVIEW_CHARS);
 }
 
 function isLikelyBasicQuestion(prompt: string): boolean {

@@ -80,6 +80,9 @@ class JobsRuntimeConfigurationLogger implements OnModuleInit {
       nodeEnv: process.env.NODE_ENV ?? null,
       queueDisabled: isQueueDisabled,
       questionBankWorkerEnabled: isCourseQuestionBankPreparationWorkerEnabled,
+      questionBankWorkerEnvValue: describeWorkerFlagEnvValue(
+        process.env.COURSE_QUESTION_BANK_PREPARATION_WORKER_ENABLED,
+      ),
       redisConfigured: Boolean(process.env.REDIS_URL || process.env.REDIS_HOST),
       redisConnectionMode: process.env.REDIS_URL ? 'url' : 'host-port',
       consumerRegistered: isCourseQuestionBankPreparationWorkerEnabled,
@@ -96,8 +99,10 @@ const isDocumentFileCleanupWorkerEnabled =
     process.env.DOCUMENT_PROCESSING_WORKER_ENABLED) === 'true';
 
 const isCourseQuestionBankPreparationWorkerEnabled =
-  !isQueueDisabled &&
-  process.env.COURSE_QUESTION_BANK_PREPARATION_WORKER_ENABLED === 'true';
+  resolveCourseQuestionBankPreparationWorkerEnabled({
+    queueDisabled: isQueueDisabled,
+    envValue: process.env.COURSE_QUESTION_BANK_PREPARATION_WORKER_ENABLED,
+  });
 
 const documentProcessingConsumerProviders = isDocumentProcessingWorkerEnabled
   ? [
@@ -251,4 +256,34 @@ function resolveRedisConnection(): ConnectionOptions {
     password: url.password || undefined,
     db: Number.isNaN(database) ? undefined : database,
   };
+}
+
+export function resolveCourseQuestionBankPreparationWorkerEnabled(input: {
+  queueDisabled: boolean;
+  envValue: string | undefined;
+}) {
+  if (input.queueDisabled) {
+    return false;
+  }
+
+  const normalized = input.envValue?.trim().toLowerCase();
+  return !['false', '0', 'off', 'disabled'].includes(normalized ?? '');
+}
+
+function describeWorkerFlagEnvValue(value: string | undefined) {
+  const normalized = value?.trim().toLowerCase();
+
+  if (!normalized) {
+    return 'unset';
+  }
+
+  if (
+    ['true', 'false', '1', '0', 'on', 'off', 'enabled', 'disabled'].includes(
+      normalized,
+    )
+  ) {
+    return normalized;
+  }
+
+  return 'custom';
 }
