@@ -79,7 +79,7 @@ Routes structurantes déjà présentes :
 
 ## 4. Risques backend actuels
 
-- Génération question bank encore trop synchrone.
+- Génération question bank sortie du tap utilisateur pour quick V0, mais sélection multi-notions/concurrence encore à durcir.
 - Quick course-level centré sur une notion sélectionnée.
 - Suppression de source désormais gardée par CORE-09A ; CORE-09B ajoute une intention transactionnelle de cleanup et un processor interne pour supprimer les fichiers physiques uniquement après suppression DB safe.
 - Stockage local à remplacer ou abstraire pour production.

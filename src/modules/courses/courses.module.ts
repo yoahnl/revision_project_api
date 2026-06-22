@@ -12,6 +12,11 @@ import {
   GenerateCourseRevisionSheetUseCase,
   GetCourseRevisionSheetUseCase,
 } from './application/course-revision-sheet.use-case';
+import { COURSE_QUESTION_BANK_PREPARATION_REPOSITORY } from './application/course-question-bank-preparation.repository';
+import {
+  GetCourseQuestionBankReadinessUseCase,
+  PrepareCourseQuestionBankUseCase,
+} from './application/course-question-bank-readiness.use-case';
 import {
   GetCourseProgressUseCase,
   GetSubjectProgressUseCase,
@@ -32,6 +37,7 @@ import { ListSubjectCoursesUseCase } from './application/list-subject-courses.us
 import { StartCourseQuickRevisionSessionUseCase } from './application/start-course-quick-revision-session.use-case';
 import { UpdateCourseUseCase } from './application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from './application/upload-course-pdf-for-course.use-case';
+import { PrismaCourseQuestionBankPreparationRepository } from './infrastructure/prisma-course-question-bank-preparation.repository';
 import { PrismaCoursesRepository } from './infrastructure/prisma-courses.repository';
 import { CoursesController } from './interfaces/courses.controller';
 
@@ -63,12 +69,18 @@ import { CoursesController } from './interfaces/courses.controller';
     UploadCoursePdfForCourseUseCase,
     GetCourseRevisionSheetUseCase,
     GenerateCourseRevisionSheetUseCase,
+    GetCourseQuestionBankReadinessUseCase,
+    PrepareCourseQuestionBankUseCase,
     StartCourseQuickRevisionSessionUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,
     {
       provide: COURSES_REPOSITORY,
       useClass: PrismaCoursesRepository,
+    },
+    {
+      provide: COURSE_QUESTION_BANK_PREPARATION_REPOSITORY,
+      useClass: PrismaCourseQuestionBankPreparationRepository,
     },
   ],
   exports: [
@@ -88,6 +100,8 @@ import { CoursesController } from './interfaces/courses.controller';
     UploadCoursePdfForCourseUseCase,
     GetCourseRevisionSheetUseCase,
     GenerateCourseRevisionSheetUseCase,
+    GetCourseQuestionBankReadinessUseCase,
+    PrepareCourseQuestionBankUseCase,
     StartCourseQuickRevisionSessionUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,

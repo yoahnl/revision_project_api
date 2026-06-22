@@ -18,7 +18,7 @@ Horizons autorisés : `FOUNDATION`, `MVP_STABLE`, `MVP_PLUS`, `POST_MVP`, `RELEA
 | CORE-09A | CORE-09 | MVP_STABLE | Oui | DONE | STAB-01A | Archive/delete semantics des sources. | Tests ownership, usage historique, 409/archive. | `docs/core/CORE_09A_SOURCE_LIFECYCLE_API_REPORT.md` |
 | CORE-09B | CORE-09 | MVP_STABLE | Oui | DONE | CORE-09A | Cleanup blob et abstraction storage. | Tests storage, cleanup, repository, jobs, e2e et full Jest. | `docs/core/CORE_09B_STORAGE_CLEANUP_API_REPORT.md` |
 | CORE-09C | CORE-09 | MVP_STABLE | Oui | DONE | CORE-09A | Lifecycle subject/course : rename/edit/archive si validé. | Routes lifecycle/PATCH/archive/delete, tests ciblés, e2e, intégration app et hardening CORE-09C-bis. | `docs/core/CORE_09C_SUBJECT_COURSE_LIFECYCLE_API_REPORT.md` |
-| CORE-10A | CORE-10 | MVP_STABLE | Oui | TODO | CORE-09A | Async question bank readiness. | Jobs, retries, status readiness. | À créer |
+| CORE-10A | CORE-10 | MVP_STABLE | Oui | DONE | CORE-09A | Async question bank readiness. | Readiness course-level, job de preparation, quick start non bloquant, e2e et full Jest verts. | `docs/core/CORE_10A_ASYNC_QUESTION_BANK_READINESS_API_REPORT.md` |
 | CORE-10B | CORE-10 | MVP_STABLE | Oui | TODO | CORE-10A | Multi-KU selection et concurrence. | Tests sélection, distribution, locking. | À créer |
 | CORE-10C | CORE-10 | MVP_STABLE | Oui | TODO | CORE-10B | Découplage QuestionBankService et métriques. | Unit tests + repository tests. | À créer |
 | CORE-11A | CORE-11 | MVP_STABLE | Oui | TODO | CORE-10A | Draft persistence et resume. | Tests lifecycle/draft/ownership. | À créer |

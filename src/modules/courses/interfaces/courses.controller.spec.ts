@@ -26,6 +26,10 @@ import {
   GetSubjectProgressUseCase,
 } from '../application/course-progress.use-case';
 import {
+  GetCourseQuestionBankReadinessUseCase,
+  PrepareCourseQuestionBankUseCase,
+} from '../application/course-question-bank-readiness.use-case';
+import {
   ArchiveCourseSourceUseCase,
   GetCourseSourceLifecycleUseCase,
 } from '../application/course-source-lifecycle.use-case';
@@ -492,6 +496,48 @@ describe('CoursesController', () => {
     });
   });
 
+  it('returns course question bank readiness and starts async preparation', async () => {
+    const {
+      controller,
+      getCourseQuestionBankReadiness,
+      prepareCourseQuestionBank,
+    } = createController();
+    getCourseQuestionBankReadiness.execute.mockResolvedValue(
+      questionBankReadiness({ status: 'NOT_PREPARED' }),
+    );
+    prepareCourseQuestionBank.execute.mockResolvedValue(
+      questionBankReadiness({ status: 'PREPARING' }),
+    );
+
+    await expect(
+      controller.getQuestionBankReadiness(currentStudent, ' course-1 ', '5'),
+    ).resolves.toMatchObject({
+      courseId: 'course-1',
+      status: 'NOT_PREPARED',
+      targetQuestionCount: 5,
+    });
+    await expect(
+      controller.prepareQuestionBank(currentStudent, ' course-1 ', {
+        questionCount: 5,
+      }),
+    ).resolves.toMatchObject({
+      courseId: 'course-1',
+      status: 'PREPARING',
+      targetQuestionCount: 5,
+    });
+
+    expect(getCourseQuestionBankReadiness.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      questionCount: 5,
+    });
+    expect(prepareCourseQuestionBank.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      questionCount: 5,
+    });
+  });
+
   it('defaults course quick revision questionCount when omitted', async () => {
     const { controller, startCourseQuickRevisionSession } = createController();
     startCourseQuickRevisionSession.execute.mockResolvedValue(
@@ -560,12 +606,26 @@ describe('CoursesController', () => {
     ).rejects.toThrow(ConflictException);
 
     startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
-      new CourseQuickRevisionQuestionsPreparingError(),
+      new CourseQuickRevisionQuestionsPreparingError(
+        questionBankReadiness({
+          status: 'PREPARING',
+          userMessage:
+            'Les questions sont en préparation. Réessaie dans un instant.',
+        }),
+      ),
     );
 
     await expect(
       controller.startQuickRevisionSession(currentStudent, 'course-1'),
-    ).rejects.toThrow(ConflictException);
+    ).rejects.toMatchObject({
+      response: {
+        code: 'COURSE_QUICK_REVISION_QUESTIONS_PREPARING',
+        message: 'Les questions sont en préparation. Réessaie dans un instant.',
+        readiness: {
+          status: 'PREPARING',
+        },
+      },
+    });
 
     startCourseQuickRevisionSession.execute.mockRejectedValueOnce(
       new CourseQuickRevisionQuestionCountInvalidError(),
@@ -610,6 +670,8 @@ function createController() {
   const uploadCoursePdfForCourse = { execute: jest.fn() };
   const getCourseRevisionSheet = { execute: jest.fn() };
   const generateCourseRevisionSheet = { execute: jest.fn() };
+  const getCourseQuestionBankReadiness = { execute: jest.fn() };
+  const prepareCourseQuestionBank = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getCourseProgress = { execute: jest.fn() };
   const getSubjectProgress = { execute: jest.fn() };
@@ -629,6 +691,8 @@ function createController() {
       uploadCoursePdfForCourse as unknown as UploadCoursePdfForCourseUseCase,
       getCourseRevisionSheet as unknown as GetCourseRevisionSheetUseCase,
       generateCourseRevisionSheet as unknown as GenerateCourseRevisionSheetUseCase,
+      getCourseQuestionBankReadiness as unknown as GetCourseQuestionBankReadinessUseCase,
+      prepareCourseQuestionBank as unknown as PrepareCourseQuestionBankUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getCourseProgress as unknown as GetCourseProgressUseCase,
       getSubjectProgress as unknown as GetSubjectProgressUseCase,
@@ -646,11 +710,26 @@ function createController() {
     uploadCoursePdfForCourse,
     getCourseRevisionSheet,
     generateCourseRevisionSheet,
+    getCourseQuestionBankReadiness,
+    prepareCourseQuestionBank,
     startCourseQuickRevisionSession,
     getCourseProgress,
     getSubjectProgress,
     getCourseSourceLifecycle,
     archiveCourseSource,
+  };
+}
+
+function questionBankReadiness(overrides: Record<string, unknown> = {}) {
+  return {
+    courseId: 'course-1',
+    status: 'NOT_PREPARED',
+    readyQuestionCount: 0,
+    targetQuestionCount: 5,
+    canStartQuickRevision: false,
+    canPrepare: true,
+    userMessage: 'Les questions doivent être préparées avant de commencer.',
+    ...overrides,
   };
 }
 

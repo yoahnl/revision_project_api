@@ -82,12 +82,6 @@ export class QuestionBankService {
       throw new Error(QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY);
     }
 
-    await this.ensureQuestionPool({
-      ...input,
-      questionCount,
-      context,
-    });
-
     const selectedQuestions = await this.reserveQuestions({
       ...input,
       questionCount,
@@ -104,6 +98,48 @@ export class QuestionBankService {
       documentId: input.documentId,
       quiz: toGeneratedQuiz(selectedQuestions),
     });
+  }
+
+  async prepareCourseQuickQuestionBank(input: {
+    studentId: string;
+    subjectId: string;
+    courseId: string;
+    documentId: string;
+    knowledgeUnitId: string;
+    questionCount?: number;
+  }): Promise<void> {
+    const questionCount = resolveQuickQuestionBankQuestionCount(
+      input.questionCount,
+    );
+    const context =
+      await this.activitiesRepository.findDiagnosticQuizGenerationContext({
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        knowledgeUnitId: input.knowledgeUnitId,
+      });
+
+    if (
+      !context ||
+      context.documentId !== input.documentId ||
+      context.chunks.length === 0
+    ) {
+      throw new Error(QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY);
+    }
+
+    await this.ensureQuestionPool({
+      ...input,
+      questionCount,
+      context,
+    });
+  }
+
+  async countActiveCourseQuickQuestions(input: {
+    studentId: string;
+    subjectId: string;
+    courseId: string;
+    knowledgeUnitId: string;
+  }): Promise<number> {
+    return this.countActiveQuestions(input);
   }
 
   private async ensureQuestionPool(input: {

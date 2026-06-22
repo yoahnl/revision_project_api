@@ -10,6 +10,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -27,6 +28,10 @@ import {
   GetCourseProgressUseCase,
   GetSubjectProgressUseCase,
 } from '../application/course-progress.use-case';
+import {
+  GetCourseQuestionBankReadinessUseCase,
+  PrepareCourseQuestionBankUseCase,
+} from '../application/course-question-bank-readiness.use-case';
 import {
   ArchiveCourseSourceUseCase,
   GetCourseSourceLifecycleUseCase,
@@ -96,6 +101,8 @@ export class CoursesController {
     private readonly uploadCoursePdfForCourseUseCase: UploadCoursePdfForCourseUseCase,
     private readonly getCourseRevisionSheetUseCase: GetCourseRevisionSheetUseCase,
     private readonly generateCourseRevisionSheetUseCase: GenerateCourseRevisionSheetUseCase,
+    private readonly getCourseQuestionBankReadinessUseCase: GetCourseQuestionBankReadinessUseCase,
+    private readonly prepareCourseQuestionBankUseCase: PrepareCourseQuestionBankUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getCourseProgressUseCase: GetCourseProgressUseCase,
     private readonly getSubjectProgressUseCase: GetSubjectProgressUseCase,
@@ -364,6 +371,39 @@ export class CoursesController {
       .catch(normalizeCourseError);
   }
 
+  @Get('courses/:courseId/question-bank/readiness')
+  getQuestionBankReadiness(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Query('questionCount') questionCount?: string,
+  ) {
+    return this.getCourseQuestionBankReadinessUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        questionCount: normalizeOptionalQuestionCountQuery(questionCount),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/question-bank/prepare')
+  @HttpCode(202)
+  prepareQuestionBank(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Body() body: Record<string, unknown> = {},
+  ) {
+    const validatedBody = validateQuestionBankPreparationBody(body);
+
+    return this.prepareCourseQuestionBankUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        questionCount: validatedBody.questionCount,
+      })
+      .catch(normalizeCourseError);
+  }
+
   @Post('courses/:courseId/revision-sessions/quick')
   startQuickRevisionSession(
     @CurrentStudent() student: AuthenticatedStudent,
@@ -589,6 +629,74 @@ function validateQuickRevisionBody(body: Record<string, unknown> = {}): {
   return { questionCount };
 }
 
+function validateQuestionBankPreparationBody(
+  body: Record<string, unknown> = {},
+): {
+  questionCount?: number;
+} {
+  if (
+    'studentId' in body ||
+    'subjectId' in body ||
+    'documentId' in body ||
+    'knowledgeUnitId' in body ||
+    'courseId' in body
+  ) {
+    throw new BadRequestException(
+      'Question bank preparation only accepts courseId from the URL',
+    );
+  }
+
+  const allowedFields = new Set(['questionCount']);
+  const unknownField = Object.keys(body).find(
+    (field) => !allowedFields.has(field),
+  );
+
+  if (unknownField) {
+    throw new BadRequestException(
+      'Question bank preparation only accepts questionCount in the body',
+    );
+  }
+
+  if (!('questionCount' in body)) {
+    return {};
+  }
+
+  return {
+    questionCount: normalizeQuestionCount(body.questionCount),
+  };
+}
+
+function normalizeOptionalQuestionCountQuery(
+  questionCount: string | undefined,
+): number | undefined {
+  if (questionCount == null) {
+    return undefined;
+  }
+
+  if (!/^\d+$/.test(questionCount)) {
+    throw new BadRequestException(
+      'Course quick revision questionCount must be an integer between 5 and 30',
+    );
+  }
+
+  return normalizeQuestionCount(Number(questionCount));
+}
+
+function normalizeQuestionCount(questionCount: unknown): number {
+  if (
+    typeof questionCount !== 'number' ||
+    !Number.isInteger(questionCount) ||
+    questionCount < QUICK_QUESTION_BANK_MIN_QUESTION_COUNT ||
+    questionCount > QUICK_QUESTION_BANK_MAX_QUESTION_COUNT
+  ) {
+    throw new BadRequestException(
+      'Course quick revision questionCount must be an integer between 5 and 30',
+    );
+  }
+
+  return questionCount;
+}
+
 function normalizeCourseError(error: unknown): never {
   if (error instanceof BadRequestException) {
     throw error;
@@ -627,10 +735,19 @@ function normalizeCourseError(error: unknown): never {
   if (
     error instanceof CourseQuickRevisionSourceNotReadyError ||
     error instanceof CourseQuickRevisionKnowledgeUnitNotReadyError ||
-    error instanceof CourseQuickRevisionGenerationFailedError ||
-    error instanceof CourseQuickRevisionQuestionsPreparingError
+    error instanceof CourseQuickRevisionGenerationFailedError
   ) {
     throw new ConflictException(error.message);
+  }
+
+  if (error instanceof CourseQuickRevisionQuestionsPreparingError) {
+    throw new ConflictException({
+      code: error.code,
+      message:
+        error.readiness?.userMessage ??
+        'Les questions sont en préparation. Réessaie dans un instant.',
+      readiness: error.readiness,
+    });
   }
 
   if (error instanceof CourseQuickRevisionQuestionCountInvalidError) {

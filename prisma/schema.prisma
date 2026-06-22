@@ -164,6 +164,27 @@ model DocumentFileCleanupJob {
   @@index([studentId])
 }
 
+model CourseQuestionBankPreparationJob {
+  id                  String    @id @default(cuid())
+  studentId           String
+  subjectId           String
+  courseId            String
+  documentId          String
+  knowledgeUnitId     String
+  targetQuestionCount Int
+  status              JobStatus @default(PENDING)
+  attempts            Int       @default(0)
+  lastError           String?
+  lockedAt            DateTime?
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([courseId, status])
+  @@index([studentId, courseId, status])
+}
+
 model KnowledgeUnit {
   id                      String                   @id @default(cuid())
   subjectId               String

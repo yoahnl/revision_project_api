@@ -4,6 +4,10 @@ import {
   type DocumentFileCleanupQueue,
 } from './application/document-file-cleanup.queue';
 import {
+  COURSE_QUESTION_BANK_PREPARATION_QUEUE,
+  type CourseQuestionBankPreparationQueue,
+} from './application/course-question-bank-preparation.queue';
+import {
   DOCUMENT_PROCESSING_QUEUE,
   type DocumentProcessingQueue,
 } from './application/document-processing.queue';
@@ -21,12 +25,18 @@ describe('JobsModule', () => {
     const cleanupQueue = module.get<DocumentFileCleanupQueue>(
       DOCUMENT_FILE_CLEANUP_QUEUE,
     );
+    const preparationQueue = module.get<CourseQuestionBankPreparationQueue>(
+      COURSE_QUESTION_BANK_PREPARATION_QUEUE,
+    );
 
     await expect(
       processingQueue.enqueue({ documentId: 'document-1' }),
     ).resolves.toBeUndefined();
     await expect(
       cleanupQueue.enqueue({ cleanupJobId: 'cleanup-1' }),
+    ).resolves.toBeUndefined();
+    await expect(
+      preparationQueue.enqueue({ preparationJobId: 'prep-1' }),
     ).resolves.toBeUndefined();
 
     await module.close();

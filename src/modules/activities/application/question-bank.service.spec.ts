@@ -16,7 +16,7 @@ import {
 } from './question-bank.service';
 
 describe('QuestionBankService', () => {
-  it('generates missing questions in batches of two, persists them, then snapshots the session quiz', async () => {
+  it('prepares missing questions in batches of two without creating a session snapshot', async () => {
     const { activitiesRepository, generator, mocks, service } = createHarness();
     activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
       generationContext(),
@@ -41,6 +41,33 @@ describe('QuestionBankService', () => {
       .mockResolvedValueOnce({ id: 'bank-b-2' })
       .mockResolvedValueOnce({ id: 'bank-c-1' })
       .mockResolvedValueOnce({ id: 'bank-c-2' });
+
+    await service.prepareCourseQuickQuestionBank({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'ku-1',
+      questionCount: 6,
+    });
+
+    expect(generator.generate.mock.calls).toHaveLength(3);
+    expect(
+      generator.generate.mock.calls.map(([input]) => input.questionCount),
+    ).toEqual([2, 2, 2]);
+    expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(6);
+    expect(mocks.questionBankItemFindMany.mock.calls).toHaveLength(0);
+    expect(mocks.questionBankItemUpdateMany.mock.calls).toHaveLength(0);
+    expect(activitiesRepository.createDiagnosticQuiz.mock.calls).toHaveLength(
+      0,
+    );
+  });
+
+  it('snapshots a quick session quiz from an already prepared bank without calling the generator', async () => {
+    const { activitiesRepository, generator, mocks, service } = createHarness();
+    activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
+      generationContext(),
+    );
     mocks.questionBankItemFindMany.mockResolvedValue(bankItems(6));
     mocks.questionBankItemUpdateMany.mockResolvedValue({ count: 6 });
     activitiesRepository.createDiagnosticQuiz.mockResolvedValue({
@@ -59,11 +86,7 @@ describe('QuestionBankService', () => {
       questionCount: 6,
     });
 
-    expect(generator.generate.mock.calls).toHaveLength(3);
-    expect(
-      generator.generate.mock.calls.map(([input]) => input.questionCount),
-    ).toEqual([2, 2, 2]);
-    expect(mocks.questionBankItemCreate.mock.calls).toHaveLength(6);
+    expect(generator.generate.mock.calls).toHaveLength(0);
     const findManyCall = getFirstMockInput<QuestionBankItemFindManyInput>(
       mocks.questionBankItemFindMany.mock.calls,
     );
@@ -173,7 +196,7 @@ describe('QuestionBankService', () => {
       questions: [],
     });
 
-    await service.createCourseQuickDiagnosticQuiz({
+    await service.prepareCourseQuickQuestionBank({
       studentId: 'student-1',
       subjectId: 'subject-1',
       courseId: 'course-1',

@@ -2,6 +2,14 @@ import { BullModule } from '@nestjs/bullmq';
 import { Module } from '@nestjs/common';
 import type { ConnectionOptions } from 'bullmq';
 import { AiModule } from '../ai/ai.module';
+import { ACTIVITIES_REPOSITORY } from '../activities/application/activities.repository';
+import { DIAGNOSTIC_QUIZ_GENERATOR } from '../activities/application/diagnostic-quiz-generator';
+import { QuestionBankService } from '../activities/application/question-bank.service';
+import { GenkitDiagnosticQuizGenerator } from '../activities/infrastructure/genkit-diagnostic-quiz.generator';
+import { PrismaActivitiesRepository } from '../activities/infrastructure/prisma-activities.repository';
+import { COURSE_QUESTION_BANK_PREPARATION_REPOSITORY } from '../courses/application/course-question-bank-preparation.repository';
+import { ProcessCourseQuestionBankPreparationJobUseCase } from '../courses/application/process-course-question-bank-preparation-job.use-case';
+import { PrismaCourseQuestionBankPreparationRepository } from '../courses/infrastructure/prisma-course-question-bank-preparation.repository';
 import { DOCUMENT_CONTENT_READER } from '../documents/application/document-content-reader';
 import { DOCUMENT_FILE_CLEANUP_REPOSITORY } from '../documents/application/document-file-cleanup.repository';
 import { DOCUMENT_FILE_STORAGE } from '../documents/application/document-file-storage';
@@ -23,6 +31,10 @@ import {
   type DocumentFileCleanupQueue,
 } from './application/document-file-cleanup.queue';
 import {
+  COURSE_QUESTION_BANK_PREPARATION_QUEUE,
+  type CourseQuestionBankPreparationQueue,
+} from './application/course-question-bank-preparation.queue';
+import {
   DOCUMENT_PROCESSING_QUEUE,
   type DocumentProcessingQueue,
 } from './application/document-processing.queue';
@@ -34,6 +46,11 @@ import {
   BullMqDocumentProcessingQueue,
   DOCUMENT_PROCESSING_QUEUE_NAME,
 } from './infrastructure/bullmq-document-processing.queue';
+import {
+  BullMqCourseQuestionBankPreparationQueue,
+  COURSE_QUESTION_BANK_PREPARATION_QUEUE_NAME,
+} from './infrastructure/bullmq-course-question-bank-preparation.queue';
+import { CourseQuestionBankPreparationConsumer } from './infrastructure/course-question-bank-preparation.consumer';
 import { DocumentFileCleanupConsumer } from './infrastructure/document-file-cleanup.consumer';
 import { DocumentProcessingConsumer } from './infrastructure/document-processing.consumer';
 
@@ -49,6 +66,10 @@ class NoopDocumentFileCleanupQueue implements DocumentFileCleanupQueue {
   async enqueue(): Promise<void> {}
 }
 
+class NoopCourseQuestionBankPreparationQueue implements CourseQuestionBankPreparationQueue {
+  async enqueue(): Promise<void> {}
+}
+
 const isDocumentProcessingWorkerEnabled =
   !isQueueDisabled && process.env.DOCUMENT_PROCESSING_WORKER_ENABLED === 'true';
 
@@ -56,6 +77,10 @@ const isDocumentFileCleanupWorkerEnabled =
   !isQueueDisabled &&
   (process.env.DOCUMENT_FILE_CLEANUP_WORKER_ENABLED ??
     process.env.DOCUMENT_PROCESSING_WORKER_ENABLED) === 'true';
+
+const isCourseQuestionBankPreparationWorkerEnabled =
+  !isQueueDisabled &&
+  process.env.COURSE_QUESTION_BANK_PREPARATION_WORKER_ENABLED === 'true';
 
 const documentProcessingConsumerProviders = isDocumentProcessingWorkerEnabled
   ? [
@@ -104,6 +129,30 @@ const documentFileCleanupWorkerImports =
     ? [PrismaModule]
     : [];
 
+const courseQuestionBankPreparationConsumerProviders =
+  isCourseQuestionBankPreparationWorkerEnabled
+    ? [
+        QuestionBankService,
+        {
+          provide: ACTIVITIES_REPOSITORY,
+          useClass: PrismaActivitiesRepository,
+        },
+        {
+          provide: DIAGNOSTIC_QUIZ_GENERATOR,
+          useClass: GenkitDiagnosticQuizGenerator,
+        },
+        {
+          provide: COURSE_QUESTION_BANK_PREPARATION_REPOSITORY,
+          useClass: PrismaCourseQuestionBankPreparationRepository,
+        },
+        ProcessCourseQuestionBankPreparationJobUseCase,
+        CourseQuestionBankPreparationConsumer,
+      ]
+    : [];
+
+const courseQuestionBankPreparationWorkerImports =
+  isCourseQuestionBankPreparationWorkerEnabled ? [PrismaModule, AiModule] : [];
+
 @Module({
   imports: isQueueDisabled
     ? []
@@ -117,8 +166,12 @@ const documentFileCleanupWorkerImports =
         BullModule.registerQueue({
           name: DOCUMENT_FILE_CLEANUP_QUEUE_NAME,
         }),
+        BullModule.registerQueue({
+          name: COURSE_QUESTION_BANK_PREPARATION_QUEUE_NAME,
+        }),
         ...documentProcessingWorkerImports,
         ...documentFileCleanupWorkerImports,
+        ...courseQuestionBankPreparationWorkerImports,
       ],
   providers: [
     isQueueDisabled
@@ -139,10 +192,24 @@ const documentFileCleanupWorkerImports =
           provide: DOCUMENT_FILE_CLEANUP_QUEUE,
           useClass: BullMqDocumentFileCleanupQueue,
         },
+    isQueueDisabled
+      ? {
+          provide: COURSE_QUESTION_BANK_PREPARATION_QUEUE,
+          useClass: NoopCourseQuestionBankPreparationQueue,
+        }
+      : {
+          provide: COURSE_QUESTION_BANK_PREPARATION_QUEUE,
+          useClass: BullMqCourseQuestionBankPreparationQueue,
+        },
     ...documentProcessingConsumerProviders,
     ...documentFileCleanupConsumerProviders,
+    ...courseQuestionBankPreparationConsumerProviders,
   ],
-  exports: [DOCUMENT_PROCESSING_QUEUE, DOCUMENT_FILE_CLEANUP_QUEUE],
+  exports: [
+    DOCUMENT_PROCESSING_QUEUE,
+    DOCUMENT_FILE_CLEANUP_QUEUE,
+    COURSE_QUESTION_BANK_PREPARATION_QUEUE,
+  ],
 })
 export class JobsModule {}
 

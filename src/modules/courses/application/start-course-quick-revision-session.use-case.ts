@@ -4,13 +4,16 @@ import {
   QUICK_QUESTION_BANK_INSUFFICIENT_QUESTIONS,
   QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY,
   QuestionBankService,
+  resolveQuickQuestionBankQuestionCount,
 } from '../../activities/application/question-bank.service';
+import type { CourseQuestionBankReadiness } from '../domain/course-question-bank-readiness.entity';
 import type { RevisionSessionResponseDto } from '../../revision-sessions/domain/revision-session.entity';
 import { StartRevisionSessionUseCase } from '../../revision-sessions/application/start-revision-session.use-case';
 import {
   COURSES_REPOSITORY,
   type CoursesRepository,
 } from './courses.repository';
+import { PrepareCourseQuestionBankUseCase } from './course-question-bank-readiness.use-case';
 
 export class CourseQuickRevisionSourceNotReadyError extends Error {
   readonly code = 'COURSE_QUICK_REVISION_SOURCE_NOT_READY';
@@ -49,7 +52,7 @@ export class CourseQuickRevisionQuestionCountInvalidError extends Error {
 export class CourseQuickRevisionQuestionsPreparingError extends Error {
   readonly code = 'COURSE_QUICK_REVISION_QUESTIONS_PREPARING';
 
-  constructor() {
+  constructor(readonly readiness?: CourseQuestionBankReadiness) {
     super('Course quick revision questions are being prepared');
   }
 }
@@ -61,6 +64,7 @@ export class StartCourseQuickRevisionSessionUseCase {
     private readonly coursesRepository: CoursesRepository,
     private readonly startRevisionSession: StartRevisionSessionUseCase,
     private readonly questionBank: QuestionBankService,
+    private readonly prepareQuestionBank: PrepareCourseQuestionBankUseCase,
   ) {}
 
   async execute(input: {
@@ -100,6 +104,39 @@ export class StartCourseQuickRevisionSessionUseCase {
       throw new CourseQuickRevisionKnowledgeUnitNotReadyError();
     }
 
+    let questionCount: number;
+    try {
+      questionCount = resolveQuickQuestionBankQuestionCount(
+        input.questionCount,
+      );
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message === QUICK_QUESTION_BANK_COUNT_INVALID
+      ) {
+        throw new CourseQuickRevisionQuestionCountInvalidError();
+      }
+
+      throw error;
+    }
+    const readyQuestionCount =
+      await this.questionBank.countActiveCourseQuickQuestions({
+        studentId: input.studentId,
+        subjectId: course.subjectId,
+        courseId: course.courseId,
+        knowledgeUnitId: knowledgeUnit.id,
+      });
+
+    if (readyQuestionCount < questionCount) {
+      const readiness = await this.prepareQuestionBank.execute({
+        studentId: input.studentId,
+        courseId: course.courseId,
+        questionCount,
+      });
+
+      throw new CourseQuickRevisionQuestionsPreparingError(readiness);
+    }
+
     try {
       const diagnosticQuizActivity =
         await this.questionBank.createCourseQuickDiagnosticQuiz({
@@ -108,7 +145,7 @@ export class StartCourseQuickRevisionSessionUseCase {
           courseId: course.courseId,
           documentId: readySource.documentId,
           knowledgeUnitId: knowledgeUnit.id,
-          questionCount: input.questionCount,
+          questionCount,
         });
 
       return await this.startRevisionSession.execute({
@@ -133,7 +170,13 @@ export class StartCourseQuickRevisionSessionUseCase {
         (error.message === QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY ||
           error.message === QUICK_QUESTION_BANK_INSUFFICIENT_QUESTIONS)
       ) {
-        throw new CourseQuickRevisionQuestionsPreparingError();
+        const readiness = await this.prepareQuestionBank.execute({
+          studentId: input.studentId,
+          courseId: course.courseId,
+          questionCount,
+        });
+
+        throw new CourseQuickRevisionQuestionsPreparingError(readiness);
       }
 
       // The Course API has already verified ownership, READY source and KU.
