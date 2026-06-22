@@ -81,7 +81,7 @@ Routes structurantes déjà présentes :
 
 - Génération question bank encore trop synchrone.
 - Quick course-level centré sur une notion sélectionnée.
-- Suppression de source désormais gardée par CORE-09A, mais cleanup blob/storage encore à faire.
+- Suppression de source désormais gardée par CORE-09A ; CORE-09B ajoute une intention transactionnelle de cleanup et un processor interne pour supprimer les fichiers physiques uniquement après suppression DB safe.
 - Stockage local à remplacer ou abstraire pour production.
 - `QuestionBankService` trop large et trop couplé à Prisma.
 - Pas encore de deep course-level.
@@ -138,9 +138,9 @@ Routes structurantes déjà présentes :
 ### CORE-09 — Source lifecycle & storage policy
 
 - API scope : archive/suppression source, stockage, relations Prisma, règles de conservation.
-- État : CORE-09A a ajouté `archivedAt`, la décision delete/archive/block et les guards 409 sur source utilisée.
-- Tests : suppression source utilisée, source inutilisée, ownership, archive, blobs/cascades pour CORE-09B.
-- Risque : cleanup storage physique et lifecycle matière/cours restent à traiter en CORE-09B/CORE-09C.
+- État : CORE-09A a ajouté `archivedAt`, la décision delete/archive/block et les guards 409 sur source utilisée. CORE-09B ajoute le cleanup storage post-delete via outbox DB, port storage et worker interne.
+- Tests : suppression source utilisée, source inutilisée, ownership, archive, cleanup storage, jobs, e2e.
+- Risque : le lifecycle matière/cours reste à traiter en CORE-09C ; le storage cloud reste une dette future.
 
 ### CORE-10 — Question bank production hardening
 
@@ -225,7 +225,7 @@ QUALITY-00 + lots MVP_STABLE requis -> RELEASE-01
 `MVP_STABLE` côté backend suppose :
 
 - `QUALITY-00` terminé ;
-- `CORE-09A` terminé ;
+- `CORE-09A` et `CORE-09B` terminés ;
 - `CORE-10A` terminé ;
 - `CORE-11A` terminé ;
 - quick flow vert ;

@@ -94,6 +94,11 @@ export interface DocumentKnowledgeUnitsDto {
 
 export const DOCUMENTS_REPOSITORY = Symbol('DOCUMENTS_REPOSITORY');
 
+export interface DeleteDocumentResult {
+  deleted: boolean;
+  cleanupJobId: string | null;
+}
+
 export interface DocumentsRepository {
   create(input: {
     studentId: StudentId;
@@ -131,13 +136,13 @@ export interface DocumentsRepository {
   deleteForStudent(input: {
     studentId: StudentId;
     documentId: string;
-  }): Promise<boolean>;
+  }): Promise<DeleteDocumentResult>;
 
   deleteCourseDocumentForStudent(input: {
     studentId: StudentId;
     courseId: string;
     documentId: string;
-  }): Promise<boolean>;
+  }): Promise<DeleteDocumentResult>;
 
   findById(documentId: string): Promise<RevisionDocumentDto | null>;
 

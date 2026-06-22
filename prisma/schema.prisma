@@ -139,6 +139,25 @@ model DocumentProcessingJob {
   document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
 }
 
+model DocumentFileCleanupJob {
+  id          String    @id @default(cuid())
+  documentId  String?
+  studentId   String
+  storagePath String
+  reason      String
+  status      JobStatus @default(PENDING)
+  attempts    Int       @default(0)
+  lastError   String?
+  lockedAt    DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([documentId])
+  @@index([studentId])
+}
+
 model KnowledgeUnit {
   id                      String                   @id @default(cuid())
   subjectId               String

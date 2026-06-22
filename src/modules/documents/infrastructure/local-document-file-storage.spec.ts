@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { LocalDocumentFileStorage } from './local-document-file-storage';
@@ -59,6 +59,77 @@ describe('LocalDocumentFileStorage', () => {
           storagePath: '../secrets/cours.pdf',
         }),
       ).rejects.toThrow('Document storage path must be relative');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('deletes an existing file below the configured root', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'revision-documents-'));
+    process.env.DOCUMENT_STORAGE_ROOT = root;
+    try {
+      const storagePath = 'students/student-1/subjects/subject-1/cours.pdf';
+      await mkdir(join(root, 'students/student-1/subjects/subject-1'), {
+        recursive: true,
+      });
+      await writeFile(join(root, storagePath), Buffer.from('pdf-content'));
+
+      await expect(
+        new LocalDocumentFileStorage().delete({ storagePath }),
+      ).resolves.toBeUndefined();
+
+      await expect(readFile(join(root, storagePath))).rejects.toMatchObject({
+        code: 'ENOENT',
+      });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('treats an already missing file as a successful delete', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'revision-documents-'));
+    process.env.DOCUMENT_STORAGE_ROOT = root;
+    try {
+      await expect(
+        new LocalDocumentFileStorage().delete({
+          storagePath: 'students/student-1/subjects/subject-1/missing.pdf',
+        }),
+      ).resolves.toBeUndefined();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects unsafe delete paths before touching the filesystem', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'revision-documents-'));
+    process.env.DOCUMENT_STORAGE_ROOT = root;
+    try {
+      const storage = new LocalDocumentFileStorage();
+
+      await expect(
+        storage.delete({ storagePath: '../secrets/cours.pdf' }),
+      ).rejects.toThrow('Document storage path must be relative');
+      await expect(
+        storage.delete({ storagePath: '/tmp/cours.pdf' }),
+      ).rejects.toThrow('Document storage path must be relative');
+      await expect(
+        storage.delete({ storagePath: 'students\\student-1\\cours.pdf' }),
+      ).rejects.toThrow('Document storage path must be relative');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('does not delete directories', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'revision-documents-'));
+    process.env.DOCUMENT_STORAGE_ROOT = root;
+    try {
+      const storagePath = 'students/student-1/subjects/subject-1';
+      await mkdir(join(root, storagePath), { recursive: true });
+
+      await expect(
+        new LocalDocumentFileStorage().delete({ storagePath }),
+      ).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
     }

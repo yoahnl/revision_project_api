@@ -4,6 +4,7 @@ import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.serv
 import {
   type DocumentChunkPersistenceInput,
   type DocumentKnowledgeUnitsDto,
+  type DeleteDocumentResult,
   type DocumentsRepository,
   type KnowledgeUnitPersistenceInput,
   type KnowledgeUnitSourcePersistenceInput,
@@ -42,6 +43,7 @@ type SourceLifecycleDocumentRecord = {
   studentId: string;
   subjectId: string;
   courseId: string | null;
+  storagePath: string;
   status: DocumentStatus;
   archivedAt: Date | null;
 };
@@ -50,6 +52,7 @@ type SourceLifecyclePrismaClient = Pick<
   PrismaService,
   | 'activitySession'
   | 'document'
+  | 'documentFileCleanupJob'
   | 'documentChunk'
   | 'knowledgeUnit'
   | 'openQuestion'
@@ -259,12 +262,12 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
   async deleteForStudent(input: {
     studentId: string;
     documentId: string;
-  }): Promise<boolean> {
+  }): Promise<DeleteDocumentResult> {
     return this.prisma.$transaction(async (tx) => {
       const document = await this.findLifecycleDocument(input, tx);
 
       if (!document) {
-        return false;
+        return { deleted: false, cleanupJobId: null };
       }
 
       const dependencyCounts = await this.countSourceDependencies(tx, document);
@@ -287,7 +290,22 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
         },
       });
 
-      return result.count === 1;
+      if (result.count !== 1) {
+        return { deleted: false, cleanupJobId: null };
+      }
+
+      const cleanupJob = await tx.documentFileCleanupJob.create({
+        data: {
+          documentId: document.id,
+          studentId: document.studentId,
+          storagePath: document.storagePath,
+          reason: 'DOCUMENT_SAFE_DELETE',
+          status: 'PENDING',
+        },
+        select: { id: true },
+      });
+
+      return { deleted: true, cleanupJobId: cleanupJob.id };
     });
   }
 
@@ -295,12 +313,12 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
     studentId: string;
     courseId: string;
     documentId: string;
-  }): Promise<boolean> {
+  }): Promise<DeleteDocumentResult> {
     return this.prisma.$transaction(async (tx) => {
       const document = await this.findLifecycleDocument(input, tx);
 
       if (!document) {
-        return false;
+        return { deleted: false, cleanupJobId: null };
       }
 
       const dependencyCounts = await this.countSourceDependencies(tx, document);
@@ -324,7 +342,22 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
         },
       });
 
-      return result.count === 1;
+      if (result.count !== 1) {
+        return { deleted: false, cleanupJobId: null };
+      }
+
+      const cleanupJob = await tx.documentFileCleanupJob.create({
+        data: {
+          documentId: document.id,
+          studentId: document.studentId,
+          storagePath: document.storagePath,
+          reason: 'COURSE_SOURCE_SAFE_DELETE',
+          status: 'PENDING',
+        },
+        select: { id: true },
+      });
+
+      return { deleted: true, cleanupJobId: cleanupJob.id };
     });
   }
 
@@ -695,6 +728,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
         studentId: true,
         subjectId: true,
         courseId: true,
+        storagePath: true,
         status: true,
         archivedAt: true,
       },

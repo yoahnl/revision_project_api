@@ -35,6 +35,9 @@ type PrismaDocumentsMock = {
     create: jest.Mock;
     updateMany: jest.Mock;
   };
+  documentFileCleanupJob: {
+    create: jest.Mock;
+  };
   knowledgeUnit: {
     findUnique: jest.Mock;
     findMany: jest.Mock;
@@ -103,6 +106,9 @@ describe('PrismaDocumentsRepository', () => {
       documentProcessingJob: {
         create: jest.fn(),
         updateMany: jest.fn(),
+      },
+      documentFileCleanupJob: {
+        create: jest.fn(),
       },
       knowledgeUnit: {
         findUnique: jest.fn(),
@@ -369,17 +375,23 @@ describe('PrismaDocumentsRepository', () => {
     });
   });
 
-  it('deletes a safe document owned by a student without deleting learning history', async () => {
+  it('deletes a safe document owned by a student and creates a cleanup job transactionally', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.findFirst.mockResolvedValue(record({ status: 'FAILED' }));
     prisma.document.deleteMany.mockResolvedValue({ count: 1 });
+    prisma.documentFileCleanupJob.create.mockResolvedValue({
+      id: 'cleanup-1',
+    });
 
     await expect(
       repository.deleteForStudent({
         studentId: 'student-1',
         documentId: 'document-1',
       }),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({
+      deleted: true,
+      cleanupJobId: 'cleanup-1',
+    });
 
     expect(prisma.$transaction).toHaveBeenCalledTimes(1);
     expect(prisma.document.findFirst).toHaveBeenCalledWith({
@@ -392,6 +404,7 @@ describe('PrismaDocumentsRepository', () => {
         studentId: true,
         subjectId: true,
         courseId: true,
+        storagePath: true,
         status: true,
         archivedAt: true,
       },
@@ -402,6 +415,16 @@ describe('PrismaDocumentsRepository', () => {
         id: 'document-1',
         studentId: 'student-1',
       },
+    });
+    expect(prisma.documentFileCleanupJob.create).toHaveBeenCalledWith({
+      data: {
+        documentId: 'document-1',
+        studentId: 'student-1',
+        storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+        reason: 'DOCUMENT_SAFE_DELETE',
+        status: 'PENDING',
+      },
+      select: { id: true },
     });
   });
 
@@ -414,10 +437,32 @@ describe('PrismaDocumentsRepository', () => {
         studentId: 'student-1',
         documentId: 'document-2',
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({
+      deleted: false,
+      cleanupJobId: null,
+    });
 
     expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
     expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.documentFileCleanupJob.create).not.toHaveBeenCalled();
+  });
+
+  it('does not create cleanup when the safe delete loses a concurrent race', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.document.findFirst.mockResolvedValue(record({ status: 'FAILED' }));
+    prisma.document.deleteMany.mockResolvedValue({ count: 0 });
+
+    await expect(
+      repository.deleteForStudent({
+        studentId: 'student-1',
+        documentId: 'document-1',
+      }),
+    ).resolves.toEqual({
+      deleted: false,
+      cleanupJobId: null,
+    });
+
+    expect(prisma.documentFileCleanupJob.create).not.toHaveBeenCalled();
   });
 
   it('blocks deletion and recommends archive when a document has learning history', async () => {
@@ -434,6 +479,7 @@ describe('PrismaDocumentsRepository', () => {
 
     expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
     expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.documentFileCleanupJob.create).not.toHaveBeenCalled();
   });
 
   it('returns a lifecycle decision for a source with learning dependencies', async () => {
@@ -502,14 +548,18 @@ describe('PrismaDocumentsRepository', () => {
     );
     expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
     expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.documentFileCleanupJob.create).not.toHaveBeenCalled();
   });
 
-  it('deletes a safe course document only when it belongs to the requested course', async () => {
+  it('deletes a safe course document and creates a cleanup job with course delete reason', async () => {
     const { prisma, repository } = createRepository();
     prisma.document.findFirst.mockResolvedValue(
       record({ courseId: 'course-1', status: 'FAILED' }),
     );
     prisma.document.deleteMany.mockResolvedValue({ count: 1 });
+    prisma.documentFileCleanupJob.create.mockResolvedValue({
+      id: 'cleanup-course-1',
+    });
 
     await expect(
       repository.deleteCourseDocumentForStudent({
@@ -517,7 +567,10 @@ describe('PrismaDocumentsRepository', () => {
         courseId: 'course-1',
         documentId: 'document-1',
       }),
-    ).resolves.toBe(true);
+    ).resolves.toEqual({
+      deleted: true,
+      cleanupJobId: 'cleanup-course-1',
+    });
 
     expect(prisma.document.findFirst).toHaveBeenCalledWith({
       where: {
@@ -530,6 +583,7 @@ describe('PrismaDocumentsRepository', () => {
         studentId: true,
         subjectId: true,
         courseId: true,
+        storagePath: true,
         status: true,
         archivedAt: true,
       },
@@ -541,6 +595,16 @@ describe('PrismaDocumentsRepository', () => {
         studentId: 'student-1',
         courseId: 'course-1',
       },
+    });
+    expect(prisma.documentFileCleanupJob.create).toHaveBeenCalledWith({
+      data: {
+        documentId: 'document-1',
+        studentId: 'student-1',
+        storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+        reason: 'COURSE_SOURCE_SAFE_DELETE',
+        status: 'PENDING',
+      },
+      select: { id: true },
     });
   });
 
@@ -554,7 +618,10 @@ describe('PrismaDocumentsRepository', () => {
         courseId: 'course-1',
         documentId: 'document-2',
       }),
-    ).resolves.toBe(false);
+    ).resolves.toEqual({
+      deleted: false,
+      cleanupJobId: null,
+    });
 
     expect(prisma.document.findFirst).toHaveBeenCalledWith({
       where: {
@@ -567,12 +634,14 @@ describe('PrismaDocumentsRepository', () => {
         studentId: true,
         subjectId: true,
         courseId: true,
+        storagePath: true,
         status: true,
         archivedAt: true,
       },
     });
     expect(prisma.knowledgeUnit.deleteMany).not.toHaveBeenCalled();
     expect(prisma.document.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.documentFileCleanupJob.create).not.toHaveBeenCalled();
   });
 
   it('marks uploaded documents as processing and records the running job', async () => {

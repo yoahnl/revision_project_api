@@ -56,7 +56,7 @@ export class LocalDocumentFileStorage
   async delete(input: { storagePath: string }): Promise<void> {
     await unlink(resolveStoragePath(input.storagePath)).catch(
       (error: unknown) => {
-        if (isNodeError(error) && error.code === 'ENOENT') {
+        if (getNodeErrorCode(error) === 'ENOENT') {
           return;
         }
 
@@ -171,6 +171,12 @@ function resolveStoragePath(storagePath: string): string {
   return absolutePath;
 }
 
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-  return error instanceof Error && 'code' in error;
+function getNodeErrorCode(error: unknown): string | undefined {
+  if (error === null || typeof error !== 'object' || !('code' in error)) {
+    return undefined;
+  }
+
+  const code = (error as NodeJS.ErrnoException).code;
+
+  return typeof code === 'string' ? code : undefined;
 }

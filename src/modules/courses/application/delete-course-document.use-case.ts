@@ -7,6 +7,10 @@ import {
   DOCUMENTS_REPOSITORY,
   type DocumentsRepository,
 } from '../../documents/application/documents.repository';
+import {
+  DOCUMENT_FILE_CLEANUP_QUEUE,
+  type DocumentFileCleanupQueue,
+} from '../../jobs/application/document-file-cleanup.queue';
 
 @Injectable()
 export class DeleteCourseDocumentUseCase {
@@ -15,6 +19,8 @@ export class DeleteCourseDocumentUseCase {
     private readonly coursesRepository: CoursesRepository,
     @Inject(DOCUMENTS_REPOSITORY)
     private readonly documentsRepository: DocumentsRepository,
+    @Inject(DOCUMENT_FILE_CLEANUP_QUEUE)
+    private readonly cleanupQueue: DocumentFileCleanupQueue,
   ) {}
 
   async execute(input: {
@@ -33,11 +39,15 @@ export class DeleteCourseDocumentUseCase {
 
     // The delete is constrained by courseId too: a student cannot delete a
     // document from another course by reusing a valid documentId.
-    const deleted =
+    const result =
       await this.documentsRepository.deleteCourseDocumentForStudent(input);
 
-    if (!deleted) {
+    if (!result.deleted) {
       throw new NotFoundException('Course source not found');
+    }
+
+    if (result.cleanupJobId !== null) {
+      await this.cleanupQueue.enqueue({ cleanupJobId: result.cleanupJobId });
     }
   }
 }
