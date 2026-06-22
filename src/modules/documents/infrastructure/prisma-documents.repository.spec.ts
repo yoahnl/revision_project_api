@@ -201,6 +201,7 @@ describe('PrismaDocumentsRepository', () => {
       where: {
         id: 'subject-1',
         studentId: 'student-1',
+        archivedAt: null,
       },
     });
     expect(prisma.document.create).toHaveBeenCalledWith({
@@ -274,6 +275,32 @@ describe('PrismaDocumentsRepository', () => {
     expect(prisma.documentProcessingJob.create).not.toHaveBeenCalled();
   });
 
+  it('does not create a document for an archived subject', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.create({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        kind: 'COURSE_PDF',
+        fileName: 'cours.pdf',
+        storagePath: 'students/student-1/subjects/subject-1/cours.pdf',
+        mimeType: 'application/pdf',
+      }),
+    ).rejects.toThrow('Subject does not belong to student');
+
+    expect(prisma.subject.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'subject-1',
+        studentId: 'student-1',
+        archivedAt: null,
+      },
+    });
+    expect(prisma.document.create).not.toHaveBeenCalled();
+    expect(prisma.documentProcessingJob.create).not.toHaveBeenCalled();
+  });
+
   it('lists documents for a subject owned by the student', async () => {
     const { prisma, repository } = createRepository();
     prisma.subject.findFirst.mockResolvedValue({ id: 'subject-1' });
@@ -291,6 +318,7 @@ describe('PrismaDocumentsRepository', () => {
       where: {
         id: 'subject-1',
         studentId: 'student-1',
+        archivedAt: null,
       },
     });
     expect(prisma.document.findMany).toHaveBeenCalledWith({
@@ -318,6 +346,27 @@ describe('PrismaDocumentsRepository', () => {
       }),
     ).rejects.toThrow('Subject does not belong to student');
 
+    expect(prisma.document.findMany).not.toHaveBeenCalled();
+  });
+
+  it('rejects document listing for archived subjects', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.subject.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.findBySubjectForStudent({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+      }),
+    ).rejects.toThrow('Subject does not belong to student');
+
+    expect(prisma.subject.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'subject-1',
+        studentId: 'student-1',
+        archivedAt: null,
+      },
+    });
     expect(prisma.document.findMany).not.toHaveBeenCalled();
   });
 

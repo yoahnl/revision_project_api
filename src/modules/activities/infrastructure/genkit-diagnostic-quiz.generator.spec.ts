@@ -92,6 +92,7 @@ import type {
 import { Logger } from '@nestjs/common';
 
 describe('GenkitDiagnosticQuizGenerator', () => {
+  const originalFetch = global.fetch;
   const originalAiProvider = process.env.AI_PROVIDER;
   const originalMistralApiKey = process.env.MISTRAL_API_KEY;
   const originalMistralModel = process.env.MISTRAL_MODEL;
@@ -118,6 +119,9 @@ describe('GenkitDiagnosticQuizGenerator', () => {
 
   beforeEach(() => {
     process.env.DIAGNOSTIC_QUIZ_OPENAI_COMPAT_TRANSPORT = 'genkit';
+    if (global.fetch === undefined) {
+      global.fetch = jest.fn();
+    }
     loggerLogSpy = jest
       .spyOn(Logger.prototype, 'log')
       .mockImplementation(() => undefined);
@@ -157,6 +161,11 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     mockGoogleAI.mockClear();
     mockGenkit.mockClear();
     mockGenerate.mockReset();
+    if (originalFetch === undefined) {
+      Reflect.deleteProperty(global, 'fetch');
+    } else {
+      global.fetch = originalFetch;
+    }
     loggerLogSpy.mockRestore();
     loggerWarnSpy.mockRestore();
   });

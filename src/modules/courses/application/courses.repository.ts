@@ -176,7 +176,7 @@ export interface CoursesRepository {
 
   updateForStudent(
     input: UpdateCourseRepositoryInput,
-  ): Promise<CourseDto | null>;
+  ): Promise<CourseWithSourceStatsDto | null>;
 
   archiveForStudent(input: {
     studentId: string;

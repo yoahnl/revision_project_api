@@ -106,6 +106,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
         where: {
           id: document.subjectId,
           studentId: document.studentId,
+          archivedAt: null,
         },
       });
 
@@ -146,6 +147,7 @@ export class PrismaDocumentsRepository implements DocumentsRepository {
       where: {
         id: input.subjectId,
         studentId: input.studentId,
+        archivedAt: null,
       },
     });
 

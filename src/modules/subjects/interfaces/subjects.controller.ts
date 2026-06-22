@@ -118,10 +118,12 @@ export class SubjectsController {
   @Delete(':id')
   @HttpCode(204)
   delete(@CurrentStudent() student: { id: string }, @Param('id') id: string) {
-    return this.deleteSubject.execute({
-      studentId: student.id,
-      subjectId: trimRequiredSubjectId(id),
-    });
+    return this.deleteSubject
+      .execute({
+        studentId: student.id,
+        subjectId: trimRequiredSubjectId(id),
+      })
+      .catch(normalizeSubjectValidationError);
   }
 }
 

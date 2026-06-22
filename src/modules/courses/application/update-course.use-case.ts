@@ -1,6 +1,9 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { COURSES_REPOSITORY } from './courses.repository';
-import type { CoursesRepository } from './courses.repository';
+import type {
+  CoursesRepository,
+  CourseWithSourceStatsDto,
+} from './courses.repository';
 
 @Injectable()
 export class UpdateCourseUseCase {
@@ -16,7 +19,7 @@ export class UpdateCourseUseCase {
     description?: string | null;
     chapterLabel?: string | null;
     estimatedMinutes?: number | null;
-  }) {
+  }): Promise<CourseWithSourceStatsDto> {
     const updated = await this.coursesRepository.updateForStudent(input);
 
     if (!updated) {

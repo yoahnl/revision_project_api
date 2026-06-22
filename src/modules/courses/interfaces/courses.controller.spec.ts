@@ -87,6 +87,39 @@ describe('CoursesController', () => {
     expect(createCourse.execute.mock.calls).toHaveLength(0);
   });
 
+  it('returns a complete course list item after patching a course', async () => {
+    const { controller, updateCourse } = createController();
+    updateCourse.execute.mockResolvedValue(
+      courseWithStats({
+        title: 'Droit public',
+        sourceCount: 3,
+        readySourceCount: 1,
+        processingSourceCount: 1,
+        failedSourceCount: 1,
+      }),
+    );
+
+    await expect(
+      controller.updateCourse(currentStudent, ' course-1 ', {
+        title: ' Droit public ',
+      }),
+    ).resolves.toEqual(
+      publicCourse({
+        title: 'Droit public',
+        sourceCount: 3,
+        readySourceCount: 1,
+        processingSourceCount: 1,
+        failedSourceCount: 1,
+      }),
+    );
+
+    expect(updateCourse.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      title: 'Droit public',
+    });
+  });
+
   it('returns detail with subject and sources', async () => {
     const { controller, getCourseDetail } = createController();
     getCourseDetail.execute.mockResolvedValue({

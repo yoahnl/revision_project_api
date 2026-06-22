@@ -129,6 +129,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         id: input.courseId,
         studentId: input.studentId,
         archivedAt: null,
+        subject: { archivedAt: null },
       },
     });
 
@@ -217,6 +218,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         id: input.courseId,
         studentId: input.studentId,
         archivedAt: null,
+        subject: { archivedAt: null },
       },
       include: {
         subject: {
@@ -274,6 +276,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         id: input.courseId,
         studentId: input.studentId,
         archivedAt: null,
+        subject: { archivedAt: null },
       },
     });
 
@@ -470,12 +473,13 @@ export class PrismaCoursesRepository implements CoursesRepository {
     description?: string | null;
     chapterLabel?: string | null;
     estimatedMinutes?: number | null;
-  }): Promise<CourseDto | null> {
+  }): Promise<CourseWithSourceStatsDto | null> {
     const existing = await this.prisma.course.findFirst({
       where: {
         id: input.courseId,
         studentId: input.studentId,
         archivedAt: null,
+        subject: { archivedAt: null },
       },
       select: { id: true },
     });
@@ -500,7 +504,12 @@ export class PrismaCoursesRepository implements CoursesRepository {
       },
     });
 
-    return toCourseDto(updated);
+    const stats = await this.getCourseSourceStats({
+      studentId: input.studentId,
+      courseId: existing.id,
+    });
+
+    return toCourseWithStatsDto(updated, stats);
   }
 
   async archiveForStudent(input: {
@@ -550,6 +559,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         id: input.courseId,
         studentId: input.studentId,
         archivedAt: null,
+        subject: { archivedAt: null },
       },
       select: {
         id: true,
@@ -565,6 +575,30 @@ export class PrismaCoursesRepository implements CoursesRepository {
           subjectId: course.subjectId,
         }
       : null;
+  }
+
+  private async getCourseSourceStats(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseDocumentStats> {
+    const documents = await this.prisma.document.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        archivedAt: null,
+      },
+      select: {
+        status: true,
+      },
+    });
+
+    const stats = emptySourceStats();
+
+    for (const document of documents) {
+      applyDocumentStatus(stats, document.status);
+    }
+
+    return stats;
   }
 
   async findFirstReadyCoursePdfDocumentForCourse(input: {
@@ -647,6 +681,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
           id: input.courseId,
           studentId: input.studentId,
           archivedAt: null,
+          subject: { archivedAt: null },
         },
       });
 
@@ -734,7 +769,11 @@ export class PrismaCoursesRepository implements CoursesRepository {
 type CourseLifecycleClient = {
   course: {
     findFirst(input: {
-      where: { id: string; studentId: string };
+      where: {
+        id: string;
+        studentId: string;
+        subject: { archivedAt: null };
+      };
       select: { id: true; archivedAt: true };
     }): Promise<{ id: string; archivedAt: Date | null } | null>;
   };
@@ -767,6 +806,7 @@ async function getCourseLifecycleDecision(
     where: {
       id: input.courseId,
       studentId: input.studentId,
+      subject: { archivedAt: null },
     },
     select: {
       id: true,

@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ArchiveSubjectUseCase } from '../application/archive-subject.use-case';
 import { CreateSubjectUseCase } from '../application/create-subject.use-case';
 import { DeleteSubjectUseCase } from '../application/delete-subject.use-case';
@@ -6,6 +6,7 @@ import { GetSubjectLifecycleUseCase } from '../application/get-subject-lifecycle
 import { GetSubjectUseCase } from '../application/get-subject.use-case';
 import { ListSubjectsUseCase } from '../application/list-subjects.use-case';
 import { UpdateSubjectUseCase } from '../application/update-subject.use-case';
+import { SubjectDeleteBlockedError } from '../domain/subject-lifecycle.entity';
 import { SubjectsController } from './subjects.controller';
 
 describe('SubjectsController', () => {
@@ -162,6 +163,27 @@ describe('SubjectsController', () => {
       studentId: 'student-1',
       subjectId: 'subject-1',
     });
+  });
+
+  it('maps blocked subject deletion to 409', async () => {
+    const { controller, executeDelete } = createController();
+    executeDelete.mockRejectedValueOnce(
+      new SubjectDeleteBlockedError({
+        subjectId: 'subject-1',
+        status: 'ACTIVE',
+        recommendedAction: 'ARCHIVE',
+        canDelete: false,
+        canArchive: true,
+        canUpdate: true,
+        blockingReasons: ['HAS_COURSES'],
+        userMessage:
+          'Cette matière contient déjà des cours ou des révisions. Archive-la plutôt que la supprimer.',
+      }),
+    );
+
+    await expect(controller.delete(student, 'subject-1')).rejects.toThrow(
+      ConflictException,
+    );
   });
 
   it('returns a lifecycle decision for the current student subject', async () => {

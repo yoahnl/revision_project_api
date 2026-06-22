@@ -153,12 +153,42 @@ rg -n "COURSE_DELETE_BLOCKED|SUBJECT_DELETE_BLOCKED|HAS_REVISION_SESSIONS|HAS_QU
 
 Résultat : 240 lignes. Occurrences attendues dans tests, repositories Prisma, erreurs domaine et modules infrastructure. Aucun texte utilisateur public n'est produit par le backend.
 
+## CORE-09C-bis hardening fixes
+
+- `PATCH /courses/:courseId` retourne désormais un `CourseListItemResponse` complet après update : `sourceCount`, `readySourceCount`, `processingSourceCount` et `failedSourceCount` sont recalculés côté repository avant la réponse.
+- `DELETE /subjects/:id` mappe maintenant `SubjectDeleteBlockedError` vers `409 Conflict`, comme les autres décisions lifecycle bloquées.
+- Les recherches de cours actifs refusent les cours dont la matière parente est archivée via `subject.archivedAt = null`, ce qui protège le détail cours, la progression, quick revision, upload/attachment, lifecycle, archive et delete par le contexte d'ownership actif.
+- Les uploads/listes legacy de documents par matière refusent aussi les matières archivées.
+- Le test GenKit diagnostic quiz initialise `global.fetch` dans le setup Jest si l'environnement full Jest ne l'expose pas, sans modifier la logique GenKit de production.
+
+Tests ciblés exécutés pendant le durcissement :
+
+- `npm test -- subjects.controller --runInBand` : OK, 9 tests.
+- `npm test -- prisma-courses.repository --runInBand` : OK, 27 tests.
+- `npm test -- genkit-diagnostic-quiz --runInBand` : OK, 31 tests.
+- `npm test -- documents --runInBand` : OK, 94 tests.
+- `npm test -- courses.controller --runInBand` : OK, 27 tests.
+- `npx prisma validate` : OK.
+- `npx prisma generate` : OK.
+- `npm run build` : OK.
+- `npm run lint:check` : OK après retrait d'un cast inutile dans le setup de test GenKit.
+- `npm test -- subjects --runInBand` : OK, 6 suites, 26 tests.
+- `npm test -- courses --runInBand` : OK, 11 suites, 94 tests.
+- `npm test -- lifecycle --runInBand` : OK, 4 suites, 16 tests.
+- `npm test -- revision-sessions --runInBand` : OK, 9 suites, 70 tests.
+- `npm run test:e2e -- --runInBand` : OK, 2 suites, 34 tests.
+- `npm test -- --runInBand` : OK, 93 suites passées, 1 suite skipped, 800 tests passés, 1 test skipped.
+
+Backend intact côté périmètre : aucun changement GenKit runtime, aucun changement prompts/providers, aucun changement storage cleanup, aucun lancement CORE-10A.
+
+Confirmation Git : aucun commit effectué pendant CORE-09C-bis.
+
 ## 13. Limitations
 
 - Pas de restauration d'archive.
 - Pas de page historique des archives.
 - Pas de lifecycle d'archive visible admin.
-- Full Jest reste rouge sur deux tests GenKit hors périmètre.
+- Le full Jest est de nouveau vert ; il reste une suite/test skipped préexistante.
 
 ## 14. Dette restante
 
@@ -219,7 +249,7 @@ Le contenu complet est disponible dans le diff Git local. Ce rapport ne s'inclut
 
 ## 18. Critique du prompt
 
-Le prompt demande `CORE-09C` en `DONE` si API + App sont cohérents et testés. C'est vrai pour les suites ciblées CORE-09C et l'e2e ; le full Jest reste rouge sur GenKit hors scope. Le point est documenté plutôt que masqué.
+Le prompt CORE-09C-bis est volontairement chirurgical et pertinent : il corrige des incohérences de contrat/API plutôt qu'un nouveau lot produit. La seule subtilité est que le fix GenKit demandé concerne le setup Jest, pas GenKit lui-même ; le correctif reste donc strictement dans le périmètre de test.
 
 ## 19. Confirmation aucun commit
 

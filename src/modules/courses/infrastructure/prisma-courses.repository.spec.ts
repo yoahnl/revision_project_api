@@ -91,7 +91,33 @@ describe('PrismaCoursesRepository', () => {
     ).resolves.toBeNull();
 
     expect(prisma.course.findFirst).toHaveBeenCalledWith({
-      where: { id: 'course-1', studentId: 'student-2', archivedAt: null },
+      where: {
+        id: 'course-1',
+        studentId: 'student-2',
+        archivedAt: null,
+        subject: { archivedAt: null },
+      },
+    });
+  });
+
+  it('does not return a course when its parent subject is archived', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.findByIdForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toBeNull();
+
+    expect(prisma.course.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'course-1',
+        studentId: 'student-1',
+        archivedAt: null,
+        subject: { archivedAt: null },
+      },
     });
   });
 
@@ -224,6 +250,60 @@ describe('PrismaCoursesRepository', () => {
     expect(prisma.course.delete).not.toHaveBeenCalled();
   });
 
+  it('updates a course and returns active source counters', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue(courseRecord({ id: 'course-1' }));
+    prisma.course.update.mockResolvedValue(
+      courseRecord({ id: 'course-1', title: 'Droit public' }),
+    );
+    prisma.document.findMany.mockResolvedValue([
+      documentRecord({ courseId: 'course-1', status: 'READY' }),
+      documentRecord({
+        id: 'document-2',
+        courseId: 'course-1',
+        status: 'PROCESSING',
+      }),
+      documentRecord({
+        id: 'document-3',
+        courseId: 'course-1',
+        status: 'FAILED',
+      }),
+    ]);
+
+    const updated = await repository.updateForStudent({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      title: 'Droit public',
+    });
+
+    expect(prisma.course.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'course-1',
+        studentId: 'student-1',
+        archivedAt: null,
+        subject: { archivedAt: null },
+      },
+      select: { id: true },
+    });
+    expect(prisma.document.findMany).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        courseId: 'course-1',
+        archivedAt: null,
+      },
+      select: {
+        status: true,
+      },
+    });
+    expect(updated).toMatchObject({
+      title: 'Droit public',
+      sourceCount: 3,
+      readySourceCount: 1,
+      processingSourceCount: 1,
+      failedSourceCount: 1,
+    });
+  });
+
   it('keeps document/course ownership coherent when attaching a document', async () => {
     const { prisma, repository } = createRepository();
     prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
@@ -252,6 +332,32 @@ describe('PrismaCoursesRepository', () => {
     expect(prisma.document.update).toHaveBeenCalledWith({
       where: { id: 'document-1' },
       data: { courseId: 'course-1' },
+    });
+  });
+
+  it('refuses active course ownership when the parent subject is archived', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.findCourseOwnershipContext({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toBeNull();
+
+    expect(prisma.course.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'course-1',
+        studentId: 'student-1',
+        archivedAt: null,
+        subject: { archivedAt: null },
+      },
+      select: {
+        id: true,
+        studentId: true,
+        subjectId: true,
+      },
     });
   });
 
