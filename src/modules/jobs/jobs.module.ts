@@ -1,12 +1,20 @@
 import { BullModule } from '@nestjs/bullmq';
-import { Injectable, Logger, Module, OnModuleInit } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Module,
+  OnModuleInit,
+  type Provider,
+} from '@nestjs/common';
 import type { ConnectionOptions } from 'bullmq';
 import { AiModule } from '../ai/ai.module';
 import { ACTIVITIES_REPOSITORY } from '../activities/application/activities.repository';
 import { DIAGNOSTIC_QUIZ_GENERATOR } from '../activities/application/diagnostic-quiz-generator';
+import { QUESTION_BANK_REPOSITORY } from '../activities/application/question-bank.repository';
 import { QuestionBankService } from '../activities/application/question-bank.service';
 import { GenkitDiagnosticQuizGenerator } from '../activities/infrastructure/genkit-diagnostic-quiz.generator';
 import { PrismaActivitiesRepository } from '../activities/infrastructure/prisma-activities.repository';
+import { PrismaQuestionBankRepository } from '../activities/infrastructure/prisma-question-bank.repository';
 import { COURSE_QUESTION_BANK_PREPARATION_REPOSITORY } from '../courses/application/course-question-bank-preparation.repository';
 import { ProcessCourseQuestionBankPreparationJobUseCase } from '../courses/application/process-course-question-bank-preparation-job.use-case';
 import { PrismaCourseQuestionBankPreparationRepository } from '../courses/infrastructure/prisma-course-question-bank-preparation.repository';
@@ -152,25 +160,9 @@ const documentFileCleanupWorkerImports =
     : [];
 
 const courseQuestionBankPreparationConsumerProviders =
-  isCourseQuestionBankPreparationWorkerEnabled
-    ? [
-        QuestionBankService,
-        {
-          provide: ACTIVITIES_REPOSITORY,
-          useClass: PrismaActivitiesRepository,
-        },
-        {
-          provide: DIAGNOSTIC_QUIZ_GENERATOR,
-          useClass: GenkitDiagnosticQuizGenerator,
-        },
-        {
-          provide: COURSE_QUESTION_BANK_PREPARATION_REPOSITORY,
-          useClass: PrismaCourseQuestionBankPreparationRepository,
-        },
-        ProcessCourseQuestionBankPreparationJobUseCase,
-        CourseQuestionBankPreparationConsumer,
-      ]
-    : [];
+  buildCourseQuestionBankPreparationConsumerProviders({
+    enabled: isCourseQuestionBankPreparationWorkerEnabled,
+  });
 
 const courseQuestionBankPreparationWorkerImports =
   isCourseQuestionBankPreparationWorkerEnabled ? [PrismaModule, AiModule] : [];
@@ -235,6 +227,36 @@ const courseQuestionBankPreparationWorkerImports =
   ],
 })
 export class JobsModule {}
+
+export function buildCourseQuestionBankPreparationConsumerProviders(input: {
+  enabled: boolean;
+}): Provider[] {
+  if (!input.enabled) {
+    return [];
+  }
+
+  return [
+    QuestionBankService,
+    {
+      provide: QUESTION_BANK_REPOSITORY,
+      useClass: PrismaQuestionBankRepository,
+    },
+    {
+      provide: ACTIVITIES_REPOSITORY,
+      useClass: PrismaActivitiesRepository,
+    },
+    {
+      provide: DIAGNOSTIC_QUIZ_GENERATOR,
+      useClass: GenkitDiagnosticQuizGenerator,
+    },
+    {
+      provide: COURSE_QUESTION_BANK_PREPARATION_REPOSITORY,
+      useClass: PrismaCourseQuestionBankPreparationRepository,
+    },
+    ProcessCourseQuestionBankPreparationJobUseCase,
+    CourseQuestionBankPreparationConsumer,
+  ];
+}
 
 function resolveRedisConnection(): ConnectionOptions {
   const redisUrl = process.env.REDIS_URL;
