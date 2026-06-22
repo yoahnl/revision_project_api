@@ -44,12 +44,14 @@ model RevisionGoal {
 }
 
 model Subject {
-  id        String   @id @default(cuid())
-  studentId String
-  name      String
-  priority  Int      @default(3)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id             String    @id @default(cuid())
+  studentId      String
+  name           String
+  priority       Int       @default(3)
+  archivedAt     DateTime?
+  archivedReason String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   student                StudentProfile          @relation(fields: [studentId], references: [id], onDelete: Cascade)
   courses                Course[]
@@ -67,19 +69,22 @@ model Subject {
 
   @@unique([id, studentId])
   @@index([studentId])
+  @@index([archivedAt])
 }
 
 model Course {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   studentId        String
   subjectId        String
   title            String
   description      String?
   chapterLabel     String?
   estimatedMinutes Int?
-  displayOrder     Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  displayOrder     Int       @default(0)
+  archivedAt       DateTime?
+  archivedReason   String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   student           StudentProfile     @relation(fields: [studentId], references: [id], onDelete: Cascade)
   subject           Subject            @relation(fields: [subjectId, studentId], references: [id, studentId], onDelete: Cascade)
@@ -91,6 +96,7 @@ model Course {
   @@index([studentId])
   @@index([subjectId, studentId])
   @@index([subjectId, displayOrder])
+  @@index([archivedAt])
 }
 
 model Document {

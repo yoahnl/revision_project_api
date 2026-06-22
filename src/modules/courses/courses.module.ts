@@ -7,6 +7,7 @@ import { JobsModule } from '../jobs/jobs.module';
 import { RevisionSessionsModule } from '../revision-sessions/revision-sessions.module';
 import { StudyArtifactsModule } from '../study-artifacts/study-artifacts.module';
 import { BackfillCoursesFromDocumentsDryRunUseCase } from './application/backfill-courses-from-documents.use-case';
+import { ArchiveCourseUseCase } from './application/archive-course.use-case';
 import {
   GenerateCourseRevisionSheetUseCase,
   GetCourseRevisionSheetUseCase,
@@ -24,10 +25,12 @@ import { CreateCourseUseCase } from './application/create-course.use-case';
 import { DeleteCourseDocumentUseCase } from './application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from './application/delete-course.use-case';
 import { GetCourseDetailUseCase } from './application/get-course-detail.use-case';
+import { GetCourseLifecycleUseCase } from './application/get-course-lifecycle.use-case';
 import { GetCourseUseCase } from './application/get-course.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from './application/list-subject-courses-with-stats.use-case';
 import { ListSubjectCoursesUseCase } from './application/list-subject-courses.use-case';
 import { StartCourseQuickRevisionSessionUseCase } from './application/start-course-quick-revision-session.use-case';
+import { UpdateCourseUseCase } from './application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from './application/upload-course-pdf-for-course.use-case';
 import { PrismaCoursesRepository } from './infrastructure/prisma-courses.repository';
 import { CoursesController } from './interfaces/courses.controller';
@@ -49,6 +52,9 @@ import { CoursesController } from './interfaces/courses.controller';
     ListSubjectCoursesWithStatsUseCase,
     GetCourseUseCase,
     GetCourseDetailUseCase,
+    GetCourseLifecycleUseCase,
+    UpdateCourseUseCase,
+    ArchiveCourseUseCase,
     DeleteCourseUseCase,
     DeleteCourseDocumentUseCase,
     GetCourseSourceLifecycleUseCase,
@@ -71,6 +77,9 @@ import { CoursesController } from './interfaces/courses.controller';
     ListSubjectCoursesWithStatsUseCase,
     GetCourseUseCase,
     GetCourseDetailUseCase,
+    GetCourseLifecycleUseCase,
+    UpdateCourseUseCase,
+    ArchiveCourseUseCase,
     DeleteCourseUseCase,
     DeleteCourseDocumentUseCase,
     GetCourseSourceLifecycleUseCase,

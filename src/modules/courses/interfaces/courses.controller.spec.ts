@@ -18,6 +18,7 @@ import {
   StartCourseQuickRevisionSessionUseCase,
 } from '../application/start-course-quick-revision-session.use-case';
 import { CreateCourseUseCase } from '../application/create-course.use-case';
+import { ArchiveCourseUseCase } from '../application/archive-course.use-case';
 import { DeleteCourseDocumentUseCase } from '../application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import {
@@ -29,7 +30,9 @@ import {
   GetCourseSourceLifecycleUseCase,
 } from '../application/course-source-lifecycle.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
+import { GetCourseLifecycleUseCase } from '../application/get-course-lifecycle.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
+import { UpdateCourseUseCase } from '../application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CoursesController } from './courses.controller';
 import { SourceDeleteBlockedError } from '../../documents/domain/source-lifecycle.entity';
@@ -566,6 +569,9 @@ function createController() {
   const createCourse = { execute: jest.fn() };
   const listCourses = { execute: jest.fn() };
   const getCourseDetail = { execute: jest.fn() };
+  const getCourseLifecycle = { execute: jest.fn() };
+  const updateCourse = { execute: jest.fn() };
+  const archiveCourse = { execute: jest.fn() };
   const deleteCourse = { execute: jest.fn() };
   const deleteCourseDocument = { execute: jest.fn() };
   const uploadCoursePdfForCourse = { execute: jest.fn() };
@@ -582,6 +588,9 @@ function createController() {
       createCourse as unknown as CreateCourseUseCase,
       listCourses as unknown as ListSubjectCoursesWithStatsUseCase,
       getCourseDetail as unknown as GetCourseDetailUseCase,
+      getCourseLifecycle as unknown as GetCourseLifecycleUseCase,
+      updateCourse as unknown as UpdateCourseUseCase,
+      archiveCourse as unknown as ArchiveCourseUseCase,
       deleteCourse as unknown as DeleteCourseUseCase,
       deleteCourseDocument as unknown as DeleteCourseDocumentUseCase,
       uploadCoursePdfForCourse as unknown as UploadCoursePdfForCourseUseCase,
@@ -596,6 +605,9 @@ function createController() {
     createCourse,
     listCourses,
     getCourseDetail,
+    getCourseLifecycle,
+    updateCourse,
+    archiveCourse,
     deleteCourse,
     deleteCourseDocument,
     uploadCoursePdfForCourse,

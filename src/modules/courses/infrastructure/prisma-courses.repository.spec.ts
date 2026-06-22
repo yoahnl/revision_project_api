@@ -20,7 +20,7 @@ describe('PrismaCoursesRepository', () => {
     });
 
     expect(prisma.subject.findFirst).toHaveBeenCalledWith({
-      where: { id: 'subject-1', studentId: 'student-1' },
+      where: { id: 'subject-1', studentId: 'student-1', archivedAt: null },
       select: { id: true },
     });
     expect(prisma.course.create).toHaveBeenCalledWith({
@@ -69,7 +69,11 @@ describe('PrismaCoursesRepository', () => {
     });
 
     expect(prisma.course.findMany).toHaveBeenCalledWith({
-      where: { studentId: 'student-1', subjectId: 'subject-1' },
+      where: {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        archivedAt: null,
+      },
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
     });
     expect(result.map((course) => course.id)).toEqual(['course-1', 'course-2']);
@@ -87,7 +91,7 @@ describe('PrismaCoursesRepository', () => {
     ).resolves.toBeNull();
 
     expect(prisma.course.findFirst).toHaveBeenCalledWith({
-      where: { id: 'course-1', studentId: 'student-2' },
+      where: { id: 'course-1', studentId: 'student-2', archivedAt: null },
     });
   });
 
@@ -121,8 +125,12 @@ describe('PrismaCoursesRepository', () => {
     prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
       Promise.resolve(callback(prisma)),
     );
-    prisma.course.findFirst.mockResolvedValue(courseRecord());
+    prisma.course.findFirst.mockResolvedValue(
+      courseRecord({ archivedAt: null }),
+    );
     prisma.document.count.mockResolvedValue(0);
+    prisma.revisionSession.count.mockResolvedValue(0);
+    prisma.questionBankItem.count.mockResolvedValue(0);
     prisma.course.delete.mockResolvedValue(courseRecord());
 
     await expect(
@@ -142,21 +150,77 @@ describe('PrismaCoursesRepository', () => {
     expect(prisma.document.deleteMany).not.toHaveBeenCalled();
   });
 
-  it('refuses to delete a course containing documents', async () => {
+  it('blocks deleting a used course and returns the lifecycle decision', async () => {
     const { prisma, repository } = createRepository();
     prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
       Promise.resolve(callback(prisma)),
     );
-    prisma.course.findFirst.mockResolvedValue(courseRecord());
-    prisma.document.count.mockResolvedValue(1);
+    prisma.course.findFirst.mockResolvedValue(
+      courseRecord({ archivedAt: null }),
+    );
+    prisma.document.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    prisma.revisionSession.count.mockResolvedValue(1);
+    prisma.questionBankItem.count.mockResolvedValue(1);
 
-    await expect(
-      repository.deleteIfEmpty({
+    try {
+      await repository.deleteIfEmpty({
         studentId: 'student-1',
         courseId: 'course-1',
-      }),
-    ).rejects.toThrow('Course contains documents');
+      });
+      throw new Error('Expected course deletion to be blocked');
+    } catch (error: unknown) {
+      const blocked = error as {
+        code: string;
+        decision: {
+          recommendedAction: string;
+          blockingReasons: string[];
+        };
+      };
+      expect(blocked.code).toBe('COURSE_DELETE_BLOCKED');
+      expect(blocked.decision.recommendedAction).toBe('ARCHIVE');
+      expect(blocked.decision.blockingReasons).toEqual([
+        'HAS_DOCUMENTS',
+        'HAS_REVISION_SESSIONS',
+        'HAS_QUESTION_BANK_ITEMS',
+      ]);
+    }
 
+    expect(prisma.course.delete).not.toHaveBeenCalled();
+  });
+
+  it('archives a used course without deleting it', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      Promise.resolve(callback(prisma)),
+    );
+    prisma.course.findFirst.mockResolvedValue(
+      courseRecord({ archivedAt: null }),
+    );
+    prisma.document.count.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    prisma.revisionSession.count.mockResolvedValue(0);
+    prisma.questionBankItem.count.mockResolvedValue(0);
+    prisma.course.update.mockResolvedValue(courseRecord());
+
+    const decision = await repository.archiveForStudent({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      reason: 'USER_ARCHIVED',
+    });
+
+    expect(decision).toMatchObject({
+      courseId: 'course-1',
+      status: 'ARCHIVED',
+      recommendedAction: 'BLOCK',
+    });
+    const [updateInput] = prisma.course.update.mock.calls[0] as [
+      {
+        where: { id: string };
+        data: { archivedAt: Date; archivedReason: string };
+      },
+    ];
+    expect(updateInput.where).toEqual({ id: 'course-1' });
+    expect(updateInput.data.archivedAt).toBeInstanceOf(Date);
+    expect(updateInput.data.archivedReason).toBe('USER_ARCHIVED');
     expect(prisma.course.delete).not.toHaveBeenCalled();
   });
 
@@ -767,6 +831,7 @@ function createPrismaMock() {
       delete: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn(),
+      update: jest.fn(),
     },
     document: {
       count: jest.fn(),
@@ -778,6 +843,12 @@ function createPrismaMock() {
     },
     knowledgeUnit: {
       findMany: jest.fn(),
+    },
+    revisionSession: {
+      count: jest.fn(),
+    },
+    questionBankItem: {
+      count: jest.fn(),
     },
     $transaction: jest.fn(),
   };

@@ -8,6 +8,7 @@ import {
   HttpCode,
   NotFoundException,
   Param,
+  Patch,
   Post,
   UploadedFile,
   UseGuards,
@@ -49,12 +50,19 @@ import {
   validateCoursePdfFile,
 } from '../../documents/interfaces/course-pdf-upload.validator';
 import { CreateCourseUseCase } from '../application/create-course.use-case';
+import { ArchiveCourseUseCase } from '../application/archive-course.use-case';
 import { DeleteCourseDocumentUseCase } from '../application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
+import { GetCourseLifecycleUseCase } from '../application/get-course-lifecycle.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
+import { UpdateCourseUseCase } from '../application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CourseContainsDocumentsError } from '../domain/course.entity';
+import {
+  CourseArchiveBlockedError,
+  CourseDeleteBlockedError,
+} from '../domain/course-lifecycle.entity';
 import {
   SourceArchiveBlockedError,
   SourceDeleteBlockedError,
@@ -80,6 +88,9 @@ export class CoursesController {
     private readonly createCourse: CreateCourseUseCase,
     private readonly listCourses: ListSubjectCoursesWithStatsUseCase,
     private readonly getCourseDetail: GetCourseDetailUseCase,
+    private readonly getCourseLifecycleUseCase: GetCourseLifecycleUseCase,
+    private readonly updateCourseUseCase: UpdateCourseUseCase,
+    private readonly archiveCourseUseCase: ArchiveCourseUseCase,
     private readonly deleteCourseUseCase: DeleteCourseUseCase,
     private readonly deleteCourseDocumentUseCase: DeleteCourseDocumentUseCase,
     private readonly uploadCoursePdfForCourseUseCase: UploadCoursePdfForCourseUseCase,
@@ -152,6 +163,50 @@ export class CoursesController {
         courseId: trimRequiredString(courseId, 'Course id is required'),
       })
       .then(toCourseDetailResponse)
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/lifecycle')
+  getCourseLifecycle(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getCourseLifecycleUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Patch('courses/:courseId')
+  updateCourse(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Body() body: Record<string, unknown> = {},
+  ) {
+    const validatedBody = validateUpdateCourseBody(body);
+
+    return this.updateCourseUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        ...validatedBody,
+      })
+      .then(toCourseListItemResponse)
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/archive')
+  archiveCourse(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.archiveCourseUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
       .catch(normalizeCourseError);
   }
 
@@ -356,6 +411,71 @@ function validateCreateCourseBody(body: CreateCourseRequest) {
   };
 }
 
+function validateUpdateCourseBody(body: Record<string, unknown>) {
+  const allowedFields = new Set([
+    'title',
+    'description',
+    'chapterLabel',
+    'estimatedMinutes',
+  ]);
+  const unknownField = Object.keys(body).find(
+    (field) => !allowedFields.has(field),
+  );
+
+  if (unknownField) {
+    throw new BadRequestException('Course update contains unsupported fields');
+  }
+
+  const update: {
+    title?: string;
+    description?: string | null;
+    chapterLabel?: string | null;
+    estimatedMinutes?: number | null;
+  } = {};
+
+  if ('title' in body) {
+    const title = trimRequiredString(
+      body.title,
+      'Course title must contain at least 2 characters',
+      MAX_COURSE_TITLE_LENGTH,
+    );
+
+    if (title.length < 2) {
+      throw new BadRequestException(
+        'Course title must contain at least 2 characters',
+      );
+    }
+
+    update.title = title;
+  }
+
+  if ('description' in body) {
+    update.description = trimOptionalString(
+      body.description,
+      'Course description is too long',
+      MAX_COURSE_DESCRIPTION_LENGTH,
+    );
+  }
+
+  if ('chapterLabel' in body) {
+    update.chapterLabel = trimOptionalString(
+      body.chapterLabel,
+      'Course chapterLabel is too long',
+      MAX_COURSE_CHAPTER_LABEL_LENGTH,
+    );
+  }
+
+  if ('estimatedMinutes' in body) {
+    update.estimatedMinutes = normalizeEstimatedMinutes(body.estimatedMinutes);
+  }
+
+  if (Object.keys(update).length === 0) {
+    throw new BadRequestException('Course update requires at least one field');
+  }
+
+  return update;
+}
+
 function trimRequiredString(value: unknown, message: string, maxLength = 255) {
   if (typeof value !== 'string') {
     throw new BadRequestException(message);
@@ -476,6 +596,17 @@ function normalizeCourseError(error: unknown): never {
 
   if (error instanceof CourseContainsDocumentsError) {
     throw new ConflictException('Course contains documents');
+  }
+
+  if (
+    error instanceof CourseDeleteBlockedError ||
+    error instanceof CourseArchiveBlockedError
+  ) {
+    throw new ConflictException({
+      code: error.code,
+      message: error.message,
+      decision: error.decision,
+    });
   }
 
   if (

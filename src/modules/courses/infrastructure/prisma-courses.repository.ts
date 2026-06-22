@@ -16,10 +16,13 @@ import type {
   CreateCourseRepositoryInput,
   SubjectProgressDto,
 } from '../application/courses.repository';
+import type { CourseDocumentAttachment } from '../domain/course.entity';
 import {
-  CourseContainsDocumentsError,
-  type CourseDocumentAttachment,
-} from '../domain/course.entity';
+  buildCourseLifecycleDecision,
+  CourseArchiveBlockedError,
+  CourseDeleteBlockedError,
+  type CourseLifecycleDecision,
+} from '../domain/course-lifecycle.entity';
 
 type CourseRecord = CourseDto;
 
@@ -95,6 +98,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         where: {
           studentId: input.studentId,
           subjectId: input.subjectId,
+          archivedAt: null,
         },
         _max: { displayOrder: true },
       });
@@ -124,6 +128,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         id: input.courseId,
         studentId: input.studentId,
+        archivedAt: null,
       },
     });
 
@@ -140,6 +145,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         studentId: input.studentId,
         subjectId: input.subjectId,
+        archivedAt: null,
       },
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
     });
@@ -157,6 +163,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         studentId: input.studentId,
         subjectId: input.subjectId,
+        archivedAt: null,
       },
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
     })) as CourseRecord[];
@@ -209,6 +216,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         id: input.courseId,
         studentId: input.studentId,
+        archivedAt: null,
       },
       include: {
         subject: {
@@ -265,6 +273,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         id: input.courseId,
         studentId: input.studentId,
+        archivedAt: null,
       },
     });
 
@@ -333,6 +342,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         id: input.subjectId,
         studentId: input.studentId,
+        archivedAt: null,
       },
       select: { id: true },
     });
@@ -345,6 +355,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         studentId: input.studentId,
         subjectId: input.subjectId,
+        archivedAt: null,
       },
       orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
     })) as ProgressCourseRecord[];
@@ -427,33 +438,106 @@ export class PrismaCoursesRepository implements CoursesRepository {
     courseId: string;
   }): Promise<boolean> {
     return this.prisma.$transaction(async (tx) => {
-      const course = await tx.course.findFirst({
-        where: {
-          id: input.courseId,
-          studentId: input.studentId,
-        },
-      });
+      const decision = await getCourseLifecycleDecision(tx, input);
 
-      if (!course) {
+      if (!decision) {
         return false;
       }
 
-      const documentCount = await tx.document.count({
-        where: {
-          courseId: course.id,
-          studentId: input.studentId,
-        },
-      });
-
-      if (documentCount > 0) {
-        throw new CourseContainsDocumentsError();
+      if (!decision.canDelete) {
+        throw new CourseDeleteBlockedError(decision);
       }
 
       await tx.course.delete({
-        where: { id: course.id },
+        where: { id: input.courseId },
       });
 
       return true;
+    });
+  }
+
+  async getLifecycleDecisionForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseLifecycleDecision | null> {
+    return getCourseLifecycleDecision(this.prisma, input);
+  }
+
+  async updateForStudent(input: {
+    studentId: string;
+    courseId: string;
+    title?: string;
+    description?: string | null;
+    chapterLabel?: string | null;
+    estimatedMinutes?: number | null;
+  }): Promise<CourseDto | null> {
+    const existing = await this.prisma.course.findFirst({
+      where: {
+        id: input.courseId,
+        studentId: input.studentId,
+        archivedAt: null,
+      },
+      select: { id: true },
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    const updated = await this.prisma.course.update({
+      where: { id: existing.id },
+      data: {
+        ...(input.title !== undefined ? { title: input.title } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
+        ...(input.chapterLabel !== undefined
+          ? { chapterLabel: input.chapterLabel }
+          : {}),
+        ...(input.estimatedMinutes !== undefined
+          ? { estimatedMinutes: input.estimatedMinutes }
+          : {}),
+      },
+    });
+
+    return toCourseDto(updated);
+  }
+
+  async archiveForStudent(input: {
+    studentId: string;
+    courseId: string;
+    reason: string;
+  }): Promise<CourseLifecycleDecision | null> {
+    return this.prisma.$transaction(async (tx) => {
+      const decision = await getCourseLifecycleDecision(tx, input);
+
+      if (!decision) {
+        return null;
+      }
+
+      if (!decision.canArchive) {
+        throw new CourseArchiveBlockedError(decision);
+      }
+
+      const archivedAt = new Date();
+      await tx.course.update({
+        where: { id: input.courseId },
+        data: {
+          archivedAt,
+          archivedReason: input.reason,
+        },
+      });
+
+      return buildCourseLifecycleDecision({
+        courseId: input.courseId,
+        archivedAt,
+        dependencyCounts: {
+          documents: 0,
+          processingDocuments: 0,
+          revisionSessions: 0,
+          questionBankItems: 0,
+        },
+      });
     });
   }
 
@@ -465,6 +549,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
       where: {
         id: input.courseId,
         studentId: input.studentId,
+        archivedAt: null,
       },
       select: {
         id: true,
@@ -561,6 +646,7 @@ export class PrismaCoursesRepository implements CoursesRepository {
         where: {
           id: input.courseId,
           studentId: input.studentId,
+          archivedAt: null,
         },
       });
 
@@ -645,10 +731,98 @@ export class PrismaCoursesRepository implements CoursesRepository {
   }
 }
 
+type CourseLifecycleClient = {
+  course: {
+    findFirst(input: {
+      where: { id: string; studentId: string };
+      select: { id: true; archivedAt: true };
+    }): Promise<{ id: string; archivedAt: Date | null } | null>;
+  };
+  document: {
+    count(input: {
+      where: {
+        courseId: string;
+        studentId: string;
+        status?: { in: Array<'UPLOADED' | 'PROCESSING'> };
+      };
+    }): Promise<number>;
+  };
+  revisionSession: {
+    count(input: {
+      where: { courseId: string; studentId: string };
+    }): Promise<number>;
+  };
+  questionBankItem: {
+    count(input: {
+      where: { courseId: string; studentId: string };
+    }): Promise<number>;
+  };
+};
+
+async function getCourseLifecycleDecision(
+  client: CourseLifecycleClient,
+  input: { studentId: string; courseId: string },
+): Promise<CourseLifecycleDecision | null> {
+  const course = await client.course.findFirst({
+    where: {
+      id: input.courseId,
+      studentId: input.studentId,
+    },
+    select: {
+      id: true,
+      archivedAt: true,
+    },
+  });
+
+  if (!course) {
+    return null;
+  }
+
+  const [documents, processingDocuments, revisionSessions, questionBankItems] =
+    await Promise.all([
+      client.document.count({
+        where: {
+          courseId: course.id,
+          studentId: input.studentId,
+        },
+      }),
+      client.document.count({
+        where: {
+          courseId: course.id,
+          studentId: input.studentId,
+          status: { in: ['UPLOADED', 'PROCESSING'] },
+        },
+      }),
+      client.revisionSession.count({
+        where: {
+          courseId: course.id,
+          studentId: input.studentId,
+        },
+      }),
+      client.questionBankItem.count({
+        where: {
+          courseId: course.id,
+          studentId: input.studentId,
+        },
+      }),
+    ]);
+
+  return buildCourseLifecycleDecision({
+    courseId: course.id,
+    archivedAt: course.archivedAt,
+    dependencyCounts: {
+      documents,
+      processingDocuments,
+      revisionSessions,
+      questionBankItems,
+    },
+  });
+}
+
 type SubjectOwnershipClient = {
   subject: {
     findFirst(input: {
-      where: { id: string; studentId: string };
+      where: { id: string; studentId: string; archivedAt: null };
       select: { id: true };
     }): Promise<{ id: string } | null>;
   };
@@ -662,6 +836,7 @@ async function ensureSubjectForStudent(
     where: {
       id: input.subjectId,
       studentId: input.studentId,
+      archivedAt: null,
     },
     select: { id: true },
   });

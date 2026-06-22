@@ -2,6 +2,7 @@ import type {
   CourseDocumentAttachment,
   CourseEntity,
 } from '../domain/course.entity';
+import type { CourseLifecycleDecision } from '../domain/course-lifecycle.entity';
 
 export const COURSES_REPOSITORY = Symbol('COURSES_REPOSITORY');
 
@@ -99,6 +100,15 @@ export interface CreateCourseRepositoryInput {
   estimatedMinutes?: number | null;
 }
 
+export interface UpdateCourseRepositoryInput {
+  studentId: string;
+  courseId: string;
+  title?: string;
+  description?: string | null;
+  chapterLabel?: string | null;
+  estimatedMinutes?: number | null;
+}
+
 export interface CourseOwnershipContext {
   courseId: string;
   studentId: string;
@@ -158,6 +168,21 @@ export interface CoursesRepository {
     studentId: string;
     subjectId: string;
   }): Promise<SubjectProgressDto | null>;
+
+  getLifecycleDecisionForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseLifecycleDecision | null>;
+
+  updateForStudent(
+    input: UpdateCourseRepositoryInput,
+  ): Promise<CourseDto | null>;
+
+  archiveForStudent(input: {
+    studentId: string;
+    courseId: string;
+    reason: string;
+  }): Promise<CourseLifecycleDecision | null>;
 
   deleteIfEmpty(input: {
     studentId: string;

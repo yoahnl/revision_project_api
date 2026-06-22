@@ -86,7 +86,7 @@ Routes structurantes déjà présentes :
 - `QuestionBankService` trop large et trop couplé à Prisma.
 - Pas encore de deep course-level.
 - Pas encore de mode exam.
-- Politique source delete/archive posée pour les documents ; lifecycle matière/cours complet encore à faire.
+- Politique source delete/archive posée pour les documents ; lifecycle matière/cours ajouté par CORE-09C avec rename, archive logique et suppression safe des éléments vides.
 - CI/preuves de validation à systématiser.
 - Providers IA et quotas encore sensibles.
 - Roadmap exécutable à maintenir synchronisée avec le repo app.
@@ -138,9 +138,9 @@ Routes structurantes déjà présentes :
 ### CORE-09 — Source lifecycle & storage policy
 
 - API scope : archive/suppression source, stockage, relations Prisma, règles de conservation.
-- État : CORE-09A a ajouté `archivedAt`, la décision delete/archive/block et les guards 409 sur source utilisée. CORE-09B ajoute le cleanup storage post-delete via outbox DB, port storage et worker interne.
-- Tests : suppression source utilisée, source inutilisée, ownership, archive, cleanup storage, jobs, e2e.
-- Risque : le lifecycle matière/cours reste à traiter en CORE-09C ; le storage cloud reste une dette future.
+- État : CORE-09A a ajouté `archivedAt`, la décision delete/archive/block et les guards 409 sur source utilisée. CORE-09B ajoute le cleanup storage post-delete via outbox DB, port storage et worker interne. CORE-09C ajoute le lifecycle matière/cours avec rename, archive logique et suppression safe des éléments vides.
+- Tests : suppression source utilisée, source inutilisée, ownership, archive, cleanup storage, jobs, lifecycle matière/cours, e2e.
+- Risque : le storage cloud et l'historique utilisateur des archives restent des dettes futures.
 
 ### CORE-10 — Question bank production hardening
 
