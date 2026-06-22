@@ -86,9 +86,9 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
       [knowledgeUnit()],
     );
     questionBank.countActiveCourseQuickQuestions.mockResolvedValue(2);
-    preparationRepository.findLatestForCourse.mockResolvedValue(
+    preparationRepository.findRecentForCourse.mockResolvedValue([
       preparationJob({ status: 'PENDING' }),
-    );
+    ]);
 
     await expect(
       useCase.execute({
@@ -103,6 +103,188 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
       canStartQuickRevision: false,
       canPrepare: false,
     });
+  });
+
+  it('reports preparing when per-KU jobs exist below the requested course-level target', async () => {
+    const { coursesRepository, preparationRepository, questionBank, useCase } =
+      createReadinessHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [
+        knowledgeUnit({ id: 'ku-1' }),
+        knowledgeUnit({ id: 'ku-2' }),
+        knowledgeUnit({ id: 'ku-3' }),
+      ],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(9);
+    preparationRepository.findRecentForCourse.mockResolvedValue([
+      preparationJob({
+        id: 'prep-1',
+        knowledgeUnitId: 'ku-1',
+        status: 'PENDING',
+      }),
+      preparationJob({
+        id: 'prep-2',
+        knowledgeUnitId: 'ku-2',
+        status: 'PENDING',
+      }),
+      preparationJob({
+        id: 'prep-3',
+        knowledgeUnitId: 'ku-3',
+        status: 'PENDING',
+      }),
+    ]);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 10,
+      }),
+    ).resolves.toMatchObject({
+      status: 'PREPARING',
+      readyQuestionCount: 9,
+      targetQuestionCount: 10,
+      canStartQuickRevision: false,
+      canPrepare: false,
+    });
+  });
+
+  it('reports preparing when per-KU jobs are running below the requested course-level target', async () => {
+    const { coursesRepository, preparationRepository, questionBank, useCase } =
+      createReadinessHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [
+        knowledgeUnit({ id: 'ku-1' }),
+        knowledgeUnit({ id: 'ku-2' }),
+        knowledgeUnit({ id: 'ku-3' }),
+      ],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(9);
+    preparationRepository.findRecentForCourse.mockResolvedValue([
+      preparationJob({
+        id: 'prep-1',
+        knowledgeUnitId: 'ku-1',
+        status: 'RUNNING',
+      }),
+      preparationJob({
+        id: 'prep-2',
+        knowledgeUnitId: 'ku-2',
+        status: 'RUNNING',
+      }),
+      preparationJob({
+        id: 'prep-3',
+        knowledgeUnitId: 'ku-3',
+        status: 'RUNNING',
+      }),
+    ]);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 10,
+      }),
+    ).resolves.toMatchObject({
+      status: 'PREPARING',
+      readyQuestionCount: 9,
+      targetQuestionCount: 10,
+    });
+  });
+
+  it('reports failed when only failed per-KU jobs exist below the requested course-level target', async () => {
+    const { coursesRepository, preparationRepository, questionBank, useCase } =
+      createReadinessHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [
+        knowledgeUnit({ id: 'ku-1' }),
+        knowledgeUnit({ id: 'ku-2' }),
+        knowledgeUnit({ id: 'ku-3' }),
+      ],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(9);
+    preparationRepository.findRecentForCourse.mockResolvedValue([
+      preparationJob({
+        id: 'prep-1',
+        knowledgeUnitId: 'ku-1',
+        status: 'FAILED',
+      }),
+      preparationJob({
+        id: 'prep-2',
+        knowledgeUnitId: 'ku-2',
+        status: 'FAILED',
+      }),
+      preparationJob({
+        id: 'prep-3',
+        knowledgeUnitId: 'ku-3',
+        status: 'FAILED',
+      }),
+    ]);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 10,
+      }),
+    ).resolves.toMatchObject({
+      status: 'FAILED',
+      readyQuestionCount: 9,
+      targetQuestionCount: 10,
+    });
+  });
+
+  it('reports ready when enough questions exist even if older failed jobs remain', async () => {
+    const { coursesRepository, preparationRepository, questionBank, useCase } =
+      createReadinessHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [
+        knowledgeUnit({ id: 'ku-1' }),
+        knowledgeUnit({ id: 'ku-2' }),
+        knowledgeUnit({ id: 'ku-3' }),
+      ],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(10);
+    preparationRepository.findRecentForCourse.mockResolvedValue([
+      preparationJob({ status: 'FAILED' }),
+    ]);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 10,
+      }),
+    ).resolves.toMatchObject({
+      status: 'READY',
+      readyQuestionCount: 10,
+      targetQuestionCount: 10,
+    });
+
+    expect(preparationRepository.findRecentForCourse).not.toHaveBeenCalled();
   });
 
   it('reports ready from the total active question pool across multiple knowledge units', async () => {
@@ -169,19 +351,21 @@ describe('PrepareCourseQuestionBankUseCase', () => {
       ],
     );
     questionBank.countActiveCourseQuickQuestions.mockResolvedValue(1);
-    preparationRepository.findLatestForCourse.mockResolvedValue(null);
+    preparationRepository.findRecentForCourse.mockResolvedValue([]);
     preparationRepository.ensurePendingForCourseContext
-      .mockResolvedValueOnce(
-        preparationJob({ id: 'prep-1', status: 'PENDING' }),
-      )
-      .mockResolvedValueOnce(
-        preparationJob({
+      .mockResolvedValueOnce({
+        job: preparationJob({ id: 'prep-1', status: 'PENDING' }),
+        created: true,
+      })
+      .mockResolvedValueOnce({
+        job: preparationJob({
           id: 'prep-2',
           documentId: 'document-2',
           knowledgeUnitId: 'ku-2',
           status: 'PENDING',
         }),
-      );
+        created: false,
+      });
 
     await expect(
       useCase.execute({
@@ -277,6 +461,7 @@ function createCoursesRepositoryMock() {
 function createPreparationRepositoryMock() {
   return {
     findLatestForCourse: jest.fn(),
+    findRecentForCourse: jest.fn(),
     findLatestForCourseContext: jest.fn(),
     ensurePendingForCourseContext: jest.fn(),
     claimNextPending: jest.fn(),

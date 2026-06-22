@@ -74,10 +74,63 @@ describe('ProcessCourseQuestionBankPreparationJobUseCase', () => {
     });
     expect(preparationRepository.markCompleted).not.toHaveBeenCalled();
   });
+
+  it('fails with useful metrics when duplicate generations do not reach the target', async () => {
+    const { preparationRepository, questionBank, useCase } = createHarness();
+    preparationRepository.claimNextPending.mockResolvedValue(preparationJob());
+    questionBank.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(4);
+    questionBank.prepareCourseQuickQuestionBank.mockResolvedValue({
+      activeBefore: 4,
+      activeAfter: 4,
+      generatedCount: 1,
+      persistedCount: 0,
+      duplicateSkippedCount: 1,
+      structureSkippedCount: 0,
+    });
+
+    await expect(
+      useCase.execute({ preparationJobId: 'prep-1' }),
+    ).rejects.toThrow(
+      'Question bank preparation did not reach target: readyAfter=4; target=5; persisted=0; duplicateSkipped=1; structureSkipped=0',
+    );
+
+    expect(preparationRepository.markFailed).toHaveBeenCalledWith(
+      expect.objectContaining({
+        preparationJobId: 'prep-1',
+        maxAttempts: 3,
+      }),
+    );
+  });
+
+  it('fails with useful metrics when structure-only generations do not reach the target', async () => {
+    const { preparationRepository, questionBank, useCase } = createHarness();
+    preparationRepository.claimNextPending.mockResolvedValue(preparationJob());
+    questionBank.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(4);
+    questionBank.prepareCourseQuickQuestionBank.mockResolvedValue({
+      activeBefore: 4,
+      activeAfter: 4,
+      generatedCount: 1,
+      persistedCount: 0,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 1,
+    });
+
+    await expect(
+      useCase.execute({ preparationJobId: 'prep-1' }),
+    ).rejects.toThrow(
+      'Question bank preparation did not reach target: readyAfter=4; target=5; persisted=0; duplicateSkipped=0; structureSkipped=1',
+    );
+  });
 });
 
 function createHarness() {
   const preparationRepository = {
+    findLatestForCourse: jest.fn(),
+    findRecentForCourse: jest.fn(),
     findLatestForCourseContext: jest.fn(),
     ensurePendingForCourseContext: jest.fn(),
     claimNextPending: jest.fn(),
@@ -88,7 +141,14 @@ function createHarness() {
   };
   const questionBank = {
     countActiveCourseQuickQuestions: jest.fn(),
-    prepareCourseQuickQuestionBank: jest.fn().mockResolvedValue(undefined),
+    prepareCourseQuickQuestionBank: jest.fn().mockResolvedValue({
+      activeBefore: 2,
+      activeAfter: 5,
+      generatedCount: 3,
+      persistedCount: 3,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
+    }),
   } as unknown as jest.Mocked<QuestionBankService>;
 
   return {

@@ -32,6 +32,84 @@ describe('PrismaCourseQuestionBankPreparationRepository', () => {
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
   });
+
+  it('finds recent active and failed jobs without comparing per-KU targets to the course target', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.courseQuestionBankPreparationJob.findMany.mockResolvedValue([
+      preparationJobRecord({ id: 'prep-ku-1', targetQuestionCount: 5 }),
+      preparationJobRecord({
+        id: 'prep-ku-2',
+        knowledgeUnitId: 'unit-2',
+        targetQuestionCount: 5,
+        status: 'RUNNING',
+      }),
+      preparationJobRecord({
+        id: 'prep-ku-3',
+        knowledgeUnitId: 'unit-3',
+        targetQuestionCount: 5,
+        status: 'FAILED',
+      }),
+    ]);
+
+    await expect(
+      repository.findRecentForCourse({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toHaveLength(3);
+
+    expect(
+      prisma.courseQuestionBankPreparationJob.findMany,
+    ).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        courseId: 'course-1',
+        status: {
+          in: ['PENDING', 'RUNNING', 'FAILED'],
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 50,
+    });
+  });
+
+  it('returns whether ensurePendingForCourseContext created or reused a job', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.courseQuestionBankPreparationJob.findFirst
+      .mockResolvedValueOnce(preparationJobRecord({ id: 'prep-existing' }))
+      .mockResolvedValueOnce(null);
+    prisma.courseQuestionBankPreparationJob.create.mockResolvedValue(
+      preparationJobRecord({ id: 'prep-created' }),
+    );
+
+    await expect(
+      repository.ensurePendingForCourseContext({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        targetQuestionCount: 5,
+      }),
+    ).resolves.toMatchObject({
+      created: false,
+      job: { id: 'prep-existing' },
+    });
+
+    await expect(
+      repository.ensurePendingForCourseContext({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        targetQuestionCount: 5,
+      }),
+    ).resolves.toMatchObject({
+      created: true,
+      job: { id: 'prep-created' },
+    });
+  });
 });
 
 function createRepository() {
@@ -39,6 +117,7 @@ function createRepository() {
     courseQuestionBankPreparationJob: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       findUnique: jest.fn(),
       updateMany: jest.fn(),
     },

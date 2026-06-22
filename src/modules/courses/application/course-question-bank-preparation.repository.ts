@@ -25,12 +25,22 @@ export interface CourseQuestionBankPreparationJobDto {
   updatedAt: Date;
 }
 
+export interface CourseQuestionBankPreparationEnsureResult {
+  job: CourseQuestionBankPreparationJobDto;
+  created: boolean;
+}
+
 export interface CourseQuestionBankPreparationRepository {
   findLatestForCourse(input: {
     studentId: string;
     courseId: string;
     targetQuestionCount: number;
   }): Promise<CourseQuestionBankPreparationJobDto | null>;
+
+  findRecentForCourse(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseQuestionBankPreparationJobDto[]>;
 
   findLatestForCourseContext(input: {
     studentId: string;
@@ -47,7 +57,7 @@ export interface CourseQuestionBankPreparationRepository {
     documentId: string;
     knowledgeUnitId: string;
     targetQuestionCount: number;
-  }): Promise<CourseQuestionBankPreparationJobDto>;
+  }): Promise<CourseQuestionBankPreparationEnsureResult>;
 
   claimNextPending(input: {
     preparationJobId?: string;

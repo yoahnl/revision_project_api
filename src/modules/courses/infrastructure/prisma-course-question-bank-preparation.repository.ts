@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import type {
+  CourseQuestionBankPreparationEnsureResult,
   CourseQuestionBankPreparationJobDto,
   CourseQuestionBankPreparationRepository,
 } from '../application/course-question-bank-preparation.repository';
@@ -26,6 +27,25 @@ export class PrismaCourseQuestionBankPreparationRepository implements CourseQues
     });
 
     return job ? toDto(job) : null;
+  }
+
+  async findRecentForCourse(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseQuestionBankPreparationJobDto[]> {
+    const jobs = await this.prisma.courseQuestionBankPreparationJob.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        status: {
+          in: ['PENDING', 'RUNNING', 'FAILED'],
+        },
+      },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 50,
+    });
+
+    return jobs.map(toDto);
   }
 
   async findLatestForCourseContext(input: {
@@ -58,7 +78,7 @@ export class PrismaCourseQuestionBankPreparationRepository implements CourseQues
     documentId: string;
     knowledgeUnitId: string;
     targetQuestionCount: number;
-  }): Promise<CourseQuestionBankPreparationJobDto> {
+  }): Promise<CourseQuestionBankPreparationEnsureResult> {
     const existing =
       await this.prisma.courseQuestionBankPreparationJob.findFirst({
         where: {
@@ -77,14 +97,14 @@ export class PrismaCourseQuestionBankPreparationRepository implements CourseQues
       });
 
     if (existing) {
-      return toDto(existing);
+      return { job: toDto(existing), created: false };
     }
 
     const created = await this.prisma.courseQuestionBankPreparationJob.create({
       data: input,
     });
 
-    return toDto(created);
+    return { job: toDto(created), created: true };
   }
 
   async claimNextPending(input: {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   QuestionBankItemStatus,
   QuestionSelectionMode,
@@ -67,8 +67,19 @@ type CourseQuickReservationInput = {
 
 const QUICK_QUESTION_BANK_RESERVATION_MAX_ATTEMPTS = 3;
 
+export interface CourseQuickQuestionBankPreparationStats {
+  activeBefore: number;
+  activeAfter: number;
+  generatedCount: number;
+  persistedCount: number;
+  duplicateSkippedCount: number;
+  structureSkippedCount: number;
+}
+
 @Injectable()
 export class QuestionBankService {
+  private readonly logger = new Logger(QuestionBankService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(ACTIVITIES_REPOSITORY)
@@ -119,10 +130,17 @@ export class QuestionBankService {
     documentId: string;
     knowledgeUnitId: string;
     questionCount?: number;
-  }): Promise<void> {
+  }): Promise<CourseQuickQuestionBankPreparationStats> {
     const questionCount = resolveQuickQuestionBankQuestionCount(
       input.questionCount,
     );
+    this.logger.log({
+      event: 'course_question_bank_prepare_service_start',
+      courseId: input.courseId,
+      knowledgeUnitId: input.knowledgeUnitId,
+      studentRef: safeStudentRef(input.studentId),
+      questionCount,
+    });
     const context =
       await this.activitiesRepository.findDiagnosticQuizGenerationContext({
         studentId: input.studentId,
@@ -138,7 +156,7 @@ export class QuestionBankService {
       throw new Error(QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY);
     }
 
-    await this.ensureQuestionPool({
+    return this.ensureQuestionPool({
       ...input,
       questionCount,
       context,
@@ -163,9 +181,17 @@ export class QuestionBankService {
     knowledgeUnitId: string;
     questionCount: number;
     context: DiagnosticQuizGenerationContext;
-  }): Promise<void> {
+  }): Promise<CourseQuickQuestionBankPreparationStats> {
     let activeKnowledgeUnitCount = await this.countActiveQuestions(input);
     let activeCourseCount = await this.countActiveCourseQuestions(input);
+    const stats: CourseQuickQuestionBankPreparationStats = {
+      activeBefore: activeKnowledgeUnitCount,
+      activeAfter: activeKnowledgeUnitCount,
+      generatedCount: 0,
+      persistedCount: 0,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
+    };
 
     while (
       activeKnowledgeUnitCount < input.questionCount &&
@@ -187,14 +213,33 @@ export class QuestionBankService {
         visualsEnabled: false,
       });
 
-      await this.persistGeneratedQuestions({
+      stats.generatedCount += generatedQuiz.questions.length;
+      const persistenceStats = await this.persistGeneratedQuestions({
         ...input,
         quiz: generatedQuiz,
       });
+      stats.persistedCount += persistenceStats.persistedCount;
+      stats.duplicateSkippedCount += persistenceStats.duplicateSkippedCount;
+      stats.structureSkippedCount += persistenceStats.structureSkippedCount;
       const nextActiveKnowledgeUnitCount =
         await this.countActiveQuestions(input);
       const nextActiveCourseCount =
         await this.countActiveCourseQuestions(input);
+      stats.activeAfter = nextActiveKnowledgeUnitCount;
+
+      this.logger.log({
+        event: 'course_question_bank_prepare_batch',
+        courseId: input.courseId,
+        knowledgeUnitId: input.knowledgeUnitId,
+        studentRef: safeStudentRef(input.studentId),
+        targetQuestionCount: input.questionCount,
+        generatedCount: generatedQuiz.questions.length,
+        persistedCount: persistenceStats.persistedCount,
+        duplicateSkippedCount: persistenceStats.duplicateSkippedCount,
+        structureSkippedCount: persistenceStats.structureSkippedCount,
+        activeBefore: activeKnowledgeUnitCount,
+        activeAfter: nextActiveKnowledgeUnitCount,
+      });
 
       if (
         nextActiveKnowledgeUnitCount === activeKnowledgeUnitCount &&
@@ -206,6 +251,22 @@ export class QuestionBankService {
       activeKnowledgeUnitCount = nextActiveKnowledgeUnitCount;
       activeCourseCount = nextActiveCourseCount;
     }
+
+    this.logger.log({
+      event: 'course_question_bank_prepare_service_done',
+      courseId: input.courseId,
+      knowledgeUnitId: input.knowledgeUnitId,
+      studentRef: safeStudentRef(input.studentId),
+      targetQuestionCount: input.questionCount,
+      activeBefore: stats.activeBefore,
+      activeAfter: stats.activeAfter,
+      generatedCount: stats.generatedCount,
+      persistedCount: stats.persistedCount,
+      duplicateSkippedCount: stats.duplicateSkippedCount,
+      structureSkippedCount: stats.structureSkippedCount,
+    });
+
+    return stats;
   }
 
   private countActiveQuestions(input: {
@@ -253,9 +314,20 @@ export class QuestionBankService {
     documentId: string;
     knowledgeUnitId: string;
     quiz: GeneratedDiagnosticQuiz;
-  }): Promise<void> {
+  }): Promise<{
+    persistedCount: number;
+    duplicateSkippedCount: number;
+    structureSkippedCount: number;
+  }> {
+    const stats = {
+      persistedCount: 0,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
+    };
+
     for (const question of input.quiz.questions) {
       if (isPdfStructureQuestion(question)) {
+        stats.structureSkippedCount += 1;
         continue;
       }
 
@@ -273,6 +345,7 @@ export class QuestionBankService {
       });
 
       if (existing) {
+        stats.duplicateSkippedCount += 1;
         continue;
       }
 
@@ -328,7 +401,10 @@ export class QuestionBankService {
           });
         }
       });
+      stats.persistedCount += 1;
     }
+
+    return stats;
   }
 
   private async reserveQuestions(
@@ -339,7 +415,13 @@ export class QuestionBankService {
       attempt < QUICK_QUESTION_BANK_RESERVATION_MAX_ATTEMPTS;
       attempt += 1
     ) {
-      const reserved = await this.tryReserveQuestions(input);
+      const reserved = await this.tryReserveQuestions(input).catch((error) => {
+        if (error instanceof QuestionBankReservationConflictError) {
+          return [];
+        }
+
+        throw error;
+      });
 
       if (reserved.length === input.questionCount) {
         return reserved;
@@ -412,7 +494,7 @@ export class QuestionBankService {
         });
 
         if (result.count !== 1) {
-          return [];
+          throw new QuestionBankReservationConflictError();
         }
       }
 
@@ -736,6 +818,10 @@ function fingerprintQuestion(
   return createHash('sha256').update(normalized).digest('hex');
 }
 
+function safeStudentRef(studentId: string) {
+  return createHash('sha256').update(studentId).digest('hex').slice(0, 12);
+}
+
 function normalizeForFingerprint(value: string): string {
   return value.trim().toLowerCase().replace(/\s+/g, ' ');
 }
@@ -781,3 +867,5 @@ function dedupeStrings(values: string[]): string[] {
 function toJsonValue(value: unknown): Prisma.InputJsonValue {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
+
+class QuestionBankReservationConflictError extends Error {}

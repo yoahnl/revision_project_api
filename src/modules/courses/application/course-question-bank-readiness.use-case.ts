@@ -1,4 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
   QuestionBankService,
   resolveQuickQuestionBankQuestionCount,
@@ -27,6 +28,10 @@ const QUICK_QUESTION_BANK_PREPARATION_MIN_PER_KU = 5;
 
 @Injectable()
 export class GetCourseQuestionBankReadinessUseCase {
+  private readonly logger = new Logger(
+    GetCourseQuestionBankReadinessUseCase.name,
+  );
+
   constructor(
     @Inject(COURSES_REPOSITORY)
     private readonly coursesRepository: CoursesRepository,
@@ -74,6 +79,15 @@ export class GetCourseQuestionBankReadinessUseCase {
       );
 
     if (!document) {
+      this.logReadiness({
+        studentId: input.studentId,
+        courseId: input.courseId,
+        targetQuestionCount: input.targetQuestionCount,
+        readyQuestionCount: 0,
+        activeJobCount: 0,
+        failedJobCount: 0,
+        status: 'NO_READY_SOURCE',
+      });
       return {
         readiness: buildCourseQuestionBankReadiness({
           courseId: input.courseId,
@@ -97,6 +111,15 @@ export class GetCourseQuestionBankReadinessUseCase {
       );
 
     if (knowledgeUnits.length === 0) {
+      this.logReadiness({
+        studentId: input.studentId,
+        courseId: input.courseId,
+        targetQuestionCount: input.targetQuestionCount,
+        readyQuestionCount: 0,
+        activeJobCount: 0,
+        failedJobCount: 0,
+        status: 'NO_KNOWLEDGE_UNITS',
+      });
       return {
         readiness: buildCourseQuestionBankReadiness({
           courseId: input.courseId,
@@ -119,6 +142,15 @@ export class GetCourseQuestionBankReadinessUseCase {
       });
 
     if (readyQuestionCount >= input.targetQuestionCount) {
+      this.logReadiness({
+        studentId: input.studentId,
+        courseId: course.courseId,
+        targetQuestionCount: input.targetQuestionCount,
+        readyQuestionCount,
+        activeJobCount: 0,
+        failedJobCount: 0,
+        status: 'READY',
+      });
       return {
         readiness: buildCourseQuestionBankReadiness({
           courseId: input.courseId,
@@ -132,16 +164,26 @@ export class GetCourseQuestionBankReadinessUseCase {
       };
     }
 
-    const job = await this.preparationRepository.findLatestForCourse({
+    const jobs = await this.preparationRepository.findRecentForCourse({
+      studentId: input.studentId,
+      courseId: course.courseId,
+    });
+    const status = readinessStatusFromJobs(jobs);
+
+    this.logReadiness({
       studentId: input.studentId,
       courseId: course.courseId,
       targetQuestionCount: input.targetQuestionCount,
+      readyQuestionCount,
+      activeJobCount: jobs.filter(isActivePreparationJob).length,
+      failedJobCount: jobs.filter((job) => job.status === 'FAILED').length,
+      status,
     });
 
     return {
       readiness: buildCourseQuestionBankReadiness({
         courseId: input.courseId,
-        status: readinessStatusFromJob(job),
+        status,
         readyQuestionCount,
         targetQuestionCount: input.targetQuestionCount,
       }),
@@ -150,10 +192,33 @@ export class GetCourseQuestionBankReadinessUseCase {
       knowledgeUnits,
     };
   }
+
+  private logReadiness(input: {
+    studentId: string;
+    courseId: string;
+    targetQuestionCount: number;
+    readyQuestionCount: number;
+    activeJobCount: number;
+    failedJobCount: number;
+    status: string;
+  }) {
+    this.logger.log({
+      event: 'course_question_bank_readiness_resolved',
+      courseId: input.courseId,
+      studentRef: safeStudentRef(input.studentId),
+      targetQuestionCount: input.targetQuestionCount,
+      readyQuestionCount: input.readyQuestionCount,
+      activeJobCount: input.activeJobCount,
+      failedJobCount: input.failedJobCount,
+      status: input.status,
+    });
+  }
 }
 
 @Injectable()
 export class PrepareCourseQuestionBankUseCase {
+  private readonly logger = new Logger(PrepareCourseQuestionBankUseCase.name);
+
   constructor(
     @Inject(COURSES_REPOSITORY)
     private readonly coursesRepository: CoursesRepository,
@@ -195,9 +260,10 @@ export class PrepareCourseQuestionBankUseCase {
       QUICK_QUESTION_BANK_PREPARATION_MIN_PER_KU,
       Math.ceil(targetQuestionCount / context.knowledgeUnits.length),
     );
+    const ensuredJobs: Array<{ id: string; created: boolean }> = [];
 
     for (const knowledgeUnit of context.knowledgeUnits) {
-      const job =
+      const ensured =
         await this.preparationRepository.ensurePendingForCourseContext({
           studentId: input.studentId,
           subjectId: context.subjectId,
@@ -207,8 +273,27 @@ export class PrepareCourseQuestionBankUseCase {
           targetQuestionCount: targetQuestionCountPerKnowledgeUnit,
         });
 
-      await this.preparationQueue.enqueue({ preparationJobId: job.id });
+      ensuredJobs.push({
+        id: ensured.job.id,
+        created: ensured.created,
+      });
+      await this.preparationQueue.enqueue({
+        preparationJobId: ensured.job.id,
+      });
     }
+
+    this.logger.log({
+      event: 'course_question_bank_prepare_requested',
+      courseId: input.courseId,
+      studentRef: safeStudentRef(input.studentId),
+      questionCount: targetQuestionCount,
+      readyQuestionCount: context.readiness.readyQuestionCount,
+      candidateKnowledgeUnitCount: context.knowledgeUnits.length,
+      createdJobCount: ensuredJobs.filter((job) => job.created).length,
+      reusedJobCount: ensuredJobs.filter((job) => !job.created).length,
+      preparationJobIds: ensuredJobs.map((job) => job.id),
+      status: 'PREPARING',
+    });
 
     return buildCourseQuestionBankReadiness({
       courseId: input.courseId,
@@ -219,20 +304,22 @@ export class PrepareCourseQuestionBankUseCase {
   }
 }
 
-function readinessStatusFromJob(
-  job: CourseQuestionBankPreparationJobDto | null,
-) {
-  if (!job) {
-    return 'NOT_PREPARED';
-  }
-
-  if (job.status === 'FAILED') {
-    return 'FAILED';
-  }
-
-  if (job.status === 'PENDING' || job.status === 'RUNNING') {
+function readinessStatusFromJobs(jobs: CourseQuestionBankPreparationJobDto[]) {
+  if (jobs.some(isActivePreparationJob)) {
     return 'PREPARING';
   }
 
+  if (jobs.some((job) => job.status === 'FAILED')) {
+    return 'FAILED';
+  }
+
   return 'NOT_PREPARED';
+}
+
+function isActivePreparationJob(job: CourseQuestionBankPreparationJobDto) {
+  return job.status === 'PENDING' || job.status === 'RUNNING';
+}
+
+function safeStudentRef(studentId: string) {
+  return createHash('sha256').update(studentId).digest('hex').slice(0, 12);
 }
