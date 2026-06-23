@@ -201,6 +201,14 @@ describe('PrismaRevisionSessionsRepository', () => {
     expect(prisma.revisionSession.findFirst).toHaveBeenCalledWith({
       where: { id: 'revision-session-1', studentId: 'student-1' },
       include: {
+        draftAnswers: {
+          orderBy: { updatedAt: 'asc' },
+          select: {
+            questionId: true,
+            selectedChoiceIds: true,
+            updatedAt: true,
+          },
+        },
         actions: {
           orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
           include: {
@@ -333,6 +341,213 @@ describe('PrismaRevisionSessionsRepository', () => {
     expect(serializedPayload).not.toContain('storagePath');
     expect(serializedPayload).not.toContain('promptVersion');
     expect(serializedPayload).not.toContain('provider');
+  });
+
+  it('loads draft answers with a resumable quick revision session', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findFirst.mockResolvedValue({
+      ...revisionSessionRecord({ courseId: 'course-1' }),
+      draftAnswers: [
+        {
+          questionId: 'question-1',
+          selectedChoiceIds: ['choice-1'],
+          updatedAt: new Date('2026-06-15T10:02:00.000Z'),
+        },
+      ],
+      actions: [
+        diagnosticActionRecord({
+          activitySession: {
+            id: 'activity-session-1',
+            subjectId: 'subject-1',
+            documentId: 'document-1',
+            knowledgeUnitId: 'unit-1',
+            type: 'DIAGNOSTIC_QUIZ',
+            version: 3,
+            questions: [diagnosticQuestionRecord()],
+          },
+        }),
+      ],
+    });
+
+    const result = await repository.findByIdForStudent({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+    });
+
+    expect(result.draftAnswers).toEqual([
+      {
+        questionId: 'question-1',
+        selectedChoiceIds: ['choice-1'],
+        updatedAt: new Date('2026-06-15T10:02:00.000Z'),
+      },
+    ]);
+  });
+
+  it('finds the latest resumable course session with draft progress', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findFirst.mockResolvedValue({
+      ...revisionSessionRecord({ courseId: 'course-1' }),
+      draftAnswers: [
+        {
+          questionId: 'question-1',
+          selectedChoiceIds: ['choice-1'],
+          updatedAt: new Date('2026-06-15T10:02:00.000Z'),
+        },
+      ],
+      actions: [
+        diagnosticActionRecord({
+          activitySession: {
+            questions: [{ id: 'question-1' }, { id: 'question-2' }],
+          },
+        }),
+      ],
+    });
+
+    const result = await repository.findResumableCourseSessionForStudent({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+
+    expect(prisma.revisionSession.findFirst).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        courseId: 'course-1',
+        status: 'STARTED',
+        completedAt: null,
+        course: {
+          archivedAt: null,
+          subject: {
+            archivedAt: null,
+          },
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      include: {
+        draftAnswers: {
+          select: {
+            questionId: true,
+            selectedChoiceIds: true,
+            updatedAt: true,
+          },
+        },
+        actions: {
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          include: {
+            activitySession: {
+              select: {
+                questions: {
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(result?.session.id).toBe('revision-session-1');
+    expect(result?.progress).toEqual({
+      answeredQuestionCount: 1,
+      totalQuestionCount: 2,
+    });
+  });
+
+  it('saves a valid diagnostic draft answer for the current session question', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst
+      .mockResolvedValueOnce({
+        ...revisionSessionRecord({ courseId: 'course-1' }),
+        actions: [diagnosticActionRecord()],
+      })
+      .mockResolvedValueOnce({
+        ...revisionSessionRecord({ courseId: 'course-1' }),
+        draftAnswers: [
+          {
+            questionId: 'question-1',
+            selectedChoiceIds: ['choice-1'],
+            updatedAt: new Date('2026-06-15T10:03:00.000Z'),
+          },
+        ],
+        actions: [
+          diagnosticActionRecord({
+            activitySession: {
+              id: 'activity-session-1',
+              subjectId: 'subject-1',
+              documentId: 'document-1',
+              knowledgeUnitId: 'unit-1',
+              type: 'DIAGNOSTIC_QUIZ',
+              version: 3,
+              questions: [diagnosticQuestionRecord()],
+            },
+          }),
+        ],
+      });
+    prisma.question.findFirst.mockResolvedValue(diagnosticQuestionRecord());
+
+    const result = await repository.saveDraftAnswer({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+      questionId: 'question-1',
+      selectedChoiceIds: ['choice-1'],
+    });
+
+    expect(prisma.question.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'question-1',
+        sessionId: 'activity-session-1',
+      },
+      select: {
+        id: true,
+        choices: true,
+        selectionMode: true,
+        maxSelections: true,
+      },
+    });
+    expect(prisma.revisionQuestionDraftAnswer.upsert).toHaveBeenCalledWith({
+      where: {
+        studentId_sessionId_questionId: {
+          studentId: 'student-1',
+          sessionId: 'revision-session-1',
+          questionId: 'question-1',
+        },
+      },
+      create: {
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+        activitySessionId: 'activity-session-1',
+        questionId: 'question-1',
+        selectedChoiceIds: ['choice-1'],
+      },
+      update: {
+        activitySessionId: 'activity-session-1',
+        selectedChoiceIds: ['choice-1'],
+      },
+    });
+    expect(result.draftAnswers).toHaveLength(1);
+  });
+
+  it('rejects draft choices that do not belong to the question', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue({
+      ...revisionSessionRecord({ courseId: 'course-1' }),
+      actions: [diagnosticActionRecord()],
+    });
+    prisma.question.findFirst.mockResolvedValue(diagnosticQuestionRecord());
+
+    await expect(
+      repository.saveDraftAnswer({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+        questionId: 'question-1',
+        selectedChoiceIds: ['choice-outside'],
+      }),
+    ).rejects.toThrow('Revision session draft answer choice invalid');
+    expect(prisma.revisionQuestionDraftAnswer.upsert).not.toHaveBeenCalled();
   });
 
   it('loads a planning context with action activity knowledge units and candidates', async () => {
@@ -944,6 +1159,13 @@ function createPrismaMock() {
     },
     activitySession: {
       findFirst: jest.fn(),
+    },
+    question: {
+      findFirst: jest.fn(),
+    },
+    revisionQuestionDraftAnswer: {
+      deleteMany: jest.fn(),
+      upsert: jest.fn(),
     },
     $transaction: jest.fn(),
   };

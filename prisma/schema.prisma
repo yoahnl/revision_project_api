@@ -28,6 +28,7 @@ model StudentProfile {
   openQuestions          OpenQuestion[]
   openAnswerEvaluations  OpenAnswerEvaluation[]
   questionBankItems      QuestionBankItem[]
+  revisionDraftAnswers   RevisionQuestionDraftAnswer[]
 }
 
 model RevisionGoal {
@@ -489,6 +490,7 @@ model ActivitySession {
   richClosedExercisePayload RichClosedExercisePayload?
   richClosedExerciseResult  RichClosedExerciseResult?
   revisionSessionActions    RevisionSessionAction[]
+  revisionDraftAnswers       RevisionQuestionDraftAnswer[]
 
   @@unique([id, knowledgeUnitId])
   @@index([studentId])
@@ -521,6 +523,7 @@ model Question {
   sources       QuestionSource[]
   answers       QuestionAnswer[]
   visuals       QuestionVisual[]
+  draftAnswers  RevisionQuestionDraftAnswer[]
 
   @@unique([id, subjectId])
   @@index([sessionId])
@@ -743,6 +746,7 @@ model RevisionSession {
   document      Document?               @relation(fields: [documentId, subjectId], references: [id, subjectId], onDelete: NoAction)
   knowledgeUnit KnowledgeUnit?          @relation(fields: [knowledgeUnitId, subjectId], references: [id, subjectId], onDelete: NoAction)
   actions       RevisionSessionAction[]
+  draftAnswers  RevisionQuestionDraftAnswer[]
 
   @@unique([id, studentId])
   @@index([studentId])
@@ -779,6 +783,27 @@ model RevisionSessionAction {
   @@index([activitySessionId])
   @@index([documentId])
   @@index([knowledgeUnitId])
+}
+
+model RevisionQuestionDraftAnswer {
+  id                String   @id @default(cuid())
+  studentId         String
+  sessionId         String
+  activitySessionId String
+  questionId        String
+  selectedChoiceIds Json
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  student         StudentProfile  @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  session         RevisionSession @relation(fields: [sessionId, studentId], references: [id, studentId], onDelete: Cascade)
+  activitySession ActivitySession @relation(fields: [activitySessionId], references: [id], onDelete: Cascade)
+  question        Question        @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, sessionId, questionId])
+  @@index([studentId, sessionId])
+  @@index([activitySessionId])
+  @@index([questionId])
 }
 
 enum DocumentKind {

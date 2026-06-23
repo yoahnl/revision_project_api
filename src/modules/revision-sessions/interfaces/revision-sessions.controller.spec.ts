@@ -7,9 +7,11 @@ import { AppModule } from '../../../app.module';
 import { TOKEN_VERIFIER } from '../../auth/application/token-verifier';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import { CompleteQuickRevisionSessionUseCase } from '../application/complete-quick-revision-session.use-case';
+import { DeleteRevisionSessionDraftAnswerUseCase } from '../application/delete-revision-session-draft-answer.use-case';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
 import { GetRevisionSessionResultUseCase } from '../application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
+import { SaveRevisionSessionDraftAnswerUseCase } from '../application/save-revision-session-draft-answer.use-case';
 import { StartRevisionSessionUseCase } from '../application/start-revision-session.use-case';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import type { RevisionSessionResponseDto } from '../domain/revision-session.entity';
@@ -32,6 +34,8 @@ describe('RevisionSessionsController', () => {
   let requestNextAction: { execute: jest.Mock };
   let completeQuickRevisionSession: { execute: jest.Mock };
   let getRevisionSessionResult: { execute: jest.Mock };
+  let saveDraftAnswer: { execute: jest.Mock };
+  let deleteDraftAnswer: { execute: jest.Mock };
 
   beforeEach(async () => {
     startRevisionSession = {
@@ -48,6 +52,12 @@ describe('RevisionSessionsController', () => {
     };
     getRevisionSessionResult = {
       execute: jest.fn().mockResolvedValue(revisionSessionResult()),
+    };
+    saveDraftAnswer = {
+      execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
+    };
+    deleteDraftAnswer = {
+      execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
     };
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
@@ -75,6 +85,10 @@ describe('RevisionSessionsController', () => {
       .useValue(completeQuickRevisionSession)
       .overrideProvider(GetRevisionSessionResultUseCase)
       .useValue(getRevisionSessionResult)
+      .overrideProvider(SaveRevisionSessionDraftAnswerUseCase)
+      .useValue(saveDraftAnswer)
+      .overrideProvider(DeleteRevisionSessionDraftAnswerUseCase)
+      .useValue(deleteDraftAnswer)
       .overrideProvider(PrismaService)
       .useValue({})
       .compile();
@@ -198,6 +212,60 @@ describe('RevisionSessionsController', () => {
       sessionId: 'revision-session-1',
     });
     expect(startRevisionSession.execute).not.toHaveBeenCalled();
+  });
+
+  it('saves a draft answer for the current student', async () => {
+    await request(app.getHttpServer())
+      .put(
+        '/revision-sessions/revision-session-1/questions/question-1/draft-answer',
+      )
+      .send({ selectedChoiceIds: ['choice-1'] })
+      .expect(200);
+
+    expect(saveDraftAnswer.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+      questionId: 'question-1',
+      selectedChoiceIds: ['choice-1'],
+    });
+  });
+
+  it('deletes a draft answer for the current student', async () => {
+    await request(app.getHttpServer())
+      .delete(
+        '/revision-sessions/revision-session-1/questions/question-1/draft-answer',
+      )
+      .expect(200);
+
+    expect(deleteDraftAnswer.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+      questionId: 'question-1',
+    });
+  });
+
+  it('rejects malformed draft answer payloads before calling the use case', async () => {
+    await request(app.getHttpServer())
+      .put(
+        '/revision-sessions/revision-session-1/questions/question-1/draft-answer',
+      )
+      .send({ selectedChoiceIds: ['choice-1', 2] })
+      .expect(400);
+
+    expect(saveDraftAnswer.execute).not.toHaveBeenCalled();
+  });
+
+  it('maps completed session draft save conflicts to 409', async () => {
+    saveDraftAnswer.execute.mockRejectedValue(
+      new Error('Revision session draft answer session completed'),
+    );
+
+    await request(app.getHttpServer())
+      .put(
+        '/revision-sessions/revision-session-1/questions/question-1/draft-answer',
+      )
+      .send({ selectedChoiceIds: ['choice-1'] })
+      .expect(409);
   });
 
   it('maps unknown sessions to 404', async () => {

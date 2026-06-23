@@ -4,12 +4,15 @@ import { AuthModule } from '../auth/auth.module';
 import { AiModule } from '../ai/ai.module';
 import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
 import { CompleteQuickRevisionSessionUseCase } from './application/complete-quick-revision-session.use-case';
+import { DeleteRevisionSessionDraftAnswerUseCase } from './application/delete-revision-session-draft-answer.use-case';
 import { FlagRevisionSessionQuestionUseCase } from './application/flag-revision-session-question.use-case';
+import { GetResumableCourseRevisionSessionUseCase } from './application/get-resumable-course-revision-session.use-case';
 import { GetRevisionSessionUseCase } from './application/get-revision-session.use-case';
 import { GetRevisionSessionResultUseCase } from './application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from './application/request-next-revision-session-action.use-case';
 import { REVISION_COACH_NEXT_ACTION_GENERATOR } from './application/revision-coach-next-action.generator';
 import { REVISION_SESSIONS_REPOSITORY } from './application/revision-sessions.repository';
+import { SaveRevisionSessionDraftAnswerUseCase } from './application/save-revision-session-draft-answer.use-case';
 import { StartRevisionSessionUseCase } from './application/start-revision-session.use-case';
 import { GenkitRevisionCoachNextActionGenerator } from './infrastructure/genkit-revision-coach-next-action.generator';
 import { PrismaRevisionSessionsRepository } from './infrastructure/prisma-revision-sessions.repository';
@@ -21,6 +24,9 @@ import { RevisionSessionsController } from './interfaces/revision-sessions.contr
   providers: [
     StartRevisionSessionUseCase,
     GetRevisionSessionUseCase,
+    GetResumableCourseRevisionSessionUseCase,
+    SaveRevisionSessionDraftAnswerUseCase,
+    DeleteRevisionSessionDraftAnswerUseCase,
     CompleteQuickRevisionSessionUseCase,
     GetRevisionSessionResultUseCase,
     FlagRevisionSessionQuestionUseCase,
@@ -34,6 +40,9 @@ import { RevisionSessionsController } from './interfaces/revision-sessions.contr
       useClass: PrismaRevisionSessionsRepository,
     },
   ],
-  exports: [StartRevisionSessionUseCase],
+  exports: [
+    StartRevisionSessionUseCase,
+    GetResumableCourseRevisionSessionUseCase,
+  ],
 })
 export class RevisionSessionsModule {}

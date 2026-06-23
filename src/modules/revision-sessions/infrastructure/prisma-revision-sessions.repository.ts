@@ -13,6 +13,8 @@ import type {
   RevisionSessionActionStatusValue,
   RevisionSessionActionPayload,
   RevisionSessionModeValue,
+  ResumableCourseRevisionSessionDto,
+  RevisionSessionDraftAnswerDto,
   RevisionSessionResponseDto,
   RevisionSessionStatusValue,
 } from '../domain/revision-session.entity';
@@ -39,6 +41,7 @@ type RevisionSessionRecord = {
   createdAt: Date;
   completedAt: Date | null;
   actions?: RevisionSessionActionRecord[];
+  draftAnswers?: RevisionSessionDraftAnswerRecord[];
 };
 
 type RevisionSessionActionRecord = {
@@ -95,6 +98,19 @@ type RevisionSessionActivityQuestionRecord = {
       };
     }>;
   }>;
+};
+
+type RevisionSessionDraftAnswerRecord = {
+  questionId: string;
+  selectedChoiceIds: unknown;
+  updatedAt: Date;
+};
+
+type RevisionSessionDraftTargetQuestionRecord = {
+  id: string;
+  choices: unknown;
+  selectionMode: 'SINGLE' | 'MULTIPLE';
+  maxSelections: number | null;
 };
 
 type RevisionSessionActivityResultRecord = {
@@ -262,7 +278,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
         },
       });
 
-      return toRevisionSessionResponse(session, [action]);
+      return toRevisionSessionResponse(session, [action], []);
     });
   }
 
@@ -276,6 +292,14 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
         studentId: input.studentId,
       },
       include: {
+        draftAnswers: {
+          orderBy: { updatedAt: 'asc' },
+          select: {
+            questionId: true,
+            selectedChoiceIds: true,
+            updatedAt: true,
+          },
+        },
         actions: {
           orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
           include: {
@@ -341,7 +365,167 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       throw new Error('Revision session not found');
     }
 
-    return toRevisionSessionResponse(session, session.actions ?? []);
+    return toRevisionSessionResponse(
+      session,
+      session.actions ?? [],
+      session.draftAnswers ?? [],
+    );
+  }
+
+  async findResumableCourseSessionForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<ResumableCourseRevisionSessionDto | null> {
+    const session = (await this.prisma.revisionSession.findFirst({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        status: RevisionSessionStatus.STARTED,
+        completedAt: null,
+        course: {
+          archivedAt: null,
+          subject: {
+            archivedAt: null,
+          },
+        },
+      },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      include: {
+        draftAnswers: {
+          select: {
+            questionId: true,
+            selectedChoiceIds: true,
+            updatedAt: true,
+          },
+        },
+        actions: {
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          include: {
+            activitySession: {
+              select: {
+                questions: {
+                  select: { id: true },
+                },
+              },
+            },
+          },
+        },
+      },
+    })) as RevisionSessionRecord | null;
+
+    if (!session) {
+      return null;
+    }
+
+    const action = selectCurrentAction(session.actions ?? []);
+    const questionIds =
+      action?.activitySession?.questions?.map((question) => question.id) ?? [];
+    const answeredQuestionCount = (session.draftAnswers ?? []).filter(
+      (answer) =>
+        questionIds.includes(answer.questionId) &&
+        parseDraftChoiceIds(answer.selectedChoiceIds).length > 0,
+    ).length;
+
+    return {
+      session: {
+        id: session.id,
+        status: session.status,
+        subjectId: session.subjectId,
+        courseId: session.courseId,
+        documentId: session.documentId,
+        knowledgeUnitId: session.knowledgeUnitId,
+        mode: session.mode,
+        createdAt: session.createdAt,
+        completedAt: session.completedAt,
+      },
+      currentAction: action
+        ? {
+            id: action.id,
+            kind: action.kind,
+            status: action.status,
+            displayOrder: action.displayOrder,
+            activitySessionId: action.activitySessionId,
+            documentId: action.documentId,
+            knowledgeUnitId: action.knowledgeUnitId,
+          }
+        : null,
+      progress: {
+        answeredQuestionCount,
+        totalQuestionCount: questionIds.length,
+      },
+      userMessage: 'Tu as une session en cours.',
+    };
+  }
+
+  async saveDraftAnswer(input: {
+    studentId: string;
+    sessionId: string;
+    questionId: string;
+    selectedChoiceIds: string[];
+  }): Promise<RevisionSessionResponseDto> {
+    await this.prisma.$transaction(async (tx) => {
+      const target = await this.findDraftTarget(tx, input);
+      validateDraftSelection(target.question, input.selectedChoiceIds);
+
+      if (input.selectedChoiceIds.length === 0) {
+        await tx.revisionQuestionDraftAnswer.deleteMany({
+          where: {
+            studentId: input.studentId,
+            sessionId: input.sessionId,
+            questionId: input.questionId,
+          },
+        });
+        return;
+      }
+
+      await tx.revisionQuestionDraftAnswer.upsert({
+        where: {
+          studentId_sessionId_questionId: {
+            studentId: input.studentId,
+            sessionId: input.sessionId,
+            questionId: input.questionId,
+          },
+        },
+        create: {
+          studentId: input.studentId,
+          sessionId: input.sessionId,
+          activitySessionId: target.activitySessionId,
+          questionId: input.questionId,
+          selectedChoiceIds: input.selectedChoiceIds,
+        },
+        update: {
+          activitySessionId: target.activitySessionId,
+          selectedChoiceIds: input.selectedChoiceIds,
+        },
+      });
+    });
+
+    return this.findByIdForStudent({
+      studentId: input.studentId,
+      sessionId: input.sessionId,
+    });
+  }
+
+  async deleteDraftAnswer(input: {
+    studentId: string;
+    sessionId: string;
+    questionId: string;
+  }): Promise<RevisionSessionResponseDto> {
+    await this.prisma.$transaction(async (tx) => {
+      await this.findDraftTarget(tx, input);
+      await tx.revisionQuestionDraftAnswer.deleteMany({
+        where: {
+          studentId: input.studentId,
+          sessionId: input.sessionId,
+          questionId: input.questionId,
+        },
+      });
+    });
+
+    return this.findByIdForStudent({
+      studentId: input.studentId,
+      sessionId: input.sessionId,
+    });
   }
 
   async completeQuickSession(input: {
@@ -455,6 +639,13 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
           },
         });
       }
+
+      await tx.revisionQuestionDraftAnswer.deleteMany({
+        where: {
+          studentId: input.studentId,
+          sessionId: session.id,
+        },
+      });
 
       return toRevisionSessionResult(completedSession, activityWithResult);
     });
@@ -692,14 +883,84 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       return toRevisionSessionResponse(
         updatedSession,
         updatedSession.actions ?? [],
+        [],
       );
     });
+  }
+
+  private async findDraftTarget(
+    tx: Pick<PrismaService, 'revisionSession' | 'question'>,
+    input: {
+      studentId: string;
+      sessionId: string;
+      questionId: string;
+    },
+  ): Promise<{
+    activitySessionId: string;
+    question: RevisionSessionDraftTargetQuestionRecord;
+  }> {
+    const session = (await tx.revisionSession.findFirst({
+      where: {
+        id: input.sessionId,
+        studentId: input.studentId,
+      },
+      include: {
+        actions: {
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+    })) as RevisionSessionRecord | null;
+
+    if (!session) {
+      throw new Error('Revision session not found');
+    }
+
+    if (
+      session.status !== RevisionSessionStatus.STARTED ||
+      session.completedAt !== null
+    ) {
+      throw new Error('Revision session draft cannot be saved');
+    }
+
+    const action = selectCurrentAction(session.actions ?? []);
+
+    if (
+      !action ||
+      action.status !== RevisionSessionActionStatus.READY ||
+      action.kind !== RevisionSessionActionKind.DIAGNOSTIC_QUIZ ||
+      !action.activitySessionId
+    ) {
+      throw new Error('Revision session draft cannot be saved');
+    }
+
+    const question = (await tx.question.findFirst({
+      where: {
+        id: input.questionId,
+        sessionId: action.activitySessionId,
+      },
+      select: {
+        id: true,
+        choices: true,
+        selectionMode: true,
+        maxSelections: true,
+      },
+    })) as RevisionSessionDraftTargetQuestionRecord | null;
+
+    if (!question) {
+      throw new Error('Revision session question not found');
+    }
+
+    return {
+      activitySessionId: action.activitySessionId,
+      question,
+    };
   }
 }
 
 function toRevisionSessionResponse(
   session: RevisionSessionRecord,
   actions: RevisionSessionActionRecord[],
+  draftAnswers: RevisionSessionDraftAnswerRecord[],
 ): RevisionSessionResponseDto {
   const history = actions.map((action) => ({
     id: action.id,
@@ -740,6 +1001,17 @@ function toRevisionSessionResponse(
     },
     currentAction,
     history,
+    draftAnswers: draftAnswers.map(toDraftAnswerDto),
+  };
+}
+
+function toDraftAnswerDto(
+  draftAnswer: RevisionSessionDraftAnswerRecord,
+): RevisionSessionDraftAnswerDto {
+  return {
+    questionId: draftAnswer.questionId,
+    selectedChoiceIds: parseDraftChoiceIds(draftAnswer.selectedChoiceIds),
+    updatedAt: draftAnswer.updatedAt,
   };
 }
 
@@ -963,6 +1235,39 @@ function parsePublicQuestionChoices(input: unknown) {
     .filter((choice): choice is { id: string; label: string } =>
       Boolean(choice),
     );
+}
+
+function parseDraftChoiceIds(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.filter((value): value is string => typeof value === 'string');
+}
+
+function validateDraftSelection(
+  question: RevisionSessionDraftTargetQuestionRecord,
+  selectedChoiceIds: string[],
+): void {
+  const choices = parsePublicQuestionChoices(question.choices);
+  const knownChoiceIds = new Set(choices.map((choice) => choice.id));
+
+  if (selectedChoiceIds.some((choiceId) => !knownChoiceIds.has(choiceId))) {
+    throw new Error('Revision session draft answer choice invalid');
+  }
+
+  if (question.selectionMode === 'SINGLE' && selectedChoiceIds.length > 1) {
+    throw new Error('Revision session draft answer selection invalid');
+  }
+
+  const maxSelections =
+    question.selectionMode === 'MULTIPLE'
+      ? (question.maxSelections ?? choices.length)
+      : 1;
+
+  if (selectedChoiceIds.length > maxSelections) {
+    throw new Error('Revision session draft answer selection invalid');
+  }
 }
 
 function parseRecord(input: unknown): Record<string, unknown> {

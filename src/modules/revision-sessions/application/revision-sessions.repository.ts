@@ -3,6 +3,7 @@ import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionStatusValue,
   RevisionSessionModeValue,
+  ResumableCourseRevisionSessionDto,
   RevisionSessionResponseDto,
   RevisionSessionStatusValue,
 } from '../domain/revision-session.entity';
@@ -72,6 +73,24 @@ export interface RevisionSessionsRepository {
   findByIdForStudent(input: {
     studentId: string;
     sessionId: string;
+  }): Promise<RevisionSessionResponseDto>;
+
+  findResumableCourseSessionForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<ResumableCourseRevisionSessionDto | null>;
+
+  saveDraftAnswer(input: {
+    studentId: string;
+    sessionId: string;
+    questionId: string;
+    selectedChoiceIds: string[];
+  }): Promise<RevisionSessionResponseDto>;
+
+  deleteDraftAnswer(input: {
+    studentId: string;
+    sessionId: string;
+    questionId: string;
   }): Promise<RevisionSessionResponseDto>;
 
   findPlanningContextByIdForStudent(input: {

@@ -66,8 +66,25 @@ export interface RevisionSessionCurrentActionDto extends RevisionSessionActionDt
   payload: RevisionSessionActionPayload;
 }
 
+export interface RevisionSessionDraftAnswerDto {
+  questionId: string;
+  selectedChoiceIds: string[];
+  updatedAt: Date;
+}
+
 export interface RevisionSessionResponseDto {
   session: RevisionSessionDto;
   currentAction: RevisionSessionCurrentActionDto | null;
   history: RevisionSessionActionDto[];
+  draftAnswers: RevisionSessionDraftAnswerDto[];
+}
+
+export interface ResumableCourseRevisionSessionDto {
+  session: RevisionSessionDto;
+  currentAction: RevisionSessionActionDto | null;
+  progress: {
+    answeredQuestionCount: number;
+    totalQuestionCount: number;
+  };
+  userMessage: string;
 }

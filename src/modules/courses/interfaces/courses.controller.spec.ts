@@ -40,6 +40,7 @@ import { UpdateCourseUseCase } from '../application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CoursesController } from './courses.controller';
 import { SourceDeleteBlockedError } from '../../documents/domain/source-lifecycle.entity';
+import { GetResumableCourseRevisionSessionUseCase } from '../../revision-sessions/application/get-resumable-course-revision-session.use-case';
 
 describe('CoursesController', () => {
   it('lists courses for the current student and subject', async () => {
@@ -496,6 +497,56 @@ describe('CoursesController', () => {
     });
   });
 
+  it('returns a resumable course quick revision session', async () => {
+    const { controller, getResumableCourseRevisionSession } =
+      createController();
+    getResumableCourseRevisionSession.execute.mockResolvedValue({
+      session: {
+        id: 'session-1',
+        status: 'STARTED',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+        mode: 'QUICK',
+        createdAt: new Date('2026-06-15T10:00:00.000Z'),
+        completedAt: null,
+      },
+      currentAction: {
+        id: 'action-1',
+        kind: 'DIAGNOSTIC_QUIZ',
+        status: 'READY',
+        displayOrder: 0,
+        activitySessionId: 'activity-session-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+      },
+      progress: {
+        answeredQuestionCount: 2,
+        totalQuestionCount: 5,
+      },
+      userMessage: 'Tu as une session en cours.',
+    });
+
+    await expect(
+      controller.getResumableRevisionSession(currentStudent, ' course-1 '),
+    ).resolves.toMatchObject({
+      session: {
+        id: 'session-1',
+        courseId: 'course-1',
+      },
+      progress: {
+        answeredQuestionCount: 2,
+        totalQuestionCount: 5,
+      },
+    });
+
+    expect(getResumableCourseRevisionSession.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+  });
+
   it('returns course question bank readiness and starts async preparation', async () => {
     const {
       controller,
@@ -673,6 +724,7 @@ function createController() {
   const getCourseQuestionBankReadiness = { execute: jest.fn() };
   const prepareCourseQuestionBank = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
+  const getResumableCourseRevisionSession = { execute: jest.fn() };
   const getCourseProgress = { execute: jest.fn() };
   const getSubjectProgress = { execute: jest.fn() };
   const getCourseSourceLifecycle = { execute: jest.fn() };
@@ -694,6 +746,7 @@ function createController() {
       getCourseQuestionBankReadiness as unknown as GetCourseQuestionBankReadinessUseCase,
       prepareCourseQuestionBank as unknown as PrepareCourseQuestionBankUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
+      getResumableCourseRevisionSession as unknown as GetResumableCourseRevisionSessionUseCase,
       getCourseProgress as unknown as GetCourseProgressUseCase,
       getSubjectProgress as unknown as GetSubjectProgressUseCase,
       getCourseSourceLifecycle as unknown as GetCourseSourceLifecycleUseCase,
@@ -713,6 +766,7 @@ function createController() {
     getCourseQuestionBankReadiness,
     prepareCourseQuestionBank,
     startCourseQuickRevisionSession,
+    getResumableCourseRevisionSession,
     getCourseProgress,
     getSubjectProgress,
     getCourseSourceLifecycle,

@@ -3,10 +3,12 @@ import {
   Body,
   ConflictException,
   Controller,
+  Delete,
   Get,
   NotFoundException,
   Param,
   Post,
+  Put,
   UnprocessableEntityException,
   UseGuards,
 } from '@nestjs/common';
@@ -14,10 +16,12 @@ import { CurrentStudent } from '../../auth/interfaces/current-student.decorator'
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
 import type { RevisionSessionPreferredAction } from '../domain/revision-session.entity';
 import { CompleteQuickRevisionSessionUseCase } from '../application/complete-quick-revision-session.use-case';
+import { DeleteRevisionSessionDraftAnswerUseCase } from '../application/delete-revision-session-draft-answer.use-case';
 import { FlagRevisionSessionQuestionUseCase } from '../application/flag-revision-session-question.use-case';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
 import { GetRevisionSessionResultUseCase } from '../application/get-revision-session-result.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
+import { SaveRevisionSessionDraftAnswerUseCase } from '../application/save-revision-session-draft-answer.use-case';
 import { StartRevisionSessionUseCase } from '../application/start-revision-session.use-case';
 
 class StartRevisionSessionDto {
@@ -29,6 +33,10 @@ class StartRevisionSessionDto {
 
 class FlagRevisionSessionQuestionDto {
   reason?: string;
+}
+
+class SaveRevisionSessionDraftAnswerDto {
+  selectedChoiceIds!: string[];
 }
 
 interface ValidatedStartRevisionSessionBody {
@@ -48,6 +56,8 @@ export class RevisionSessionsController {
     private readonly completeQuickRevisionSession: CompleteQuickRevisionSessionUseCase,
     private readonly getRevisionSessionResult: GetRevisionSessionResultUseCase,
     private readonly flagRevisionSessionQuestion: FlagRevisionSessionQuestionUseCase,
+    private readonly saveDraftAnswer: SaveRevisionSessionDraftAnswerUseCase,
+    private readonly deleteDraftAnswer: DeleteRevisionSessionDraftAnswerUseCase,
   ) {}
 
   @Post()
@@ -177,6 +187,55 @@ export class RevisionSessionsController {
         normalizeRevisionSessionError(error);
       });
   }
+
+  @Put(':sessionId/questions/:questionId/draft-answer')
+  saveQuestionDraft(
+    @CurrentStudent() student: { id: string },
+    @Param('sessionId') sessionId: string,
+    @Param('questionId') questionId: string,
+    @Body() body: SaveRevisionSessionDraftAnswerDto | undefined,
+  ) {
+    const validatedSessionId = validateRequiredId(
+      sessionId,
+      'Revision session id',
+    );
+    const validatedQuestionId = validateRequiredId(questionId, 'Question id');
+    const selectedChoiceIds = validateDraftAnswerBody(body);
+
+    return this.saveDraftAnswer
+      .execute({
+        studentId: student.id,
+        sessionId: validatedSessionId,
+        questionId: validatedQuestionId,
+        selectedChoiceIds,
+      })
+      .catch((error: unknown) => {
+        normalizeRevisionSessionError(error);
+      });
+  }
+
+  @Delete(':sessionId/questions/:questionId/draft-answer')
+  deleteQuestionDraft(
+    @CurrentStudent() student: { id: string },
+    @Param('sessionId') sessionId: string,
+    @Param('questionId') questionId: string,
+  ) {
+    const validatedSessionId = validateRequiredId(
+      sessionId,
+      'Revision session id',
+    );
+    const validatedQuestionId = validateRequiredId(questionId, 'Question id');
+
+    return this.deleteDraftAnswer
+      .execute({
+        studentId: student.id,
+        sessionId: validatedSessionId,
+        questionId: validatedQuestionId,
+      })
+      .catch((error: unknown) => {
+        normalizeRevisionSessionError(error);
+      });
+  }
 }
 
 function validateStartRevisionSessionBody(
@@ -277,6 +336,28 @@ function validateFlagQuestionBody(
   return trimmed;
 }
 
+function validateDraftAnswerBody(
+  input: SaveRevisionSessionDraftAnswerDto | undefined,
+): string[] {
+  if (!input || !Array.isArray(input.selectedChoiceIds)) {
+    throw new BadRequestException('Draft answer selectedChoiceIds is required');
+  }
+
+  const unknownField = Object.keys(input).find(
+    (field) => field !== 'selectedChoiceIds',
+  );
+
+  if (unknownField) {
+    throw new BadRequestException(
+      'Draft answer body only accepts selectedChoiceIds',
+    );
+  }
+
+  return input.selectedChoiceIds.map((choiceId) =>
+    validateRequiredId(choiceId, 'Choice id'),
+  );
+}
+
 function normalizeRevisionSessionError(error: unknown): never {
   if (error instanceof Error) {
     if (
@@ -316,6 +397,22 @@ function normalizeRevisionSessionError(error: unknown): never {
       error.message === 'Revision session result not found' ||
       error.message === 'Revision session not completed' ||
       error.message === 'Revision session question cannot be flagged'
+    ) {
+      throw new ConflictException(error.message);
+    }
+
+    if (
+      error.message === 'Revision session draft answer has duplicate choices' ||
+      error.message === 'Revision session draft answer choice invalid' ||
+      error.message === 'Revision session draft answer selection invalid'
+    ) {
+      throw new BadRequestException(error.message);
+    }
+
+    if (
+      error.message === 'Revision session draft cannot be saved' ||
+      error.message === 'Revision session draft cannot be deleted' ||
+      error.message === 'Revision session draft answer session completed'
     ) {
       throw new ConflictException(error.message);
     }

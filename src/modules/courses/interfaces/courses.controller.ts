@@ -48,6 +48,7 @@ import {
   CourseQuickRevisionSourceNotReadyError,
   StartCourseQuickRevisionSessionUseCase,
 } from '../application/start-course-quick-revision-session.use-case';
+import { GetResumableCourseRevisionSessionUseCase } from '../../revision-sessions/application/get-resumable-course-revision-session.use-case';
 import { toPublicRevisionSheet } from '../../study-artifacts/interfaces/study-artifact-response.mapper';
 import {
   MAX_DOCUMENT_BYTES,
@@ -104,6 +105,7 @@ export class CoursesController {
     private readonly getCourseQuestionBankReadinessUseCase: GetCourseQuestionBankReadinessUseCase,
     private readonly prepareCourseQuestionBankUseCase: PrepareCourseQuestionBankUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
+    private readonly getResumableCourseRevisionSessionUseCase: GetResumableCourseRevisionSessionUseCase,
     private readonly getCourseProgressUseCase: GetCourseProgressUseCase,
     private readonly getSubjectProgressUseCase: GetSubjectProgressUseCase,
     private readonly getCourseSourceLifecycleUseCase: GetCourseSourceLifecycleUseCase,
@@ -417,6 +419,19 @@ export class CoursesController {
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
         questionCount: validatedBody.questionCount,
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/revision-sessions/resumable')
+  getResumableRevisionSession(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getResumableCourseRevisionSessionUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
       })
       .catch(normalizeCourseError);
   }
