@@ -10,6 +10,7 @@ import { RevisionModule } from './modules/revision/revision.module';
 import { RevisionSessionsModule } from './modules/revision-sessions/revision-sessions.module';
 import { StudyArtifactsModule } from './modules/study-artifacts/study-artifacts.module';
 import { SubjectsModule } from './modules/subjects/subjects.module';
+import { PrismaModule } from './shared/infrastructure/prisma/prisma.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { SubjectsModule } from './modules/subjects/subjects.module';
     ActivitiesModule,
     RevisionSessionsModule,
     StudyArtifactsModule,
+    PrismaModule,
   ],
   controllers: [AppController, HealthController],
   providers: [AppService],
