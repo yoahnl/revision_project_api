@@ -41,6 +41,7 @@ import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pd
 import { CoursesController } from './courses.controller';
 import { SourceDeleteBlockedError } from '../../documents/domain/source-lifecycle.entity';
 import { GetResumableCourseRevisionSessionUseCase } from '../../revision-sessions/application/get-resumable-course-revision-session.use-case';
+import { ListCourseRevisionSessionHistoryUseCase } from '../../revision-sessions/application/list-revision-session-history.use-case';
 
 describe('CoursesController', () => {
   it('lists courses for the current student and subject', async () => {
@@ -547,6 +548,62 @@ describe('CoursesController', () => {
     });
   });
 
+  it('returns completed revision session history for a course', async () => {
+    const { controller, listCourseRevisionSessionHistory } = createController();
+    listCourseRevisionSessionHistory.execute.mockResolvedValue(
+      revisionSessionHistory(),
+    );
+
+    await expect(
+      controller.getCourseRevisionSessionHistory(
+        currentStudent,
+        ' course-1 ',
+        '5',
+      ),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          session: {
+            id: 'revision-session-1',
+            courseId: 'course-1',
+            status: 'COMPLETED',
+          },
+          summary: {
+            correctAnswers: 4,
+            totalQuestions: 6,
+          },
+        },
+      ],
+    });
+
+    expect(listCourseRevisionSessionHistory.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 5,
+    });
+  });
+
+  it('rejects invalid course history limits before use case access', () => {
+    const { controller, listCourseRevisionSessionHistory } = createController();
+
+    expect(() =>
+      controller.getCourseRevisionSessionHistory(
+        currentStudent,
+        'course-1',
+        '0',
+      ),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      controller.getCourseRevisionSessionHistory(
+        currentStudent,
+        'course-1',
+        '51',
+      ),
+    ).toThrow(BadRequestException);
+
+    expect(listCourseRevisionSessionHistory.execute).not.toHaveBeenCalled();
+  });
+
   it('returns course question bank readiness and starts async preparation', async () => {
     const {
       controller,
@@ -725,6 +782,7 @@ function createController() {
   const prepareCourseQuestionBank = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getResumableCourseRevisionSession = { execute: jest.fn() };
+  const listCourseRevisionSessionHistory = { execute: jest.fn() };
   const getCourseProgress = { execute: jest.fn() };
   const getSubjectProgress = { execute: jest.fn() };
   const getCourseSourceLifecycle = { execute: jest.fn() };
@@ -747,6 +805,7 @@ function createController() {
       prepareCourseQuestionBank as unknown as PrepareCourseQuestionBankUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getResumableCourseRevisionSession as unknown as GetResumableCourseRevisionSessionUseCase,
+      listCourseRevisionSessionHistory as unknown as ListCourseRevisionSessionHistoryUseCase,
       getCourseProgress as unknown as GetCourseProgressUseCase,
       getSubjectProgress as unknown as GetSubjectProgressUseCase,
       getCourseSourceLifecycle as unknown as GetCourseSourceLifecycleUseCase,
@@ -767,6 +826,7 @@ function createController() {
     prepareCourseQuestionBank,
     startCourseQuickRevisionSession,
     getResumableCourseRevisionSession,
+    listCourseRevisionSessionHistory,
     getCourseProgress,
     getSubjectProgress,
     getCourseSourceLifecycle,
@@ -1072,5 +1132,33 @@ function revisionSessionResponse() {
       },
     },
     history: [],
+  };
+}
+
+function revisionSessionHistory() {
+  return {
+    items: [
+      {
+        session: {
+          id: 'revision-session-1',
+          subjectId: 'subject-1',
+          courseId: 'course-1',
+          mode: 'QUICK',
+          status: 'COMPLETED',
+          createdAt: new Date('2026-06-15T10:00:00.000Z'),
+          completedAt: new Date('2026-06-15T10:04:12.000Z'),
+        },
+        summary: {
+          correctAnswers: 4,
+          totalQuestions: 6,
+          score: 0.6666666667,
+          durationSeconds: 252,
+        },
+        course: {
+          id: 'course-1',
+          title: 'Droit constitutionnel',
+        },
+      },
+    ],
   };
 }

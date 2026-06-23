@@ -11,6 +11,7 @@ import {
   Put,
   UnprocessableEntityException,
   UseGuards,
+  Query,
 } from '@nestjs/common';
 import { CurrentStudent } from '../../auth/interfaces/current-student.decorator';
 import { FirebaseAuthGuard } from '../../auth/interfaces/firebase-auth.guard';
@@ -20,6 +21,7 @@ import { DeleteRevisionSessionDraftAnswerUseCase } from '../application/delete-r
 import { FlagRevisionSessionQuestionUseCase } from '../application/flag-revision-session-question.use-case';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
 import { GetRevisionSessionResultUseCase } from '../application/get-revision-session-result.use-case';
+import { ListRevisionSessionHistoryUseCase } from '../application/list-revision-session-history.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
 import { SaveRevisionSessionDraftAnswerUseCase } from '../application/save-revision-session-draft-answer.use-case';
 import { StartRevisionSessionUseCase } from '../application/start-revision-session.use-case';
@@ -55,10 +57,26 @@ export class RevisionSessionsController {
     private readonly requestNextAction: RequestNextRevisionSessionActionUseCase,
     private readonly completeQuickRevisionSession: CompleteQuickRevisionSessionUseCase,
     private readonly getRevisionSessionResult: GetRevisionSessionResultUseCase,
+    private readonly listRevisionSessionHistory: ListRevisionSessionHistoryUseCase,
     private readonly flagRevisionSessionQuestion: FlagRevisionSessionQuestionUseCase,
     private readonly saveDraftAnswer: SaveRevisionSessionDraftAnswerUseCase,
     private readonly deleteDraftAnswer: DeleteRevisionSessionDraftAnswerUseCase,
   ) {}
+
+  @Get('history')
+  history(
+    @CurrentStudent() student: { id: string },
+    @Query('limit') limit?: string,
+  ) {
+    return this.listRevisionSessionHistory
+      .execute({
+        studentId: student.id,
+        limit: normalizeOptionalHistoryLimit(limit),
+      })
+      .catch((error: unknown) => {
+        normalizeRevisionSessionError(error);
+      });
+  }
 
   @Post()
   start(
@@ -356,6 +374,24 @@ function validateDraftAnswerBody(
   return input.selectedChoiceIds.map((choiceId) =>
     validateRequiredId(choiceId, 'Choice id'),
   );
+}
+
+function normalizeOptionalHistoryLimit(input: unknown): number | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+
+  if (typeof input !== 'string' || !/^\d+$/.test(input.trim())) {
+    throw new BadRequestException('History limit invalid');
+  }
+
+  const parsed = Number(input.trim());
+
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
+    throw new BadRequestException('History limit invalid');
+  }
+
+  return parsed;
 }
 
 function normalizeRevisionSessionError(error: unknown): never {

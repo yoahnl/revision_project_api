@@ -22,6 +22,19 @@ export interface RevisionSessionResultDto {
   corrections: RevisionSessionQuestionCorrectionDto[];
 }
 
+export interface RevisionSessionHistoryResponseDto {
+  items: RevisionSessionHistoryItemDto[];
+}
+
+export interface RevisionSessionHistoryItemDto {
+  session: RevisionSessionResultDto['session'];
+  summary: RevisionSessionResultDto['summary'];
+  course: {
+    id: string;
+    title: string;
+  };
+}
+
 export interface RevisionSessionKnowledgeUnitResultDto {
   knowledgeUnitId: string;
   title: string;

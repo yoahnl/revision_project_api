@@ -290,6 +290,11 @@ function createRevisionSessionsRepository(): jest.Mocked<RevisionSessionsReposit
       .mockResolvedValue(
         revisionSessionResponse('OPEN_QUESTION', 'open-session-1'),
       ),
+    findResumableCourseSessionForStudent: jest.fn(),
+    findCompletedCourseSessionsForStudent: jest.fn(),
+    findCompletedSessionsForStudent: jest.fn(),
+    saveDraftAnswer: jest.fn(),
+    deleteDraftAnswer: jest.fn(),
     findPlanningContextByIdForStudent: jest.fn(),
     appendAction: jest.fn(),
     completeQuickSession: jest.fn(),

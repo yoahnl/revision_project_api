@@ -451,6 +451,155 @@ describe('PrismaRevisionSessionsRepository', () => {
     });
   });
 
+  it('lists completed course sessions without loading corrections', async () => {
+    const { prisma, repository } = createRepository();
+    const completedAt = new Date('2026-06-15T10:05:00.000Z');
+    prisma.revisionSession.findMany.mockResolvedValue([
+      completedHistorySessionRecord({
+        id: 'revision-session-2',
+        createdAt: new Date('2026-06-15T10:00:00.000Z'),
+        completedAt,
+        actions: [
+          diagnosticActionRecord({
+            activitySession: {
+              result: {
+                correctAnswers: 8,
+                totalQuestions: 10,
+                score: 0.8,
+              },
+            },
+          }),
+        ],
+      }),
+    ]);
+
+    const result = await repository.findCompletedCourseSessionsForStudent({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 5,
+    });
+
+    expect(prisma.revisionSession.findMany).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        courseId: 'course-1',
+        status: 'COMPLETED',
+        completedAt: { not: null },
+        course: {
+          archivedAt: null,
+          subject: {
+            archivedAt: null,
+          },
+        },
+      },
+      orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 5,
+      select: {
+        id: true,
+        subjectId: true,
+        courseId: true,
+        mode: true,
+        status: true,
+        createdAt: true,
+        completedAt: true,
+        course: {
+          select: {
+            id: true,
+            title: true,
+          },
+        },
+        actions: {
+          orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+          select: {
+            activitySession: {
+              select: {
+                result: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    expect(
+      JSON.stringify(prisma.revisionSession.findMany.mock.calls[0]),
+    ).not.toContain('answers');
+    expect(result.items).toEqual([
+      {
+        session: {
+          id: 'revision-session-2',
+          subjectId: 'subject-1',
+          courseId: 'course-1',
+          mode: 'QUICK',
+          status: 'COMPLETED',
+          createdAt: new Date('2026-06-15T10:00:00.000Z'),
+          completedAt,
+        },
+        summary: {
+          correctAnswers: 8,
+          totalQuestions: 10,
+          score: 0.8,
+          durationSeconds: 300,
+        },
+        course: {
+          id: 'course-1',
+          title: 'Droit constitutionnel',
+        },
+      },
+    ]);
+  });
+
+  it('lists global completed sessions with owner filtering and skips missing results', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findMany.mockResolvedValue([
+      completedHistorySessionRecord({
+        id: 'revision-session-with-result',
+        actions: [
+          diagnosticActionRecord({
+            activitySession: {
+              result: {
+                correctAnswers: 3,
+                totalQuestions: 5,
+                score: null,
+              },
+            },
+          }),
+        ],
+      }),
+      completedHistorySessionRecord({
+        id: 'revision-session-without-result',
+        actions: [
+          diagnosticActionRecord({ activitySession: { result: null } }),
+        ],
+      }),
+    ]);
+
+    const result = await repository.findCompletedSessionsForStudent({
+      studentId: 'student-1',
+      limit: 10,
+    });
+
+    expect(prisma.revisionSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          studentId: 'student-1',
+          status: 'COMPLETED',
+          completedAt: { not: null },
+          course: {
+            archivedAt: null,
+            subject: {
+              archivedAt: null,
+            },
+          },
+        },
+        take: 10,
+      }),
+    );
+    expect(result.items.map((item) => item.session.id)).toEqual([
+      'revision-session-with-result',
+    ]);
+    expect(result.items[0]?.summary.score).toBe(0.6);
+  });
+
   it('saves a valid diagnostic draft answer for the current session question', async () => {
     const { prisma, repository } = createRepository();
     prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
@@ -1150,6 +1299,7 @@ function createPrismaMock() {
     revisionSession: {
       create: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       update: jest.fn(),
     },
     revisionSessionAction: {
@@ -1175,6 +1325,45 @@ function revisionSessionRecord(
   overrides: Partial<ReturnType<typeof revisionSessionRecordShape>> = {},
 ) {
   return { ...revisionSessionRecordShape(), ...overrides };
+}
+
+function completedHistorySessionRecord(
+  overrides: Partial<
+    ReturnType<typeof completedHistorySessionRecordShape>
+  > = {},
+) {
+  return { ...completedHistorySessionRecordShape(), ...overrides };
+}
+
+function completedHistorySessionRecordShape() {
+  return {
+    id: 'revision-session-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    courseId: 'course-1',
+    documentId: null,
+    knowledgeUnitId: null,
+    mode: 'QUICK',
+    status: 'COMPLETED',
+    createdAt: new Date('2026-06-15T10:00:00.000Z'),
+    updatedAt: new Date('2026-06-15T10:05:00.000Z'),
+    completedAt: new Date('2026-06-15T10:05:00.000Z'),
+    course: {
+      id: 'course-1',
+      title: 'Droit constitutionnel',
+    },
+    actions: [
+      diagnosticActionRecord({
+        activitySession: {
+          result: {
+            correctAnswers: 1,
+            totalQuestions: 1,
+            score: 1,
+          },
+        },
+      }),
+    ],
+  };
 }
 
 function revisionSessionRecordShape() {

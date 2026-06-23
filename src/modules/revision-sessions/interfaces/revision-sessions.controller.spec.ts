@@ -10,6 +10,7 @@ import { CompleteQuickRevisionSessionUseCase } from '../application/complete-qui
 import { DeleteRevisionSessionDraftAnswerUseCase } from '../application/delete-revision-session-draft-answer.use-case';
 import { GetRevisionSessionUseCase } from '../application/get-revision-session.use-case';
 import { GetRevisionSessionResultUseCase } from '../application/get-revision-session-result.use-case';
+import { ListRevisionSessionHistoryUseCase } from '../application/list-revision-session-history.use-case';
 import { RequestNextRevisionSessionActionUseCase } from '../application/request-next-revision-session-action.use-case';
 import { SaveRevisionSessionDraftAnswerUseCase } from '../application/save-revision-session-draft-answer.use-case';
 import { StartRevisionSessionUseCase } from '../application/start-revision-session.use-case';
@@ -34,6 +35,7 @@ describe('RevisionSessionsController', () => {
   let requestNextAction: { execute: jest.Mock };
   let completeQuickRevisionSession: { execute: jest.Mock };
   let getRevisionSessionResult: { execute: jest.Mock };
+  let listRevisionSessionHistory: { execute: jest.Mock };
   let saveDraftAnswer: { execute: jest.Mock };
   let deleteDraftAnswer: { execute: jest.Mock };
 
@@ -52,6 +54,9 @@ describe('RevisionSessionsController', () => {
     };
     getRevisionSessionResult = {
       execute: jest.fn().mockResolvedValue(revisionSessionResult()),
+    };
+    listRevisionSessionHistory = {
+      execute: jest.fn().mockResolvedValue(revisionSessionHistory()),
     };
     saveDraftAnswer = {
       execute: jest.fn().mockResolvedValue(revisionSessionResponse()),
@@ -85,6 +90,8 @@ describe('RevisionSessionsController', () => {
       .useValue(completeQuickRevisionSession)
       .overrideProvider(GetRevisionSessionResultUseCase)
       .useValue(getRevisionSessionResult)
+      .overrideProvider(ListRevisionSessionHistoryUseCase)
+      .useValue(listRevisionSessionHistory)
       .overrideProvider(SaveRevisionSessionDraftAnswerUseCase)
       .useValue(saveDraftAnswer)
       .overrideProvider(DeleteRevisionSessionDraftAnswerUseCase)
@@ -387,6 +394,53 @@ describe('RevisionSessionsController', () => {
     ]);
   });
 
+  it('returns completed session history without routing history as a session id', async () => {
+    const response = await request(app.getHttpServer())
+      .get('/revision-sessions/history?limit=5')
+      .expect(200);
+
+    expect(listRevisionSessionHistory.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      limit: 5,
+    });
+    expect(getRevisionSession.execute).not.toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'history',
+    });
+    expect(response.body).toMatchObject({
+      items: [
+        {
+          session: {
+            id: 'revision-session-1',
+            status: 'COMPLETED',
+          },
+          summary: {
+            correctAnswers: 4,
+            totalQuestions: 6,
+          },
+          course: {
+            id: 'course-1',
+            title: 'Droit constitutionnel',
+          },
+        },
+      ],
+    });
+  });
+
+  it('rejects invalid completed session history limits', async () => {
+    await request(app.getHttpServer())
+      .get('/revision-sessions/history?limit=0')
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/revision-sessions/history?limit=51')
+      .expect(400);
+    await request(app.getHttpServer())
+      .get('/revision-sessions/history?limit=soon')
+      .expect(400);
+
+    expect(listRevisionSessionHistory.execute).not.toHaveBeenCalled();
+  });
+
   it('maps result errors', async () => {
     getRevisionSessionResult.execute.mockRejectedValueOnce(
       new Error('Revision session not found'),
@@ -512,6 +566,34 @@ function revisionSessionResult() {
         totalQuestions: 6,
         score: 0.6666666667,
         state: 'TO_REVIEW',
+      },
+    ],
+  };
+}
+
+function revisionSessionHistory() {
+  return {
+    items: [
+      {
+        session: {
+          id: 'revision-session-1',
+          subjectId: 'subject-1',
+          courseId: 'course-1',
+          mode: 'QUICK',
+          status: 'COMPLETED',
+          createdAt: new Date('2026-06-15T10:00:00.000Z'),
+          completedAt: new Date('2026-06-15T10:04:12.000Z'),
+        },
+        summary: {
+          correctAnswers: 4,
+          totalQuestions: 6,
+          score: 0.6666666667,
+          durationSeconds: 252,
+        },
+        course: {
+          id: 'course-1',
+          title: 'Droit constitutionnel',
+        },
       },
     ],
   };

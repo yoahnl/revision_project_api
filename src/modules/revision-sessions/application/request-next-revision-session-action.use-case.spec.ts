@@ -303,6 +303,11 @@ function createRepository(): jest.Mocked<RevisionSessionsRepository> {
     ensureStartContext: jest.fn(),
     createWithInitialAction: jest.fn(),
     findByIdForStudent: jest.fn(),
+    findResumableCourseSessionForStudent: jest.fn(),
+    findCompletedCourseSessionsForStudent: jest.fn(),
+    findCompletedSessionsForStudent: jest.fn(),
+    saveDraftAnswer: jest.fn(),
+    deleteDraftAnswer: jest.fn(),
     findPlanningContextByIdForStudent: jest.fn().mockResolvedValue({
       session: {
         id: 'revision-session-1',

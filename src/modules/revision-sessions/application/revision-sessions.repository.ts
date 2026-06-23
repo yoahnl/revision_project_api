@@ -1,4 +1,7 @@
-import type { RevisionSessionResultDto } from '../domain/revision-session-result.entity';
+import type {
+  RevisionSessionHistoryResponseDto,
+  RevisionSessionResultDto,
+} from '../domain/revision-session-result.entity';
 import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionStatusValue,
@@ -79,6 +82,17 @@ export interface RevisionSessionsRepository {
     studentId: string;
     courseId: string;
   }): Promise<ResumableCourseRevisionSessionDto | null>;
+
+  findCompletedCourseSessionsForStudent(input: {
+    studentId: string;
+    courseId: string;
+    limit: number;
+  }): Promise<RevisionSessionHistoryResponseDto>;
+
+  findCompletedSessionsForStudent(input: {
+    studentId: string;
+    limit: number;
+  }): Promise<RevisionSessionHistoryResponseDto>;
 
   saveDraftAnswer(input: {
     studentId: string;

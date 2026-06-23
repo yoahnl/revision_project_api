@@ -7,6 +7,7 @@ import {
   RevisionSessionMode,
   RevisionSessionStatus,
 } from '../../../generated/prisma/enums';
+import { Prisma } from '../../../generated/prisma/client';
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import type {
   RevisionSessionActionKindValue,
@@ -20,6 +21,8 @@ import type {
 } from '../domain/revision-session.entity';
 import {
   revisionSessionResultStateForScore,
+  type RevisionSessionHistoryItemDto,
+  type RevisionSessionHistoryResponseDto,
   type RevisionSessionQuestionCorrectionDto,
   type RevisionSessionResultDto,
 } from '../domain/revision-session-result.entity';
@@ -117,6 +120,25 @@ type RevisionSessionActivityResultRecord = {
   correctAnswers: number;
   totalQuestions: number;
   score: number | null;
+};
+
+type RevisionSessionHistoryRecord = {
+  id: string;
+  subjectId: string;
+  courseId: string | null;
+  mode: RevisionSessionModeValue;
+  status: RevisionSessionStatusValue;
+  createdAt: Date;
+  completedAt: Date;
+  course: {
+    id: string;
+    title: string;
+  } | null;
+  actions: Array<{
+    activitySession: {
+      result: RevisionSessionActivityResultRecord | null;
+    } | null;
+  }>;
 };
 
 type RevisionSessionAnswerRecord = {
@@ -457,6 +479,56 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     };
   }
 
+  async findCompletedCourseSessionsForStudent(input: {
+    studentId: string;
+    courseId: string;
+    limit: number;
+  }): Promise<RevisionSessionHistoryResponseDto> {
+    const sessions = (await this.prisma.revisionSession.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        status: RevisionSessionStatus.COMPLETED,
+        completedAt: { not: null },
+        course: {
+          archivedAt: null,
+          subject: {
+            archivedAt: null,
+          },
+        },
+      },
+      orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
+      take: input.limit,
+      select: revisionSessionHistorySelect(),
+    })) as unknown as RevisionSessionHistoryRecord[];
+
+    return toRevisionSessionHistoryResponse(sessions);
+  }
+
+  async findCompletedSessionsForStudent(input: {
+    studentId: string;
+    limit: number;
+  }): Promise<RevisionSessionHistoryResponseDto> {
+    const sessions = (await this.prisma.revisionSession.findMany({
+      where: {
+        studentId: input.studentId,
+        status: RevisionSessionStatus.COMPLETED,
+        completedAt: { not: null },
+        course: {
+          archivedAt: null,
+          subject: {
+            archivedAt: null,
+          },
+        },
+      },
+      orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
+      take: input.limit,
+      select: revisionSessionHistorySelect(),
+    })) as unknown as RevisionSessionHistoryRecord[];
+
+    return toRevisionSessionHistoryResponse(sessions);
+  }
+
   async saveDraftAnswer(input: {
     studentId: string;
     sessionId: string;
@@ -781,7 +853,10 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
             }
           : {}),
       },
-      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+      orderBy: [
+        { displayOrder: 'asc' as const },
+        { createdAt: 'asc' as const },
+      ],
       take: 20,
       select: { id: true, documentId: true, title: true },
     });
@@ -1407,6 +1482,97 @@ function toRevisionSessionResult(
     },
     knowledgeUnits: aggregateKnowledgeUnitResults(activity.answers),
     corrections: buildQuestionCorrections(activity.answers),
+  };
+}
+
+function revisionSessionHistorySelect(): Prisma.RevisionSessionSelect {
+  const actionOrder: Prisma.RevisionSessionActionOrderByWithRelationInput[] = [
+    { displayOrder: 'asc' },
+    { createdAt: 'asc' },
+  ];
+
+  return {
+    id: true,
+    subjectId: true,
+    courseId: true,
+    mode: true,
+    status: true,
+    createdAt: true,
+    completedAt: true,
+    course: {
+      select: {
+        id: true,
+        title: true,
+      },
+    },
+    actions: {
+      orderBy: actionOrder,
+      select: {
+        activitySession: {
+          select: {
+            result: true,
+          },
+        },
+      },
+    },
+  };
+}
+
+function toRevisionSessionHistoryResponse(
+  sessions: RevisionSessionHistoryRecord[],
+): RevisionSessionHistoryResponseDto {
+  return {
+    items: sessions
+      .map(toRevisionSessionHistoryItem)
+      .filter((item): item is RevisionSessionHistoryItemDto => item !== null),
+  };
+}
+
+function toRevisionSessionHistoryItem(
+  session: RevisionSessionHistoryRecord,
+): RevisionSessionHistoryItemDto | null {
+  const result = session.actions
+    .map((action) => action.activitySession?.result ?? null)
+    .find((candidate): candidate is RevisionSessionActivityResultRecord =>
+      Boolean(candidate),
+    );
+
+  if (!result || !session.course) {
+    return null;
+  }
+
+  const score = normalizeScore(
+    result.score,
+    result.correctAnswers,
+    result.totalQuestions,
+  );
+  const durationSeconds = Math.max(
+    0,
+    Math.floor(
+      (session.completedAt.getTime() - session.createdAt.getTime()) / 1000,
+    ),
+  );
+
+  return {
+    session: {
+      id: session.id,
+      subjectId: session.subjectId,
+      courseId: session.courseId,
+      mode: session.mode,
+      status: 'COMPLETED',
+      createdAt: session.createdAt,
+      completedAt: session.completedAt,
+    },
+    summary: {
+      correctAnswers: result.correctAnswers,
+      totalQuestions: result.totalQuestions,
+      score,
+      durationSeconds,
+    },
+    course: {
+      id: session.course.id,
+      title: session.course.title,
+    },
   };
 }
 

@@ -49,6 +49,7 @@ import {
   StartCourseQuickRevisionSessionUseCase,
 } from '../application/start-course-quick-revision-session.use-case';
 import { GetResumableCourseRevisionSessionUseCase } from '../../revision-sessions/application/get-resumable-course-revision-session.use-case';
+import { ListCourseRevisionSessionHistoryUseCase } from '../../revision-sessions/application/list-revision-session-history.use-case';
 import { toPublicRevisionSheet } from '../../study-artifacts/interfaces/study-artifact-response.mapper';
 import {
   MAX_DOCUMENT_BYTES,
@@ -106,6 +107,7 @@ export class CoursesController {
     private readonly prepareCourseQuestionBankUseCase: PrepareCourseQuestionBankUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getResumableCourseRevisionSessionUseCase: GetResumableCourseRevisionSessionUseCase,
+    private readonly listCourseRevisionSessionHistoryUseCase: ListCourseRevisionSessionHistoryUseCase,
     private readonly getCourseProgressUseCase: GetCourseProgressUseCase,
     private readonly getSubjectProgressUseCase: GetSubjectProgressUseCase,
     private readonly getCourseSourceLifecycleUseCase: GetCourseSourceLifecycleUseCase,
@@ -435,6 +437,21 @@ export class CoursesController {
       })
       .catch(normalizeCourseError);
   }
+
+  @Get('courses/:courseId/revision-sessions/history')
+  getCourseRevisionSessionHistory(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.listCourseRevisionSessionHistoryUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        limit: normalizeOptionalHistoryLimitQuery(limit),
+      })
+      .catch(normalizeCourseError);
+  }
 }
 
 function validateCreateCourseBody(body: CreateCourseRequest) {
@@ -695,6 +712,26 @@ function normalizeOptionalQuestionCountQuery(
   }
 
   return normalizeQuestionCount(Number(questionCount));
+}
+
+function normalizeOptionalHistoryLimitQuery(
+  limit: string | undefined,
+): number | undefined {
+  if (limit == null) {
+    return undefined;
+  }
+
+  if (!/^\d+$/.test(limit.trim())) {
+    throw new BadRequestException('History limit invalid');
+  }
+
+  const parsed = Number(limit.trim());
+
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 50) {
+    throw new BadRequestException('History limit invalid');
+  }
+
+  return parsed;
 }
 
 function normalizeQuestionCount(questionCount: unknown): number {
