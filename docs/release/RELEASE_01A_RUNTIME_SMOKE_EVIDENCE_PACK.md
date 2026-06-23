@@ -2,7 +2,13 @@
 
 ## Verdict
 
-`READY_FOR_RUNTIME`, suivi comme `IN_PROGRESS` dans les trackers.
+`DONE`, après confirmation opérateur du smoke MVP complet.
+
+## Confirmation opérateur
+
+Smoke MVP complet confirmé manuellement par l'opérateur humain.
+Codex n'a pas exécuté le smoke complet.
+Aucun secret, token ou PDF de test n'est documenté.
 
 ## Preuves Dokploy
 
@@ -65,7 +71,7 @@ PostgreSQL indique `database system is ready to accept connections` et des check
 ### API
 
 - `src/health.controller.ts` expose `GET /health`.
-- `src/health.controller.ts` expose localement `GET /health/readiness` avec un check Prisma/PostgreSQL. Cette correction n'est pas encore déployée tant que le lot n'est pas commit/push.
+- `src/health.controller.ts` expose `GET /health/readiness` avec un check Prisma/PostgreSQL.
 - `Dockerfile` exécute `prisma migrate deploy` si `RUN_PRISMA_MIGRATIONS=true`.
 - `package.json` contient `prisma:migrate:deploy`.
 - `JobsModule` loggue la configuration worker sans secret.
@@ -98,15 +104,16 @@ git diff --check -> OK
 
 ## Smoke MVP complet
 
-Non exécuté.
+Non exécuté par Codex.
 
-Raison : aucun token Firebase temporaire ni session utilisateur contrôlée n'a été fourni à Codex pour créer la matière, uploader un PDF, préparer la banque et compléter la session en production. Marionette peut être utilisée après connexion utilisateur via le runbook.
+Le smoke MVP complet a été confirmé manuellement par l'opérateur humain du projet après le gate RELEASE-01A. Cette clôture ne documente aucun token, secret ou fichier de test.
 
 ## Fichiers créés
 
 - `docs/release/RELEASE_01A_RUNTIME_SMOKE_API_REPORT.md`
 - `docs/release/RELEASE_01A_MVP_RUNTIME_SMOKE_RUNBOOK.md`
 - `docs/release/RELEASE_01A_RUNTIME_SMOKE_EVIDENCE_PACK.md`
+- `docs/release/RELEASE_01A_OPERATOR_CONFIRMED_CLOSURE_API_REPORT.md`
 
 ## Fichiers modifiés
 
@@ -122,4 +129,4 @@ Le contenu complet est présent dans les fichiers listés ci-dessus. Ce pack ne 
 
 ## Limite de preuve
 
-Le gate est préparé, l'infrastructure CORE-11B est déployée, mais RELEASE-01A n'est pas `DONE` tant que le parcours MVP complet du runbook n'a pas été exécuté et signé PASS.
+Le gate a été préparé par Codex, l'infrastructure CORE-11B est déployée, et le smoke MVP complet a été confirmé manuellement par l'opérateur humain. RELEASE-01A est donc clôturé `DONE` sans prétendre que Codex a exécuté le smoke complet.

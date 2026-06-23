@@ -2,16 +2,20 @@
 
 ## Verdict
 
-`READY_FOR_RUNTIME`, représenté par `IN_PROGRESS` dans les trackers API car le statut `READY_FOR_RUNTIME` n'est pas listé parmi les statuts autorisés.
+`DONE`, après confirmation opérateur du smoke MVP complet.
 
-Le backend CORE-11B est déployé et démarre correctement. Les migrations sont appliquées, Redis est présent, BullMQ démarre, le worker question bank est enregistré et les routes critiques CORE-10/CORE-11A/CORE-11B sont exposées. Un endpoint local `GET /health/readiness` a été ajouté pour vérifier Prisma/PostgreSQL sans exposer de secret ; il devra être commit/push/déployé avant le smoke final. Le smoke MVP complet n'a pas été exécuté de bout en bout avec un utilisateur authentifié, un PDF et une session réelle contrôlée. RELEASE-01A ne doit donc pas passer `DONE`.
+Le backend CORE-11B est déployé et démarre correctement. Les migrations sont appliquées, Redis est présent, BullMQ démarre, le worker question bank est enregistré et les routes critiques CORE-10/CORE-11A/CORE-11B sont exposées. `GET /health/readiness` a été ajouté pour vérifier Prisma/PostgreSQL sans exposer de secret. Le smoke MVP complet a été confirmé manuellement par l'opérateur humain du projet après le gate RELEASE-01A. Codex n'a pas exécuté ce parcours complet lui-même.
+
+## Confirmation opérateur
+
+Le smoke MVP complet a été confirmé manuellement par l'opérateur humain du projet après le gate RELEASE-01A. Codex n'a pas exécuté ce parcours complet lui-même ; cette clôture documente une confirmation opérateur. Aucun secret, token Firebase, URL privée sensible ou PDF de test n'est documenté dans ce rapport.
 
 ## Audit initial avant correction
 
 ### API runtime
 
 - `GET /health` existe via `src/health.controller.ts` et retourne `{ "status": "ok" }`.
-- `GET /health/readiness` vérifie PostgreSQL via Prisma et retourne `status=ready` si la requête légère réussit. Cette route est présente dans le code local du lot, pas encore dans le déploiement Dokploy consulté.
+- `GET /health/readiness` vérifie PostgreSQL via Prisma et retourne `status=ready` si la requête légère réussit. Il doit être disponible après déploiement du lot RELEASE-01A.
 - `src/app.module.ts` enregistre `HealthController`.
 - `src/main.ts` démarre NestJS sur `process.env.PORT ?? 3000` avec CORS configuré.
 - `Dockerfile` lance `prisma migrate deploy` au démarrage si `RUN_PRISMA_MIGRATIONS=true`, puis `node -r dotenv/config dist/src/main.js`.
@@ -91,7 +95,7 @@ Résultat : pas de blocker migration visible côté Dokploy.
 
 `GET /health` est disponible pour le liveness minimal.
 
-`GET /health/readiness` est disponible dans le code local pour le readiness DB minimal :
+`GET /health/readiness` est disponible pour le readiness DB minimal :
 
 - succès : `status=ready`, `checks.database=ok` ;
 - échec : HTTP 503, `status=not_ready`, `checks.database=unavailable`.
@@ -134,9 +138,9 @@ Résultats :
 
 ## Smoke runtime
 
-Non exécuté de bout en bout.
+Non exécuté de bout en bout par Codex.
 
-Raison : le backend et le frontend CORE-11B sont déployés, mais le smoke MVP exige un utilisateur authentifié, un PDF de test, un parcours app réel et un contrôle des données créées. Aucun token Firebase ou session utilisateur exploitable n'a été fourni à Codex, et aucun déploiement ou mutation Dokploy n'était autorisé.
+Le smoke MVP complet a ensuite été confirmé manuellement par l'opérateur humain du projet. Cette preuve est une confirmation opérateur, pas une exécution Codex.
 
 Preuves partielles obtenues :
 
@@ -152,13 +156,13 @@ Preuves partielles obtenues :
 
 Pas de blocker technique détecté dans les fichiers ou logs audités.
 
-Blocker de validation : le smoke MVP complet n'est pas prouvé. RELEASE-01A reste donc `IN_PROGRESS` dans les trackers.
+La réserve de validation RELEASE-01A est levée par confirmation opérateur. RELEASE-01A est donc clôturé en `DONE`.
 
 ## Risques restants
 
-- Absence de preuve utilisateur de bout en bout après déploiement CORE-11B.
-- Pas de validation Marionette du parcours complet avec PDF réel.
-- Pas d'endpoint readiness DB dédié.
+- La preuve runtime complète reste une confirmation opérateur et non une exécution Codex.
+- Pas de validation Marionette Codex du parcours complet avec PDF réel.
+- Endpoint readiness DB dédié ajouté côté code : `GET /health/readiness`. Il vérifie PostgreSQL via Prisma avec une requête légère.
 - Pas de script smoke automatisé, volontairement évité pour ne pas produire une fausse preuve sans auth/dataset contrôlés.
 
 ## Fichiers créés/modifiés
@@ -168,6 +172,7 @@ Créés côté API :
 - `docs/release/RELEASE_01A_RUNTIME_SMOKE_API_REPORT.md`
 - `docs/release/RELEASE_01A_MVP_RUNTIME_SMOKE_RUNBOOK.md`
 - `docs/release/RELEASE_01A_RUNTIME_SMOKE_EVIDENCE_PACK.md`
+- `docs/release/RELEASE_01A_OPERATOR_CONFIRMED_CLOSURE_API_REPORT.md`
 
 Modifiés côté API :
 
@@ -181,9 +186,9 @@ Modifiés côté API :
 
 - Aucune preuve runtime complète n'a été inventée.
 - Aucun secret n'a été recopié.
-- Aucun code backend n'a été modifié.
+- Modifications backend limitées au health/readiness et à son wiring NestJS.
 - Aucun prompt IA, provider IA, worker ou route produit n'a été modifié.
-- Le statut `DONE` n'a pas été utilisé.
+- Le statut `DONE` est utilisé uniquement après confirmation opérateur du smoke MVP complet.
 
 ## Critique du prompt
 
@@ -191,4 +196,4 @@ Le prompt est volontairement strict et adapté à un gate release. La seule tens
 
 ## Confirmation Git
 
-Aucun commit effectué.
+Ce rapport initial a été créé avant le commit/push du gate RELEASE-01A. La clôture operator-confirmed ultérieure est documentée dans `docs/release/RELEASE_01A_OPERATOR_CONFIRMED_CLOSURE_API_REPORT.md`.
