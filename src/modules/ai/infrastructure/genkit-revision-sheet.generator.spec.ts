@@ -199,11 +199,13 @@ describe('GenkitRevisionSheetGenerator', () => {
       knowledgeUnits: [],
     });
 
-    expect(mockOpenAICompatible).toHaveBeenCalledWith({
-      name: 'mistral',
-      apiKey: 'test-mistral-key',
-      baseURL: 'https://api.mistral.ai/v1',
-    });
+    expect(mockOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'mistral',
+        apiKey: 'test-mistral-key',
+        baseURL: 'https://api.mistral.ai/v1',
+      }),
+    );
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockPlugin],
       model: 'mistral/mistral-medium-latest',
@@ -389,10 +391,10 @@ describe('GenkitRevisionSheetGenerator', () => {
       status: 'error',
       provider: 'mimo',
       errorCode: 'GENKIT_GENERATION_FAILED',
-      errorCategory: 'UNKNOWN',
+      errorCategory: 'NETWORK',
       errorName: 'FetchError',
       errorProviderCode: 'ERR_STREAM_PREMATURE_CLOSE',
-      errorSummary: 'AI provider generation failed',
+      errorSummary: 'AI provider network request failed',
     });
     expect(observer.observe.mock.calls[1]?.[0]).toMatchObject({
       status: 'success',

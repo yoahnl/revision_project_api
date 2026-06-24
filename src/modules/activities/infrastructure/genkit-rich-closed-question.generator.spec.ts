@@ -128,11 +128,13 @@ describe('GenkitRichClosedQuestionGenerator', () => {
       observer,
     ).generate(generationInput());
 
-    expect(mockOpenAICompatible).toHaveBeenCalledWith({
-      name: 'mistral',
-      apiKey: 'test-mistral-key',
-      baseURL: 'https://api.mistral.ai/v1',
-    });
+    expect(mockOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'mistral',
+        apiKey: 'test-mistral-key',
+        baseURL: 'https://api.mistral.ai/v1',
+      }),
+    );
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockMistralPlugin],
       model: 'mistral/mistral-medium-latest',

@@ -65,7 +65,11 @@ function classifyAiError(input: {
     return 'TIMEOUT';
   }
 
-  if (/network|fetch failed|econnreset|enotfound|eai_again/.test(message)) {
+  if (
+    /network|fetch failed|econnreset|enotfound|eai_again|premature.*close|stream.*close/.test(
+      `${providerCode} ${message}`,
+    )
+  ) {
     return 'NETWORK';
   }
 

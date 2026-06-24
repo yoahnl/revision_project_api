@@ -56,6 +56,17 @@ describe('StructuredLogAiGenerationObserver', () => {
       inputSize: 52,
       durationMs: 31,
       status: 'error',
+      stream: false,
+      structuredOutputMode: 'json_mode',
+      responseFormat: 'json_object',
+      thinkingDisabled: true,
+      attempt: 2,
+      maxAttempts: 3,
+      retryReason: 'stream_premature_close',
+      repairAttempted: true,
+      repairSucceeded: false,
+      fallbackFrom: 'mimo/mimo-v2.5-pro',
+      fallbackTo: 'mistral/mistral-medium-latest',
       errorCode: 'Error',
       errorCategory: 'SCHEMA_VALIDATION',
       errorName: 'ZodError',
@@ -76,6 +87,17 @@ describe('StructuredLogAiGenerationObserver', () => {
     const message = String(messageInput);
     expect(message).toContain('"event":"ai.generation"');
     expect(message).toContain('"errorCode":"Error"');
+    expect(message).toContain('"stream":false');
+    expect(message).toContain('"structuredOutputMode":"json_mode"');
+    expect(message).toContain('"responseFormat":"json_object"');
+    expect(message).toContain('"thinkingDisabled":true');
+    expect(message).toContain('"attempt":2');
+    expect(message).toContain('"maxAttempts":3');
+    expect(message).toContain('"retryReason":"stream_premature_close"');
+    expect(message).toContain('"repairAttempted":true');
+    expect(message).toContain('"repairSucceeded":false');
+    expect(message).toContain('"fallbackFrom":"mimo/mimo-v2.5-pro"');
+    expect(message).toContain('"fallbackTo":"mistral/mistral-medium-latest"');
     expect(message).toContain('"errorCategory":"SCHEMA_VALIDATION"');
     expect(message).toContain('"errorName":"ZodError"');
     expect(message).toContain('"errorStatus":400');

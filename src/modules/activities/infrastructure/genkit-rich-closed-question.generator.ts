@@ -12,6 +12,12 @@ import {
   resolveArtifactMistralFallbackMetadata,
 } from '../../ai/infrastructure/document-artifact-genkit-config';
 import { isInvalidAiOutputError } from '../../ai/infrastructure/mistral-model-fallback';
+import { buildAiErrorDiagnostics } from '../../ai/infrastructure/ai-error-diagnostics';
+import {
+  buildExplicitJsonInstruction,
+  buildStructuredGenerationConfig,
+  resolveStructuredGenerationPolicy,
+} from '../../ai/infrastructure/structured-generation-policy';
 import { evaluateRichClosedExerciseQuality } from '../application/rich-closed-questions/rich-closed-question-quality-gate';
 import { validateRichClosedExercise } from '../application/rich-closed-questions/rich-closed-question.validator';
 import {
@@ -565,11 +571,20 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
               questionTypeMix,
               previousDiagnostic,
             });
-      const attemptInputSize = attemptPrompt.length;
+      const policy = resolveStructuredGenerationPolicy({
+        provider: metadata.provider,
+        structuredOutput: true,
+      });
+      const generationPrompt = buildExplicitJsonInstruction({
+        prompt: attemptPrompt,
+        requiresJsonInstruction: policy.requiresJsonInstruction,
+      });
+      const attemptInputSize = generationPrompt.length;
 
       try {
         const { output } = await this.getAi(metadata).generate({
-          prompt: attemptPrompt,
+          prompt: generationPrompt,
+          config: buildStructuredGenerationConfig(policy),
           output: {
             schema: GeneratedRichClosedExerciseSchema,
           },
@@ -598,6 +613,15 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
           inputSize: attemptInputSize,
           durationMs: Date.now() - startedAt,
           status: 'success',
+          stream: policy.stream,
+          structuredOutputMode: policy.structuredOutputMode,
+          responseFormat: policy.responseFormat?.type,
+          thinkingDisabled: policy.thinkingDisabled,
+          attempt: index + 1,
+          maxAttempts: attempts.length,
+          repairAttempted: index > 0,
+          repairSucceeded: index > 0,
+          fallbackFrom: index > 0 ? attempts[0].model : undefined,
           documentId: input.documentId ?? undefined,
           knowledgeUnitId: input.knowledgeUnit.id,
           subjectId: input.subjectId,
@@ -607,6 +631,7 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
         return exercise;
       } catch (error) {
         const controlledError = toRichClosedGenerationError(error);
+        const diagnostics = buildAiErrorDiagnostics(controlledError);
         previousDiagnostic = controlledError.diagnostic;
 
         this.logger.warn(
@@ -629,7 +654,25 @@ export class GenkitRichClosedQuestionGenerator implements RichClosedQuestionGene
           inputSize: attemptInputSize,
           durationMs: Date.now() - startedAt,
           status: 'error',
+          stream: policy.stream,
+          structuredOutputMode: policy.structuredOutputMode,
+          responseFormat: policy.responseFormat?.type,
+          thinkingDisabled: policy.thinkingDisabled,
+          attempt: index + 1,
+          maxAttempts: attempts.length,
+          retryReason:
+            index < attempts.length - 1
+              ? (diagnostics.errorCategory?.toLowerCase() ??
+                'generation_failed')
+              : undefined,
+          repairAttempted: index > 0,
+          repairSucceeded: false,
+          fallbackFrom:
+            index < attempts.length - 1 ? metadata.model : undefined,
+          fallbackTo:
+            index < attempts.length - 1 ? attempts[index + 1].model : undefined,
           errorCode: controlledError.code,
+          ...diagnostics,
           documentId: input.documentId ?? undefined,
           knowledgeUnitId: input.knowledgeUnit.id,
           subjectId: input.subjectId,

@@ -41,6 +41,11 @@ import {
   type OpenAiCompatibleProviderName,
   type ResolvedOpenAiCompatibleProvider,
 } from '../../ai/infrastructure/openai-compatible-ai-provider';
+import {
+  buildExplicitJsonInstruction,
+  buildStructuredGenerationConfig,
+  resolveStructuredGenerationPolicy,
+} from '../../ai/infrastructure/structured-generation-policy';
 
 const DEFAULT_GENKIT_MODEL = 'googleai/gemini-2.5-flash';
 const FLOW_NAME = 'diagnosticQuizGeneration';
@@ -287,6 +292,10 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     for (const [index, metadata] of attempts.entries()) {
       const startedAt = Date.now();
       let output: unknown;
+      const policy = resolveStructuredGenerationPolicy({
+        provider: metadata.provider,
+        structuredOutput: true,
+      });
 
       try {
         output = await this.generateOutput({
@@ -294,6 +303,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           prompt,
           outputSchema,
           correlationId: input.correlationId,
+          policy,
         });
       } catch (error) {
         const errorCode = resolveDiagnosticQuizGenerationErrorCode(error);
@@ -321,6 +331,20 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           inputSize,
           durationMs: Date.now() - startedAt,
           status: 'error',
+          stream: policy.stream,
+          structuredOutputMode: policy.structuredOutputMode,
+          responseFormat: policy.responseFormat?.type,
+          thinkingDisabled: policy.thinkingDisabled,
+          attempt: index + 1,
+          maxAttempts: attempts.length,
+          retryReason:
+            index < attempts.length - 1
+              ? resolveDiagnosticQuizRetryReason(error, diagnostics)
+              : undefined,
+          fallbackFrom:
+            index < attempts.length - 1 ? metadata.model : undefined,
+          fallbackTo:
+            index < attempts.length - 1 ? attempts[index + 1].model : undefined,
           errorCode,
           ...diagnostics,
           knowledgeUnitId: input.knowledgeUnit.id,
@@ -364,6 +388,17 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           inputSize,
           durationMs: Date.now() - startedAt,
           status: 'error',
+          stream: policy.stream,
+          structuredOutputMode: policy.structuredOutputMode,
+          responseFormat: policy.responseFormat?.type,
+          thinkingDisabled: policy.thinkingDisabled,
+          attempt: index + 1,
+          maxAttempts: attempts.length,
+          retryReason: index < attempts.length - 1 ? 'empty_output' : undefined,
+          fallbackFrom:
+            index < attempts.length - 1 ? metadata.model : undefined,
+          fallbackTo:
+            index < attempts.length - 1 ? attempts[index + 1].model : undefined,
           errorCode,
           ...diagnostics,
           knowledgeUnitId: input.knowledgeUnit.id,
@@ -418,6 +453,13 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           inputSize,
           durationMs: Date.now() - startedAt,
           status: 'success',
+          stream: policy.stream,
+          structuredOutputMode: policy.structuredOutputMode,
+          responseFormat: policy.responseFormat?.type,
+          thinkingDisabled: policy.thinkingDisabled,
+          attempt: index + 1,
+          maxAttempts: attempts.length,
+          fallbackFrom: index > 0 ? attempts[0].model : undefined,
           knowledgeUnitId: input.knowledgeUnit.id,
           subjectId: input.subjectId ?? input.knowledgeUnit.subjectId,
           documentId: input.documentId ?? undefined,
@@ -450,6 +492,20 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
           inputSize,
           durationMs: Date.now() - startedAt,
           status: 'error',
+          stream: policy.stream,
+          structuredOutputMode: policy.structuredOutputMode,
+          responseFormat: policy.responseFormat?.type,
+          thinkingDisabled: policy.thinkingDisabled,
+          attempt: index + 1,
+          maxAttempts: attempts.length,
+          retryReason:
+            index < attempts.length - 1
+              ? resolveDiagnosticQuizRetryReason(error, diagnostics)
+              : undefined,
+          fallbackFrom:
+            index < attempts.length - 1 ? metadata.model : undefined,
+          fallbackTo:
+            index < attempts.length - 1 ? attempts[index + 1].model : undefined,
           errorCode,
           ...diagnostics,
           knowledgeUnitId: input.knowledgeUnit.id,
@@ -476,6 +532,7 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     prompt: string;
     outputSchema: z.ZodTypeAny;
     correlationId?: string;
+    policy: ReturnType<typeof resolveStructuredGenerationPolicy>;
   }): Promise<unknown> {
     if (shouldUseDirectOpenAiCompatibleGeneration(input.metadata)) {
       return generateOpenAiCompatibleDiagnosticQuizJson({
@@ -486,8 +543,13 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
       });
     }
 
-    const result = (await this.getAi(input.metadata).generate({
+    const generationPrompt = buildExplicitJsonInstruction({
       prompt: input.prompt,
+      requiresJsonInstruction: input.policy.requiresJsonInstruction,
+    });
+    const result = (await this.getAi(input.metadata).generate({
+      prompt: generationPrompt,
+      config: buildStructuredGenerationConfig(input.policy),
       output: {
         schema: input.outputSchema,
       },
@@ -524,6 +586,24 @@ export class GenkitDiagnosticQuizGenerator implements DiagnosticQuizGenerator {
     this.resolvedMetadata ??= resolveGenkitMetadata();
     return this.resolvedMetadata;
   }
+}
+
+function resolveDiagnosticQuizRetryReason(
+  error: unknown,
+  diagnostics: ReturnType<typeof buildAiErrorDiagnostics>,
+): string {
+  const providerCode = diagnostics.errorProviderCode?.toLowerCase() ?? '';
+  const errorName = diagnostics.errorName?.toLowerCase() ?? '';
+  const message = error instanceof Error ? error.message.toLowerCase() : '';
+
+  if (
+    providerCode === 'err_stream_premature_close' ||
+    /premature.*close|stream.*close/.test(`${errorName} ${message}`)
+  ) {
+    return 'stream_premature_close';
+  }
+
+  return diagnostics.errorCategory?.toLowerCase() ?? 'generation_failed';
 }
 
 function resolveGeneratedDiagnosticQuizSchema(input: {
@@ -947,6 +1027,10 @@ function buildOpenAiCompatibleDiagnosticQuizRequestBody(input: {
   metadata: ResolvedOpenAiCompatibleProvider;
   prompt: string;
 }) {
+  const policy = resolveStructuredGenerationPolicy({
+    provider: input.metadata.provider,
+    structuredOutput: true,
+  });
   const body: Record<string, unknown> = {
     model: stripOpenAiCompatibleModelNamespace(
       input.metadata.provider,
@@ -960,17 +1044,14 @@ function buildOpenAiCompatibleDiagnosticQuizRequestBody(input: {
       },
       {
         role: 'user',
-        content: input.prompt,
+        content: buildExplicitJsonInstruction({
+          prompt: input.prompt,
+          requiresJsonInstruction: policy.requiresJsonInstruction,
+        }),
       },
     ],
-    temperature: 0.2,
-    response_format: { type: 'json_object' },
-    stream: false,
+    ...buildStructuredGenerationConfig(policy),
   };
-
-  if (input.metadata.provider === MIMO_PROVIDER) {
-    body.thinking = { type: 'disabled' };
-  }
 
   return body;
 }

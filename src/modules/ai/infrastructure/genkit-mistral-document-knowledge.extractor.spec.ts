@@ -98,11 +98,13 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
       chunks: [{ id: 'chunk-1', index: 0, text: 'Contenu du document.' }],
     });
 
-    expect(mockOpenAICompatible).toHaveBeenCalledWith({
-      name: 'mistral',
-      apiKey: 'test-mistral-key',
-      baseURL: 'https://api.mistral.ai/v1',
-    });
+    expect(mockOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'mistral',
+        apiKey: 'test-mistral-key',
+        baseURL: 'https://api.mistral.ai/v1',
+      }),
+    );
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockPlugin],
       model: 'mistral/mistral-medium-latest',
@@ -187,17 +189,25 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
     const observation = getObservedObservation(observer);
     expect(observation.durationMs).toEqual(expect.any(Number));
     expect(observation.inputSize).toEqual(expect.any(Number));
-    expect(observation).toEqual({
-      flowName: 'documentKnowledgeExtraction',
-      provider: 'mistral',
-      model: 'mistral/mistral-medium-latest',
-      promptVersion: 'document-knowledge-v2',
-      schemaVersion: 'extracted-knowledge-v2',
-      inputSize: observation.inputSize,
-      durationMs: observation.durationMs,
-      status: 'success',
-      documentId: 'document-1',
-    });
+    expect(observation).toEqual(
+      expect.objectContaining({
+        flowName: 'documentKnowledgeExtraction',
+        provider: 'mistral',
+        model: 'mistral/mistral-medium-latest',
+        promptVersion: 'document-knowledge-v2',
+        schemaVersion: 'extracted-knowledge-v2',
+        inputSize: observation.inputSize,
+        durationMs: observation.durationMs,
+        status: 'success',
+        stream: false,
+        structuredOutputMode: 'json_mode',
+        responseFormat: 'json_object',
+        thinkingDisabled: false,
+        attempt: 1,
+        maxAttempts: 1,
+        documentId: 'document-1',
+      }),
+    );
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
     expect(observedPayload).not.toContain('SENTINEL_FULL_CHUNK_TEXT');
     expect(observedPayload).not.toContain('secret-test-key');
@@ -306,21 +316,29 @@ describe('GenkitMistralDocumentKnowledgeExtractor', () => {
 
     const observation = getObservedObservation(observer);
     expect(observation.durationMs).toEqual(expect.any(Number));
-    expect(observation).toEqual({
-      flowName: 'documentKnowledgeExtraction',
-      provider: 'mistral',
-      model: 'mistral/mistral-medium-latest',
-      promptVersion: 'document-knowledge-v2',
-      schemaVersion: 'extracted-knowledge-v2',
-      inputSize: observation.inputSize,
-      durationMs: observation.durationMs,
-      status: 'error',
-      errorCode: 'GENKIT_GENERATION_FAILED',
-      errorCategory: 'UNKNOWN',
-      errorName: 'Error',
-      errorSummary: 'AI provider generation failed',
-      documentId: 'document-1',
-    });
+    expect(observation).toEqual(
+      expect.objectContaining({
+        flowName: 'documentKnowledgeExtraction',
+        provider: 'mistral',
+        model: 'mistral/mistral-medium-latest',
+        promptVersion: 'document-knowledge-v2',
+        schemaVersion: 'extracted-knowledge-v2',
+        inputSize: observation.inputSize,
+        durationMs: observation.durationMs,
+        status: 'error',
+        stream: false,
+        structuredOutputMode: 'json_mode',
+        responseFormat: 'json_object',
+        thinkingDisabled: false,
+        attempt: 1,
+        maxAttempts: 1,
+        errorCode: 'GENKIT_GENERATION_FAILED',
+        errorCategory: 'UNKNOWN',
+        errorName: 'Error',
+        errorSummary: 'AI provider generation failed',
+        documentId: 'document-1',
+      }),
+    );
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
     expect(observedPayload).not.toContain('SENTINEL_FULL_CHUNK_TEXT');
     expect(observedPayload).not.toContain('secret-test-key');

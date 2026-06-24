@@ -26,6 +26,11 @@ import {
   resolveArtifactGenkitMetadata,
 } from './document-artifact-genkit-config';
 import { GeneratedRevisionSheetSchema } from './document-artifact-output.schema';
+import {
+  buildExplicitJsonInstruction,
+  buildStructuredGenerationConfig,
+  resolveStructuredGenerationPolicy,
+} from './structured-generation-policy';
 
 const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
 const REVISION_SHEET_SOURCE_INVALID_ERROR_CODE =
@@ -72,10 +77,19 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
 
     for (const [index, metadata] of attempts.entries()) {
       const startedAt = Date.now();
+      const policy = resolveStructuredGenerationPolicy({
+        provider: metadata.provider,
+        structuredOutput: true,
+      });
+      const generationPrompt = buildExplicitJsonInstruction({
+        prompt,
+        requiresJsonInstruction: policy.requiresJsonInstruction,
+      });
 
       try {
         const { output } = await this.getAi(metadata).generate({
-          prompt,
+          prompt: generationPrompt,
+          config: buildStructuredGenerationConfig(policy),
           output: {
             schema: GeneratedRevisionSheetSchema,
           },
@@ -101,9 +115,16 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
           model: metadata.model,
           promptVersion: REVISION_SHEET_PROMPT_VERSION,
           schemaVersion: REVISION_SHEET_SCHEMA_VERSION,
-          inputSize: prompt.length,
+          inputSize: generationPrompt.length,
           durationMs,
           status: 'success',
+          stream: policy.stream,
+          structuredOutputMode: policy.structuredOutputMode,
+          responseFormat: policy.responseFormat?.type,
+          thinkingDisabled: policy.thinkingDisabled,
+          attempt: index + 1,
+          maxAttempts: attempts.length,
+          fallbackFrom: index > 0 ? attempts[0].model : undefined,
           documentId: input.documentId,
         });
 
@@ -122,7 +143,7 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
             promptVersion: REVISION_SHEET_PROMPT_VERSION,
             schemaVersion: REVISION_SHEET_SCHEMA_VERSION,
             generatedAt,
-            inputSize: prompt.length,
+            inputSize: generationPrompt.length,
             sourceStrategy: 'DOCUMENT_CHUNKS_AND_KNOWLEDGE_UNITS',
           },
         };
@@ -135,9 +156,20 @@ export class GenkitRevisionSheetGenerator implements RevisionSheetGenerator {
           model: metadata.model,
           promptVersion: REVISION_SHEET_PROMPT_VERSION,
           schemaVersion: REVISION_SHEET_SCHEMA_VERSION,
-          inputSize: prompt.length,
+          inputSize: generationPrompt.length,
           durationMs: Date.now() - startedAt,
           status: 'error',
+          stream: policy.stream,
+          structuredOutputMode: policy.structuredOutputMode,
+          responseFormat: policy.responseFormat?.type,
+          thinkingDisabled: policy.thinkingDisabled,
+          attempt: index + 1,
+          maxAttempts: attempts.length,
+          retryReason: index < attempts.length - 1 ? 'fallback' : undefined,
+          fallbackFrom:
+            index < attempts.length - 1 ? metadata.model : undefined,
+          fallbackTo:
+            index < attempts.length - 1 ? attempts[index + 1].model : undefined,
           errorCode: resolveRevisionSheetGenerationErrorCode(error),
           errorCategory: diagnostics.errorCategory,
           errorName: diagnostics.errorName,

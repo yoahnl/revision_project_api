@@ -4,6 +4,10 @@ import openAICompatible, {
   type ModelRequestBuilder,
   type PluginOptions,
 } from '@genkit-ai/compat-oai';
+import {
+  buildStructuredGenerationConfig,
+  resolveStructuredGenerationPolicy,
+} from './structured-generation-policy';
 
 export const MISTRAL_PROVIDER = 'mistral';
 export const MIMO_PROVIDER = 'mimo';
@@ -100,52 +104,70 @@ export function createOpenAiCompatiblePlugin(
     throw new Error(`${provider.apiKeyEnv} is required`);
   }
 
-  if (provider.provider === MIMO_PROVIDER) {
-    const pluginOptions: PluginOptions = {
-      name: provider.pluginName,
-      apiKey: provider.apiKey,
-      baseURL: provider.baseURL,
-      resolver: (client, actionType, actionName) => {
-        if (actionType !== 'model') {
-          return undefined;
-        }
-
-        return defineCompatOpenAIModel({
-          name: toOpenAiCompatibleModelName(actionName, provider.pluginName),
-          client,
-          pluginOptions,
-          modelRef: compatOaiModelRef({
-            name: actionName,
-            namespace: provider.pluginName,
-          }),
-          requestBuilder: applyMimoOpenAiRequestOptions,
-        });
-      },
-    };
-
-    return openAICompatible(pluginOptions);
-  }
-
-  return openAICompatible({
+  const pluginOptions: PluginOptions = {
     name: provider.pluginName,
     apiKey: provider.apiKey,
     baseURL: provider.baseURL,
-  });
+    resolver: (client, actionType, actionName) => {
+      if (actionType !== 'model') {
+        return undefined;
+      }
+
+      return defineCompatOpenAIModel({
+        name: toOpenAiCompatibleModelName(actionName, provider.pluginName),
+        client,
+        pluginOptions,
+        modelRef: compatOaiModelRef({
+          name: actionName,
+          namespace: provider.pluginName,
+        }),
+        requestBuilder:
+          provider.provider === MIMO_PROVIDER
+            ? applyMimoOpenAiRequestOptions
+            : applyMistralOpenAiRequestOptions,
+      });
+    },
+  };
+
+  return openAICompatible(pluginOptions);
 }
+
+export const applyMistralOpenAiRequestOptions: ModelRequestBuilder = (
+  request,
+  params,
+) => {
+  applyStructuredOpenAiCompatibleRequestOptions({
+    provider: MISTRAL_PROVIDER,
+    request,
+    params,
+  });
+};
 
 export const applyMimoOpenAiRequestOptions: ModelRequestBuilder = (
   request,
   params,
 ) => {
-  const body = params as unknown as Record<string, unknown>;
-
-  copyOpenAiCompatiblePassthroughConfig(request.config, body);
-
-  // MiMo's OpenAI-compatible examples explicitly disable the extra thinking
-  // mode. Keeping this out of generic providers avoids leaking MiMo-only
-  // request fields into Mistral.
-  body.thinking = { type: 'disabled' };
+  applyStructuredOpenAiCompatibleRequestOptions({
+    provider: MIMO_PROVIDER,
+    request,
+    params,
+  });
 };
+
+function applyStructuredOpenAiCompatibleRequestOptions(input: {
+  provider: OpenAiCompatibleProviderName;
+  request: Parameters<ModelRequestBuilder>[0];
+  params: Parameters<ModelRequestBuilder>[1];
+}) {
+  const body = input.params as unknown as Record<string, unknown>;
+  const policy = resolveStructuredGenerationPolicy({
+    provider: input.provider,
+    structuredOutput: true,
+  });
+
+  copyOpenAiCompatiblePassthroughConfig(input.request.config, body);
+  Object.assign(body, buildStructuredGenerationConfig(policy));
+}
 
 export function normalizeOpenAiCompatibleModelName(
   provider: OpenAiCompatibleProviderName,

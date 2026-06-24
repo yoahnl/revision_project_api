@@ -203,11 +203,13 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       }),
     });
 
-    expect(mockOpenAICompatible).toHaveBeenCalledWith({
-      name: 'mistral',
-      apiKey: 'test-mistral-key',
-      baseURL: 'https://api.mistral.ai/v1',
-    });
+    expect(mockOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'mistral',
+        apiKey: 'test-mistral-key',
+        baseURL: 'https://api.mistral.ai/v1',
+      }),
+    );
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockMistralPlugin],
       model: 'mistral/mistral-medium-latest',
@@ -783,19 +785,26 @@ describe('GenkitDiagnosticQuizGenerator', () => {
     });
 
     const observation = getObservedObservation(observer);
-    expect(observation).toEqual({
-      flowName: 'diagnosticQuizGeneration',
-      provider: 'google-genai',
-      model: 'googleai/custom-model',
-      promptVersion: 'diagnostic-quiz-v2',
-      schemaVersion: 'diagnostic-quiz-v2',
-      inputSize: generateInput?.prompt.length,
-      durationMs: observation.durationMs,
-      status: 'success',
-      documentId: 'document-1',
-      knowledgeUnitId: 'unit-source',
-      subjectId: 'subject-1',
-    });
+    expect(observation).toEqual(
+      expect.objectContaining({
+        flowName: 'diagnosticQuizGeneration',
+        provider: 'google-genai',
+        model: 'googleai/custom-model',
+        promptVersion: 'diagnostic-quiz-v2',
+        schemaVersion: 'diagnostic-quiz-v2',
+        inputSize: generateInput?.prompt.length,
+        durationMs: observation.durationMs,
+        status: 'success',
+        stream: false,
+        structuredOutputMode: 'native_schema',
+        thinkingDisabled: false,
+        attempt: 1,
+        maxAttempts: 1,
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-source',
+        subjectId: 'subject-1',
+      }),
+    );
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
     expect(observedPayload).not.toContain('SENTINEL_SOURCE_CHUNK_TEXT');
     expect(observedPayload).not.toContain('SENTINEL_UNUSED_CHUNK_TEXT');
@@ -1441,11 +1450,13 @@ describe('GenkitDiagnosticQuizGenerator', () => {
       fallbackUsed: true,
     });
     expect(mockGoogleAI).toHaveBeenCalledTimes(1);
-    expect(mockOpenAICompatible).toHaveBeenCalledWith({
-      name: 'mistral',
-      apiKey: 'test-mistral-key',
-      baseURL: 'https://api.mistral.ai/v1',
-    });
+    expect(mockOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'mistral',
+        apiKey: 'test-mistral-key',
+        baseURL: 'https://api.mistral.ai/v1',
+      }),
+    );
     expect(mockGenkit).toHaveBeenNthCalledWith(1, {
       plugins: [mockGooglePlugin],
       model: 'googleai/gemini-2.5-flash',
@@ -1508,18 +1519,25 @@ describe('GenkitDiagnosticQuizGenerator', () => {
 
     const observation = getObservedObservation(observer);
     expect(observation.durationMs).toEqual(expect.any(Number));
-    expect(observation).toEqual({
-      flowName: 'diagnosticQuizGeneration',
-      provider: 'google-genai',
-      model: 'googleai/custom-model',
-      promptVersion: 'diagnostic-quiz-v2',
-      schemaVersion: 'diagnostic-quiz-v2',
-      inputSize: observation.inputSize,
-      durationMs: observation.durationMs,
-      status: 'success',
-      knowledgeUnitId: 'unit-1',
-      subjectId: 'subject-1',
-    });
+    expect(observation).toEqual(
+      expect.objectContaining({
+        flowName: 'diagnosticQuizGeneration',
+        provider: 'google-genai',
+        model: 'googleai/custom-model',
+        promptVersion: 'diagnostic-quiz-v2',
+        schemaVersion: 'diagnostic-quiz-v2',
+        inputSize: observation.inputSize,
+        durationMs: observation.durationMs,
+        status: 'success',
+        stream: false,
+        structuredOutputMode: 'native_schema',
+        thinkingDisabled: false,
+        attempt: 1,
+        maxAttempts: 1,
+        knowledgeUnitId: 'unit-1',
+        subjectId: 'subject-1',
+      }),
+    );
     expect(observation.inputSize).toBeGreaterThan(
       'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
     );
@@ -1550,23 +1568,31 @@ describe('GenkitDiagnosticQuizGenerator', () => {
 
     const observation = getObservedObservation(observer);
     expect(observation.durationMs).toEqual(expect.any(Number));
-    expect(observation).toEqual({
-      flowName: 'diagnosticQuizGeneration',
-      provider: 'mistral',
-      model: 'mistral/mistral-medium-latest',
-      promptVersion: 'diagnostic-quiz-v2',
-      schemaVersion: 'diagnostic-quiz-v2',
-      inputSize: observation.inputSize,
-      durationMs: observation.durationMs,
-      status: 'error',
-      errorCode: 'GENKIT_GENERATION_FAILED',
-      errorCategory: 'UNKNOWN',
-      errorName: 'Error',
-      errorSummary: 'AI provider generation failed',
-      knowledgeUnitId: 'unit-1',
-      subjectId: 'subject-1',
-      documentId: undefined,
-    });
+    expect(observation).toEqual(
+      expect.objectContaining({
+        flowName: 'diagnosticQuizGeneration',
+        provider: 'mistral',
+        model: 'mistral/mistral-medium-latest',
+        promptVersion: 'diagnostic-quiz-v2',
+        schemaVersion: 'diagnostic-quiz-v2',
+        inputSize: observation.inputSize,
+        durationMs: observation.durationMs,
+        status: 'error',
+        stream: false,
+        structuredOutputMode: 'json_mode',
+        responseFormat: 'json_object',
+        thinkingDisabled: false,
+        attempt: 1,
+        maxAttempts: 1,
+        errorCode: 'GENKIT_GENERATION_FAILED',
+        errorCategory: 'UNKNOWN',
+        errorName: 'Error',
+        errorSummary: 'AI provider generation failed',
+        knowledgeUnitId: 'unit-1',
+        subjectId: 'subject-1',
+        documentId: undefined,
+      }),
+    );
     expect(observation.inputSize).toBeGreaterThan(
       'SENTINEL_UNIT_TITLE'.length + 'SENTINEL_UNIT_SUMMARY'.length,
     );
@@ -1597,23 +1623,31 @@ describe('GenkitDiagnosticQuizGenerator', () => {
 
     const observation = getObservedObservation(observer);
     expect(observation.durationMs).toEqual(expect.any(Number));
-    expect(observation).toEqual({
-      flowName: 'diagnosticQuizGeneration',
-      provider: 'mistral',
-      model: 'mistral/mistral-medium-latest',
-      promptVersion: 'diagnostic-quiz-v2',
-      schemaVersion: 'diagnostic-quiz-v2',
-      inputSize: observation.inputSize,
-      durationMs: observation.durationMs,
-      status: 'error',
-      errorCode: 'GENKIT_GENERATION_FAILED',
-      errorCategory: 'CONFIGURATION',
-      errorName: 'Error',
-      errorSummary: 'AI provider configuration is invalid or incomplete',
-      knowledgeUnitId: 'unit-1',
-      subjectId: 'subject-1',
-      documentId: undefined,
-    });
+    expect(observation).toEqual(
+      expect.objectContaining({
+        flowName: 'diagnosticQuizGeneration',
+        provider: 'mistral',
+        model: 'mistral/mistral-medium-latest',
+        promptVersion: 'diagnostic-quiz-v2',
+        schemaVersion: 'diagnostic-quiz-v2',
+        inputSize: observation.inputSize,
+        durationMs: observation.durationMs,
+        status: 'error',
+        stream: false,
+        structuredOutputMode: 'json_mode',
+        responseFormat: 'json_object',
+        thinkingDisabled: false,
+        attempt: 1,
+        maxAttempts: 1,
+        errorCode: 'GENKIT_GENERATION_FAILED',
+        errorCategory: 'CONFIGURATION',
+        errorName: 'Error',
+        errorSummary: 'AI provider configuration is invalid or incomplete',
+        knowledgeUnitId: 'unit-1',
+        subjectId: 'subject-1',
+        documentId: undefined,
+      }),
+    );
     const observedPayload = JSON.stringify(observer.observe.mock.calls);
     expect(observedPayload).not.toContain('SENTINEL_UNIT_TITLE');
     expect(observedPayload).not.toContain('SENTINEL_UNIT_SUMMARY');

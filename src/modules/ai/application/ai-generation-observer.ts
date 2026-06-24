@@ -23,6 +23,17 @@ export interface AiGenerationObservation {
   inputSize: number;
   durationMs: number;
   status: AiGenerationStatus;
+  stream?: boolean;
+  structuredOutputMode?: string;
+  responseFormat?: string;
+  thinkingDisabled?: boolean;
+  attempt?: number;
+  maxAttempts?: number;
+  retryReason?: string;
+  repairAttempted?: boolean;
+  repairSucceeded?: boolean;
+  fallbackFrom?: string;
+  fallbackTo?: string;
   errorCode?: string;
   errorCategory?: AiGenerationErrorCategory;
   errorName?: string;

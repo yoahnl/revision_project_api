@@ -3,6 +3,7 @@ import {
   MIMO_PROVIDER,
   MISTRAL_PROVIDER,
   applyMimoOpenAiRequestOptions,
+  applyMistralOpenAiRequestOptions,
   resolveOpenAiCompatibleProvider,
 } from './openai-compatible-ai-provider';
 
@@ -113,15 +114,20 @@ describe('resolveOpenAiCompatibleProvider', () => {
 
     expect(requestBody).toMatchObject({
       customOption: 'kept',
+      stream: false,
+      temperature: 1,
+      topP: 0.95,
+      max_completion_tokens: 4096,
+      response_format: { type: 'json_object' },
       thinking: { type: 'disabled' },
     });
-    expect(requestBody).not.toHaveProperty('temperature');
   });
 
-  it('keeps Mistral on the generic OpenAI-compatible resolver', () => {
+  it('registers Mistral with a request builder that forces JSON mode without thinking', () => {
     const provider = resolveOpenAiCompatibleProvider(MISTRAL_PROVIDER, {
       MISTRAL_API_KEY: 'test-mistral-key',
     });
+    const client = { kind: 'openai-client' };
 
     createOpenAiCompatiblePlugin(provider);
 
@@ -131,6 +137,40 @@ describe('resolveOpenAiCompatibleProvider', () => {
       apiKey: 'test-mistral-key',
       baseURL: 'https://api.mistral.ai/v1',
     });
-    expect(pluginInput?.resolver).toBeUndefined();
+    expect(pluginInput?.resolver).toEqual(expect.any(Function));
+
+    const resolvedAction = pluginInput?.resolver?.(
+      client,
+      'model',
+      'mistral/mistral-medium-latest',
+    );
+
+    expect(resolvedAction).toBe(mockModelAction);
+    expect(mockDefineCompatOpenAIModel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'mistral-medium-latest',
+        requestBuilder: applyMistralOpenAiRequestOptions,
+      }),
+    );
+
+    const requestBody: Record<string, unknown> = {};
+    applyMistralOpenAiRequestOptions(
+      {
+        config: {
+          response_format: { type: 'json_object' },
+          stream: true,
+          customOption: 'kept',
+        },
+      } as never,
+      requestBody as never,
+    );
+
+    expect(requestBody).toMatchObject({
+      customOption: 'kept',
+      stream: false,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+    });
+    expect(requestBody).not.toHaveProperty('thinking');
   });
 });

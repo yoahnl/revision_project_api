@@ -25,6 +25,11 @@ import {
   type OpenAiCompatibleProviderName,
   type ResolvedOpenAiCompatibleProvider,
 } from './openai-compatible-ai-provider';
+import {
+  buildExplicitJsonInstruction,
+  buildStructuredGenerationConfig,
+  resolveStructuredGenerationPolicy,
+} from './structured-generation-policy';
 
 const FLOW_NAME = 'documentKnowledgeExtraction';
 const GENERATION_FAILED_ERROR_CODE = 'GENKIT_GENERATION_FAILED';
@@ -49,11 +54,20 @@ export class GenkitOpenAiCompatibleDocumentKnowledgeExtractor implements Documen
       chunks,
     });
     const provider = this.resolveProvider();
+    const policy = resolveStructuredGenerationPolicy({
+      provider: provider.provider,
+      structuredOutput: true,
+    });
+    const generationPrompt = buildExplicitJsonInstruction({
+      prompt,
+      requiresJsonInstruction: policy.requiresJsonInstruction,
+    });
     const startedAt = Date.now();
 
     try {
       const { output } = await this.getAi().generate({
-        prompt,
+        prompt: generationPrompt,
+        config: buildStructuredGenerationConfig(policy),
         output: {
           schema: ExtractedKnowledgeSchema,
         },
@@ -66,9 +80,15 @@ export class GenkitOpenAiCompatibleDocumentKnowledgeExtractor implements Documen
         model: provider.model,
         promptVersion: DOCUMENT_KNOWLEDGE_PROMPT_VERSION,
         schemaVersion: DOCUMENT_KNOWLEDGE_SCHEMA_VERSION,
-        inputSize: prompt.length,
+        inputSize: generationPrompt.length,
         durationMs: Date.now() - startedAt,
         status: 'success',
+        stream: policy.stream,
+        structuredOutputMode: policy.structuredOutputMode,
+        responseFormat: policy.responseFormat?.type,
+        thinkingDisabled: policy.thinkingDisabled,
+        attempt: 1,
+        maxAttempts: 1,
         documentId: input.documentId,
       });
 
@@ -80,9 +100,15 @@ export class GenkitOpenAiCompatibleDocumentKnowledgeExtractor implements Documen
         model: provider.model,
         promptVersion: DOCUMENT_KNOWLEDGE_PROMPT_VERSION,
         schemaVersion: DOCUMENT_KNOWLEDGE_SCHEMA_VERSION,
-        inputSize: prompt.length,
+        inputSize: generationPrompt.length,
         durationMs: Date.now() - startedAt,
         status: 'error',
+        stream: policy.stream,
+        structuredOutputMode: policy.structuredOutputMode,
+        responseFormat: policy.responseFormat?.type,
+        thinkingDisabled: policy.thinkingDisabled,
+        attempt: 1,
+        maxAttempts: 1,
         errorCode: GENERATION_FAILED_ERROR_CODE,
         ...buildAiErrorDiagnostics(error),
         documentId: input.documentId,

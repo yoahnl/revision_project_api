@@ -142,17 +142,24 @@ describe('GenkitDocumentSummaryGenerator', () => {
     }
     expect(generateCall[0].prompt).toContain('SENTINEL_FULL_CHUNK_TEXT');
     const observation = getObservedObservation(observer);
-    expect(observation).toEqual({
-      flowName: 'documentSummaryGeneration',
-      provider: 'google-genai',
-      model: 'googleai/gemini-2.5-flash',
-      promptVersion: 'generate-summary-v1',
-      schemaVersion: 'summary-v1',
-      inputSize: observation.inputSize,
-      durationMs: observation.durationMs,
-      status: 'success',
-      documentId: 'document-1',
-    });
+    expect(observation).toEqual(
+      expect.objectContaining({
+        flowName: 'documentSummaryGeneration',
+        provider: 'google-genai',
+        model: 'googleai/gemini-2.5-flash',
+        promptVersion: 'generate-summary-v1',
+        schemaVersion: 'summary-v1',
+        inputSize: observation.inputSize,
+        durationMs: observation.durationMs,
+        status: 'success',
+        stream: false,
+        structuredOutputMode: 'native_schema',
+        thinkingDisabled: false,
+        attempt: 1,
+        maxAttempts: 1,
+        documentId: 'document-1',
+      }),
+    );
     expect(JSON.stringify(observer.observe.mock.calls)).not.toContain(
       'SENTINEL_FULL_CHUNK_TEXT',
     );
@@ -193,11 +200,13 @@ describe('GenkitDocumentSummaryGenerator', () => {
       },
     );
 
-    expect(mockOpenAICompatible).toHaveBeenCalledWith({
-      name: 'mistral',
-      apiKey: 'test-mistral-key',
-      baseURL: 'https://api.mistral.ai/v1',
-    });
+    expect(mockOpenAICompatible).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: 'mistral',
+        apiKey: 'test-mistral-key',
+        baseURL: 'https://api.mistral.ai/v1',
+      }),
+    );
     expect(mockGenkit).toHaveBeenCalledWith({
       plugins: [mockPlugin],
       model: 'mistral/mistral-medium-latest',
