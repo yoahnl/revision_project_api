@@ -334,6 +334,13 @@ describe('rich closed question validator', () => {
       ...richClosedQuestionFixture('date_slider'),
       correctYear: 1971,
     };
+    const unreachableCorrection = {
+      ...richClosedQuestionFixture('date_slider'),
+      minYear: 1945,
+      maxYear: 1970,
+      step: 2,
+      correctYear: 1958,
+    };
     const invalidTolerance = {
       ...richClosedQuestionFixture('date_slider'),
       toleranceYears: -1,
@@ -350,6 +357,13 @@ describe('rich closed question validator', () => {
       }),
     );
     expect(validateRichClosedQuestion(invalidCorrection).issues).toContainEqual(
+      expect.objectContaining({
+        code: 'RICH_CLOSED_DATE_SLIDER_CORRECTION_INVALID',
+      }),
+    );
+    expect(
+      validateRichClosedQuestion(unreachableCorrection).issues,
+    ).toContainEqual(
       expect.objectContaining({
         code: 'RICH_CLOSED_DATE_SLIDER_CORRECTION_INVALID',
       }),

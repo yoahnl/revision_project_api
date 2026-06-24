@@ -545,16 +545,17 @@ function validateDateSliderQuestion(
   }
 
   if (
-    correctYear === null ||
-    minYear === null ||
-    maxYear === null ||
-    correctYear < minYear ||
-    correctYear > maxYear
+    !isDateSliderCorrectionReachable({
+      minYear,
+      maxYear,
+      step,
+      correctYear,
+    })
   ) {
     issues.push(
       issue(
         'RICH_CLOSED_DATE_SLIDER_CORRECTION_INVALID',
-        'Date slider correction must be within the public year range',
+        'Date slider correction must be within the public year range and align with the configured step',
         'correctYear',
       ),
     );
@@ -572,6 +573,28 @@ function validateDateSliderQuestion(
 
   validateOptionalInstruction(question.instruction, issues);
   validateExplanation(question.explanation, issues);
+}
+
+function isDateSliderCorrectionReachable(input: {
+  minYear: number | null;
+  maxYear: number | null;
+  step: number | null;
+  correctYear: number | null;
+}): boolean {
+  if (
+    input.minYear === null ||
+    input.maxYear === null ||
+    input.step === null ||
+    input.correctYear === null ||
+    input.minYear >= input.maxYear ||
+    input.step < 1 ||
+    input.correctYear < input.minYear ||
+    input.correctYear > input.maxYear
+  ) {
+    return false;
+  }
+
+  return (input.correctYear - input.minYear) % input.step === 0;
 }
 
 function validateTrueFalseGridQuestion(

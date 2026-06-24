@@ -42,22 +42,23 @@ Statuts autorisés : `TODO`, `IN_PROGRESS`, `BLOCKED`, `READY_FOR_REVIEW`, `DONE
 
 ## Prochain lot recommandé
 
-`PLUS-02A - QCM complet / rich questions recovery`.
+`PLUS-02B - QCM result/correction/history integration`.
 
-Pourquoi : la préparation examen V1 dépend de questions riches, de sources, de visuels bornés, de corrections claires et d'une compatibilité session/result/history. Le produit a déjà eu une forme riche dans V1 et des briques existent dans API/App, mais V3 doit le restaurer proprement au lieu de partir vers l'examen ou le coach.
+Pourquoi : `PLUS-02A` a récupéré le contrat rich closed, les types supportés, le rendu App et deux gardes de cohérence. Le parent `PLUS-02` reste `IN_PROGRESS` tant que résultat, correction claire, historique et compatibilité session/result/history ne sont pas durcis comme parcours produit complet.
 
 ## Validations à exécuter pour le prochain lot
 
 À adapter selon les fichiers touchés, mais au minimum :
 
-- API : tests ciblés sur rich closed/question bank/session touchés.
-- App : tests ciblés parsing/rendu/flow QCM touchés.
+- API : tests ciblés rich closed result/correction/history, revision sessions, question bank si touché.
+- App : tests ciblés correction/result/history rich closed, revision sessions et navigation depuis les actions existantes.
 - Toujours : `git diff --check` dans chaque repo touché.
 - Ne pas lancer full Flutter/Jest si aucun code correspondant n'a été modifié.
 
 ## Pièges à éviter
 
-- Ne pas fusionner `PLUS-02A` avec `PLUS-03A`.
+- Ne pas rouvrir `PLUS-02A` pour ajouter examen, quality pool ou nouvelles familles non supportées.
+- Ne pas fusionner `PLUS-02B` avec `PLUS-03A`.
 - Ne pas lancer `QUALITY-01` avant QCM/exam stabilisés.
 - Ne pas utiliser Rena pour masquer des loaders ou erreurs non polis.
 - Ne pas transformer Today en coach adaptatif tant que les signaux produit sont incomplets.
