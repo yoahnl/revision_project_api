@@ -31,6 +31,7 @@ import { DeleteCourseDocumentUseCase } from './application/delete-course-documen
 import { DeleteCourseUseCase } from './application/delete-course.use-case';
 import { GetCourseDetailUseCase } from './application/get-course-detail.use-case';
 import { GetCourseLifecycleUseCase } from './application/get-course-lifecycle.use-case';
+import { GetCourseExamPreparationOptionsUseCase } from './application/get-course-exam-preparation-options.use-case';
 import { GetCourseUseCase } from './application/get-course.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from './application/list-subject-courses-with-stats.use-case';
 import { ListSubjectCoursesUseCase } from './application/list-subject-courses.use-case';
@@ -59,6 +60,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseUseCase,
     GetCourseDetailUseCase,
     GetCourseLifecycleUseCase,
+    GetCourseExamPreparationOptionsUseCase,
     UpdateCourseUseCase,
     ArchiveCourseUseCase,
     DeleteCourseUseCase,
@@ -90,6 +92,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseUseCase,
     GetCourseDetailUseCase,
     GetCourseLifecycleUseCase,
+    GetCourseExamPreparationOptionsUseCase,
     UpdateCourseUseCase,
     ArchiveCourseUseCase,
     DeleteCourseUseCase,

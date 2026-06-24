@@ -29,6 +29,7 @@ import {
   GetCourseQuestionBankReadinessUseCase,
   PrepareCourseQuestionBankUseCase,
 } from '../application/course-question-bank-readiness.use-case';
+import { GetCourseExamPreparationOptionsUseCase } from '../application/get-course-exam-preparation-options.use-case';
 import {
   ArchiveCourseSourceUseCase,
   GetCourseSourceLifecycleUseCase,
@@ -698,6 +699,69 @@ describe('CoursesController', () => {
     });
   });
 
+  it('returns exam preparation options for the current student and course', async () => {
+    const { controller, getCourseExamPreparationOptions } = createController();
+    getCourseExamPreparationOptions.execute.mockResolvedValue({
+      course: {
+        id: 'course-1',
+        title: 'Droit constitutionnel',
+        subjectId: 'subject-1',
+      },
+      readiness: {
+        canPrepare: true,
+        state: 'READY',
+        userMessage: 'Ton cours est prêt pour une préparation examen.',
+        blockers: [],
+        readySourceCount: 1,
+        readyKnowledgeUnitCount: 2,
+        availableQuestionCount: 20,
+      },
+      scopeOptions: [
+        {
+          kind: 'course',
+          id: 'course-1',
+          label: 'Tout le cours',
+          readyQuestionCount: 20,
+          readyKnowledgeUnitCount: 2,
+          canSelect: true,
+        },
+      ],
+      questionCountOptions: [10, 20],
+      defaultQuestionCount: 20,
+      supportedQuestionKinds: ['single_choice', 'multiple_choice'],
+      defaultConfig: {
+        scopeKind: 'course',
+        scopeId: 'course-1',
+        questionCount: 20,
+        complexityProfile: 'exam',
+      },
+      nextStep: {
+        kind: 'configuration_ready',
+        userMessage: 'Configuration prête. La session complète arrive ensuite.',
+      },
+    });
+
+    await expect(
+      controller.getExamPreparationOptions(currentStudent, ' course-1 '),
+    ).resolves.toMatchObject({
+      course: {
+        id: 'course-1',
+        title: 'Droit constitutionnel',
+      },
+      readiness: {
+        state: 'READY',
+      },
+      defaultConfig: {
+        complexityProfile: 'exam',
+      },
+    });
+
+    expect(getCourseExamPreparationOptions.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+  });
+
   it('defaults course quick revision questionCount when omitted', async () => {
     const { controller, startCourseQuickRevisionSession } = createController();
     startCourseQuickRevisionSession.execute.mockResolvedValue(
@@ -832,6 +896,7 @@ function createController() {
   const generateCourseRevisionSheet = { execute: jest.fn() };
   const getCourseQuestionBankReadiness = { execute: jest.fn() };
   const prepareCourseQuestionBank = { execute: jest.fn() };
+  const getCourseExamPreparationOptions = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getResumableCourseRevisionSession = { execute: jest.fn() };
   const listCourseRevisionSessionHistory = { execute: jest.fn() };
@@ -856,6 +921,7 @@ function createController() {
       generateCourseRevisionSheet as unknown as GenerateCourseRevisionSheetUseCase,
       getCourseQuestionBankReadiness as unknown as GetCourseQuestionBankReadinessUseCase,
       prepareCourseQuestionBank as unknown as PrepareCourseQuestionBankUseCase,
+      getCourseExamPreparationOptions as unknown as GetCourseExamPreparationOptionsUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getResumableCourseRevisionSession as unknown as GetResumableCourseRevisionSessionUseCase,
       listCourseRevisionSessionHistory as unknown as ListCourseRevisionSessionHistoryUseCase,
@@ -878,6 +944,7 @@ function createController() {
     generateCourseRevisionSheet,
     getCourseQuestionBankReadiness,
     prepareCourseQuestionBank,
+    getCourseExamPreparationOptions,
     startCourseQuickRevisionSession,
     getResumableCourseRevisionSession,
     listCourseRevisionSessionHistory,

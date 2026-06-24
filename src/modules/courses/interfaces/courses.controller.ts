@@ -62,6 +62,7 @@ import { ArchiveCourseUseCase } from '../application/archive-course.use-case';
 import { DeleteCourseDocumentUseCase } from '../application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
+import { GetCourseExamPreparationOptionsUseCase } from '../application/get-course-exam-preparation-options.use-case';
 import { GetCourseLifecycleUseCase } from '../application/get-course-lifecycle.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
 import { UpdateCourseUseCase } from '../application/update-course.use-case';
@@ -106,6 +107,7 @@ export class CoursesController {
     private readonly generateCourseRevisionSheetUseCase: GenerateCourseRevisionSheetUseCase,
     private readonly getCourseQuestionBankReadinessUseCase: GetCourseQuestionBankReadinessUseCase,
     private readonly prepareCourseQuestionBankUseCase: PrepareCourseQuestionBankUseCase,
+    private readonly getCourseExamPreparationOptionsUseCase: GetCourseExamPreparationOptionsUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getResumableCourseRevisionSessionUseCase: GetResumableCourseRevisionSessionUseCase,
     private readonly listCourseRevisionSessionHistoryUseCase: ListCourseRevisionSessionHistoryUseCase,
@@ -234,6 +236,19 @@ export class CoursesController {
         courseId: trimRequiredString(courseId, 'Course id is required'),
       })
       .then(toCourseProgressResponse)
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/exam-preparation/options')
+  getExamPreparationOptions(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getCourseExamPreparationOptionsUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
       .catch(normalizeCourseError);
   }
 
