@@ -305,6 +305,7 @@ function nextStepForState(state: CourseExamPreparationReadinessState) {
 
   return {
     kind: 'configuration_ready' as const,
-    userMessage: 'Configuration prête. La session complète arrive ensuite.',
+    userMessage:
+      'Configuration prête. Tu peux démarrer un entraînement examen.',
   };
 }

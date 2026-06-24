@@ -49,6 +49,7 @@ import {
   StartCourseQuickRevisionSessionUseCase,
 } from '../application/start-course-quick-revision-session.use-case';
 import { GetResumableCourseRevisionSessionUseCase } from '../../revision-sessions/application/get-resumable-course-revision-session.use-case';
+import { ListCourseExamPreparationSessionHistoryUseCase } from '../../revision-sessions/application/exam-preparation-sessions.use-cases';
 import { ListCourseRevisionSessionHistoryUseCase } from '../../revision-sessions/application/list-revision-session-history.use-case';
 import { ListCourseRichClosedExerciseHistoryUseCase } from '../../activities/application/rich-closed-questions/list-course-rich-closed-exercise-history.use-case';
 import { toPublicRevisionSheet } from '../../study-artifacts/interfaces/study-artifact-response.mapper';
@@ -65,6 +66,13 @@ import { GetCourseDetailUseCase } from '../application/get-course-detail.use-cas
 import { GetCourseExamPreparationOptionsUseCase } from '../application/get-course-exam-preparation-options.use-case';
 import { GetCourseLifecycleUseCase } from '../application/get-course-lifecycle.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
+import {
+  CourseExamPreparationInsufficientQuestionsError,
+  CourseExamPreparationQuestionCountInvalidError,
+  CourseExamPreparationScopeNotReadyError,
+  StartCourseExamPreparationSessionUseCase,
+  type CourseExamPreparationSessionScopeKind,
+} from '../application/start-course-exam-preparation-session.use-case';
 import { UpdateCourseUseCase } from '../application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CourseContainsDocumentsError } from '../domain/course.entity';
@@ -108,9 +116,11 @@ export class CoursesController {
     private readonly getCourseQuestionBankReadinessUseCase: GetCourseQuestionBankReadinessUseCase,
     private readonly prepareCourseQuestionBankUseCase: PrepareCourseQuestionBankUseCase,
     private readonly getCourseExamPreparationOptionsUseCase: GetCourseExamPreparationOptionsUseCase,
+    private readonly startCourseExamPreparationSessionUseCase: StartCourseExamPreparationSessionUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getResumableCourseRevisionSessionUseCase: GetResumableCourseRevisionSessionUseCase,
     private readonly listCourseRevisionSessionHistoryUseCase: ListCourseRevisionSessionHistoryUseCase,
+    private readonly listCourseExamPreparationSessionHistoryUseCase: ListCourseExamPreparationSessionHistoryUseCase,
     private readonly listCourseRichClosedExerciseHistoryUseCase: ListCourseRichClosedExerciseHistoryUseCase,
     private readonly getCourseProgressUseCase: GetCourseProgressUseCase,
     private readonly getSubjectProgressUseCase: GetSubjectProgressUseCase,
@@ -248,6 +258,26 @@ export class CoursesController {
       .execute({
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/exam-preparation/sessions')
+  startExamPreparationSession(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Body() body: Record<string, unknown> = {},
+  ) {
+    const validatedBody = validateExamPreparationSessionBody(body);
+
+    return this.startCourseExamPreparationSessionUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        scopeKind: validatedBody.scopeKind,
+        scopeId: validatedBody.scopeId,
+        questionCount: validatedBody.questionCount,
+        complexityProfile: validatedBody.complexityProfile,
       })
       .catch(normalizeCourseError);
   }
@@ -462,6 +492,21 @@ export class CoursesController {
     @Query('limit') limit?: string,
   ) {
     return this.listCourseRevisionSessionHistoryUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        limit: normalizeOptionalHistoryLimitQuery(limit),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/exam-preparation/history')
+  getCourseExamPreparationSessionHistory(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.listCourseExamPreparationSessionHistoryUseCase
       .execute({
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
@@ -693,6 +738,66 @@ function validateQuickRevisionBody(body: Record<string, unknown> = {}): {
   return { questionCount };
 }
 
+function validateExamPreparationSessionBody(
+  body: Record<string, unknown> = {},
+): {
+  scopeKind: CourseExamPreparationSessionScopeKind;
+  scopeId: string;
+  questionCount: number;
+  complexityProfile: 'exam';
+} {
+  const allowedFields = new Set([
+    'scopeKind',
+    'scopeId',
+    'questionCount',
+    'complexityProfile',
+  ]);
+  const unknownField = Object.keys(body).find(
+    (field) => !allowedFields.has(field),
+  );
+
+  if (unknownField) {
+    throw new BadRequestException(
+      'Course exam preparation only accepts scopeKind, scopeId, questionCount and complexityProfile',
+    );
+  }
+
+  const scopeKind = body.scopeKind;
+  if (scopeKind !== 'course' && scopeKind !== 'source') {
+    throw new BadRequestException(
+      'Course exam preparation scopeKind must be course or source',
+    );
+  }
+
+  const scopeId = trimRequiredString(
+    body.scopeId,
+    'Course exam preparation scopeId is required',
+  );
+  const questionCount = body.questionCount;
+  if (
+    typeof questionCount !== 'number' ||
+    !Number.isInteger(questionCount) ||
+    ![10, 20, 30].includes(questionCount)
+  ) {
+    throw new BadRequestException(
+      'Course exam preparation questionCount must be 10, 20 or 30',
+    );
+  }
+
+  if (body.complexityProfile !== 'exam') {
+    throw new BadRequestException(
+      'Course exam preparation complexityProfile must be exam',
+    );
+  }
+
+  return {
+    scopeKind,
+    scopeId,
+    questionCount,
+    complexityProfile: 'exam',
+  };
+}
+
 function validateQuestionBankPreparationBody(
   body: Record<string, unknown> = {},
 ): {
@@ -836,6 +941,18 @@ function normalizeCourseError(error: unknown): never {
 
   if (error instanceof CourseQuickRevisionQuestionCountInvalidError) {
     throw new BadRequestException(error.message);
+  }
+
+  if (error instanceof CourseExamPreparationQuestionCountInvalidError) {
+    throw new BadRequestException(error.message);
+  }
+
+  if (error instanceof CourseExamPreparationScopeNotReadyError) {
+    throw new ConflictException(error.message);
+  }
+
+  if (error instanceof CourseExamPreparationInsufficientQuestionsError) {
+    throw new ConflictException(error.message);
   }
 
   if (

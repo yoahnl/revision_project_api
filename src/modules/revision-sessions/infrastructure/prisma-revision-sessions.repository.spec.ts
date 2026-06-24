@@ -133,6 +133,48 @@ describe('PrismaRevisionSessionsRepository', () => {
     expect(result.session.courseId).toBe('course-1');
   });
 
+  it('persists an explicit EXAM mode for exam preparation sessions', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.create.mockResolvedValue(
+      revisionSessionRecord({ courseId: 'course-1', mode: 'EXAM' }),
+    );
+    prisma.revisionSessionAction.create.mockResolvedValue(
+      diagnosticActionRecord(),
+    );
+
+    const result = await repository.createWithInitialAction({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      mode: 'EXAM',
+      action: {
+        kind: 'DIAGNOSTIC_QUIZ',
+        status: 'READY',
+        displayOrder: 0,
+        activitySessionId: 'activity-session-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-1',
+      },
+    });
+
+    expect(prisma.revisionSession.create.mock.calls).toMatchObject([
+      [
+        {
+          data: {
+            courseId: 'course-1',
+            mode: 'EXAM',
+          },
+        },
+      ],
+    ]);
+    expect(result.session.mode).toBe('EXAM');
+  });
+
   it('persists a rich closed session action without activity session id', async () => {
     const { prisma, repository } = createRepository();
     prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
@@ -412,6 +454,7 @@ describe('PrismaRevisionSessionsRepository', () => {
       where: {
         studentId: 'student-1',
         courseId: 'course-1',
+        mode: 'QUICK',
         status: 'STARTED',
         completedAt: null,
         course: {
@@ -483,6 +526,7 @@ describe('PrismaRevisionSessionsRepository', () => {
       where: {
         studentId: 'student-1',
         courseId: 'course-1',
+        mode: 'QUICK',
         status: 'COMPLETED',
         completedAt: { not: null },
         course: {
@@ -548,6 +592,38 @@ describe('PrismaRevisionSessionsRepository', () => {
     ]);
   });
 
+  it('lists completed course exam sessions separately from quick history', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findMany.mockResolvedValue([
+      completedHistorySessionRecord({
+        id: 'exam-session-1',
+        mode: 'EXAM',
+      }),
+    ]);
+
+    const result = await repository.findCompletedCourseExamSessionsForStudent({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 5,
+    });
+
+    const findManyCalls = prisma.revisionSession.findMany.mock.calls as Array<
+      [unknown]
+    >;
+    const findManyInput = findManyCalls[0]?.[0] as {
+      where?: Record<string, unknown>;
+      take?: number;
+    };
+    expect(findManyInput.where).toMatchObject({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      mode: 'EXAM',
+      status: 'COMPLETED',
+    });
+    expect(findManyInput.take).toBe(5);
+    expect(result.items[0]?.session.mode).toBe('EXAM');
+  });
+
   it('lists global completed sessions with owner filtering and skips missing results', async () => {
     const { prisma, repository } = createRepository();
     prisma.revisionSession.findMany.mockResolvedValue([
@@ -582,6 +658,7 @@ describe('PrismaRevisionSessionsRepository', () => {
       expect.objectContaining({
         where: {
           studentId: 'student-1',
+          mode: 'QUICK',
           status: 'COMPLETED',
           completedAt: { not: null },
           course: {
@@ -987,6 +1064,61 @@ describe('PrismaRevisionSessionsRepository', () => {
     expect(prisma.revisionSessionAction.update).not.toHaveBeenCalled();
     expect(prisma.revisionSession.update).not.toHaveBeenCalled();
     expect(result.session.completedAt).toBe(existingCompletedAt);
+  });
+
+  it('completes a submitted exam diagnostic session and returns the backend result', async () => {
+    const { prisma, repository } = createRepository();
+    const completedAt = new Date('2026-06-15T10:05:00.000Z');
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      revisionSessionRecord({
+        courseId: 'course-1',
+        mode: 'EXAM',
+        actions: [diagnosticActionRecord()],
+      }),
+    );
+    prisma.activitySession.findFirst.mockResolvedValue(
+      diagnosticActivityRecord({
+        result: {
+          correctAnswers: 2,
+          totalQuestions: 3,
+          score: 0.667,
+        },
+        answers: [
+          answerRecord({ knowledgeUnitId: 'unit-a', title: 'Unit A' }),
+          answerRecord({
+            knowledgeUnitId: 'unit-a',
+            title: 'Unit A',
+            isCorrect: false,
+          }),
+          answerRecord({ knowledgeUnitId: 'unit-b', title: 'Unit B' }),
+        ],
+      }),
+    );
+
+    const result = await repository.completeExamSession({
+      studentId: 'student-1',
+      sessionId: 'revision-session-1',
+      completedAt,
+    });
+
+    expect(prisma.revisionSessionAction.update).toHaveBeenCalledWith({
+      where: { id: 'action-1' },
+      data: { status: 'COMPLETED', completedAt },
+    });
+    expect(prisma.revisionSession.update).toHaveBeenCalledWith({
+      where: { id: 'revision-session-1' },
+      data: { status: 'COMPLETED', completedAt },
+    });
+    expect(result.session.mode).toBe('EXAM');
+    expect(result.summary).toEqual({
+      correctAnswers: 2,
+      totalQuestions: 3,
+      score: 0.667,
+      durationSeconds: 300,
+    });
   });
 
   it('refuses to complete a quick session when the diagnostic activity is not submitted', async () => {

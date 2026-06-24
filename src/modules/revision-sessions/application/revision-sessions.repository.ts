@@ -63,6 +63,7 @@ export interface RevisionSessionsRepository {
     courseId?: string | null;
     documentId: string | null;
     knowledgeUnitId: string | null;
+    mode?: RevisionSessionModeValue;
     action: {
       kind: RevisionSessionActionKindValue;
       status: RevisionSessionActionStatusValue;
@@ -84,6 +85,12 @@ export interface RevisionSessionsRepository {
   }): Promise<ResumableCourseRevisionSessionDto | null>;
 
   findCompletedCourseSessionsForStudent(input: {
+    studentId: string;
+    courseId: string;
+    limit: number;
+  }): Promise<RevisionSessionHistoryResponseDto>;
+
+  findCompletedCourseExamSessionsForStudent(input: {
     studentId: string;
     courseId: string;
     limit: number;
@@ -125,6 +132,12 @@ export interface RevisionSessionsRepository {
   }): Promise<RevisionSessionResponseDto>;
 
   completeQuickSession(input: {
+    studentId: string;
+    sessionId: string;
+    completedAt: Date;
+  }): Promise<RevisionSessionResultDto>;
+
+  completeExamSession(input: {
     studentId: string;
     sessionId: string;
     completedAt: Date;

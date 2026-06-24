@@ -42,8 +42,10 @@ import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pd
 import { CoursesController } from './courses.controller';
 import { SourceDeleteBlockedError } from '../../documents/domain/source-lifecycle.entity';
 import { GetResumableCourseRevisionSessionUseCase } from '../../revision-sessions/application/get-resumable-course-revision-session.use-case';
+import { ListCourseExamPreparationSessionHistoryUseCase } from '../../revision-sessions/application/exam-preparation-sessions.use-cases';
 import { ListCourseRevisionSessionHistoryUseCase } from '../../revision-sessions/application/list-revision-session-history.use-case';
 import { ListCourseRichClosedExerciseHistoryUseCase } from '../../activities/application/rich-closed-questions/list-course-rich-closed-exercise-history.use-case';
+import { StartCourseExamPreparationSessionUseCase } from '../application/start-course-exam-preparation-session.use-case';
 
 describe('CoursesController', () => {
   it('lists courses for the current student and subject', async () => {
@@ -585,6 +587,40 @@ describe('CoursesController', () => {
     });
   });
 
+  it('returns completed exam preparation history for a course', async () => {
+    const { controller, listCourseExamPreparationSessionHistory } =
+      createController();
+    listCourseExamPreparationSessionHistory.execute.mockResolvedValue(
+      revisionSessionHistory('EXAM'),
+    );
+
+    await expect(
+      controller.getCourseExamPreparationSessionHistory(
+        currentStudent,
+        ' course-1 ',
+        '5',
+      ),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          session: {
+            id: 'revision-session-1',
+            courseId: 'course-1',
+            mode: 'EXAM',
+          },
+        },
+      ],
+    });
+
+    expect(
+      listCourseExamPreparationSessionHistory.execute,
+    ).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 5,
+    });
+  });
+
   it('rejects invalid course history limits before use case access', () => {
     const { controller, listCourseRevisionSessionHistory } = createController();
 
@@ -737,7 +773,8 @@ describe('CoursesController', () => {
       },
       nextStep: {
         kind: 'configuration_ready',
-        userMessage: 'Configuration prête. La session complète arrive ensuite.',
+        userMessage:
+          'Configuration prête. Tu peux démarrer un entraînement examen.',
       },
     });
 
@@ -759,6 +796,40 @@ describe('CoursesController', () => {
     expect(getCourseExamPreparationOptions.execute).toHaveBeenCalledWith({
       studentId: 'student-1',
       courseId: 'course-1',
+    });
+  });
+
+  it('starts an exam preparation session from a validated configuration', async () => {
+    const { controller, startCourseExamPreparationSession } =
+      createController();
+    startCourseExamPreparationSession.execute.mockResolvedValue(
+      examRevisionSessionResponse(),
+    );
+
+    await expect(
+      controller.startExamPreparationSession(currentStudent, ' course-1 ', {
+        scopeKind: 'course',
+        scopeId: 'course-1',
+        questionCount: 20,
+        complexityProfile: 'exam',
+      }),
+    ).resolves.toMatchObject({
+      session: {
+        id: 'exam-session-1',
+        mode: 'EXAM',
+      },
+      currentAction: {
+        kind: 'DIAGNOSTIC_QUIZ',
+      },
+    });
+
+    expect(startCourseExamPreparationSession.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      scopeKind: 'course',
+      scopeId: 'course-1',
+      questionCount: 20,
+      complexityProfile: 'exam',
     });
   });
 
@@ -897,9 +968,11 @@ function createController() {
   const getCourseQuestionBankReadiness = { execute: jest.fn() };
   const prepareCourseQuestionBank = { execute: jest.fn() };
   const getCourseExamPreparationOptions = { execute: jest.fn() };
+  const startCourseExamPreparationSession = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getResumableCourseRevisionSession = { execute: jest.fn() };
   const listCourseRevisionSessionHistory = { execute: jest.fn() };
+  const listCourseExamPreparationSessionHistory = { execute: jest.fn() };
   const listCourseRichClosedExerciseHistory = { execute: jest.fn() };
   const getCourseProgress = { execute: jest.fn() };
   const getSubjectProgress = { execute: jest.fn() };
@@ -922,9 +995,11 @@ function createController() {
       getCourseQuestionBankReadiness as unknown as GetCourseQuestionBankReadinessUseCase,
       prepareCourseQuestionBank as unknown as PrepareCourseQuestionBankUseCase,
       getCourseExamPreparationOptions as unknown as GetCourseExamPreparationOptionsUseCase,
+      startCourseExamPreparationSession as unknown as StartCourseExamPreparationSessionUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getResumableCourseRevisionSession as unknown as GetResumableCourseRevisionSessionUseCase,
       listCourseRevisionSessionHistory as unknown as ListCourseRevisionSessionHistoryUseCase,
+      listCourseExamPreparationSessionHistory as unknown as ListCourseExamPreparationSessionHistoryUseCase,
       listCourseRichClosedExerciseHistory as unknown as ListCourseRichClosedExerciseHistoryUseCase,
       getCourseProgress as unknown as GetCourseProgressUseCase,
       getSubjectProgress as unknown as GetSubjectProgressUseCase,
@@ -945,9 +1020,11 @@ function createController() {
     getCourseQuestionBankReadiness,
     prepareCourseQuestionBank,
     getCourseExamPreparationOptions,
+    startCourseExamPreparationSession,
     startCourseQuickRevisionSession,
     getResumableCourseRevisionSession,
     listCourseRevisionSessionHistory,
+    listCourseExamPreparationSessionHistory,
     listCourseRichClosedExerciseHistory,
     getCourseProgress,
     getSubjectProgress,
@@ -1257,7 +1334,20 @@ function revisionSessionResponse() {
   };
 }
 
-function revisionSessionHistory() {
+function examRevisionSessionResponse() {
+  const response = revisionSessionResponse();
+
+  return {
+    ...response,
+    session: {
+      ...response.session,
+      id: 'exam-session-1',
+      mode: 'EXAM',
+    },
+  };
+}
+
+function revisionSessionHistory(mode = 'QUICK') {
   return {
     items: [
       {
@@ -1265,7 +1355,7 @@ function revisionSessionHistory() {
           id: 'revision-session-1',
           subjectId: 'subject-1',
           courseId: 'course-1',
-          mode: 'QUICK',
+          mode,
           status: 'COMPLETED',
           createdAt: new Date('2026-06-15T10:00:00.000Z'),
           completedAt: new Date('2026-06-15T10:04:12.000Z'),

@@ -5,6 +5,7 @@ import { StartOpenQuestionActivityUseCase } from '../../activities/application/s
 import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionPayload,
+  RevisionSessionModeValue,
   RevisionSessionPreferredAction,
   RevisionSessionRichClosedExercisePayload,
   RevisionSessionResponseDto,
@@ -32,6 +33,7 @@ export class StartRevisionSessionUseCase {
     preferredAction?: RevisionSessionPreferredAction;
     questionCount?: number;
     diagnosticQuizActivity?: DiagnosticQuizActivity;
+    mode?: RevisionSessionModeValue;
   }): Promise<RevisionSessionResponseDto> {
     const actionKind = resolveInitialActionKind(input);
 
@@ -112,6 +114,7 @@ export class StartRevisionSessionUseCase {
       studentId: string;
       subjectId: string;
       courseId?: string | null;
+      mode?: RevisionSessionModeValue;
     };
     context: {
       subjectId: string;
@@ -134,6 +137,7 @@ export class StartRevisionSessionUseCase {
           : {}),
         documentId: input.documentId,
         knowledgeUnitId: input.knowledgeUnitId,
+        mode: input.input.mode,
         action: {
           kind: input.actionKind,
           status: 'READY',

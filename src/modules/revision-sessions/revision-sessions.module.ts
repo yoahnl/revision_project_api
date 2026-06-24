@@ -5,6 +5,12 @@ import { AiModule } from '../ai/ai.module';
 import { PrismaModule } from '../../shared/infrastructure/prisma/prisma.module';
 import { CompleteQuickRevisionSessionUseCase } from './application/complete-quick-revision-session.use-case';
 import { DeleteRevisionSessionDraftAnswerUseCase } from './application/delete-revision-session-draft-answer.use-case';
+import {
+  GetExamPreparationSessionResultUseCase,
+  GetExamPreparationSessionUseCase,
+  ListCourseExamPreparationSessionHistoryUseCase,
+  SubmitExamPreparationSessionUseCase,
+} from './application/exam-preparation-sessions.use-cases';
 import { FlagRevisionSessionQuestionUseCase } from './application/flag-revision-session-question.use-case';
 import { GetResumableCourseRevisionSessionUseCase } from './application/get-resumable-course-revision-session.use-case';
 import { GetRevisionSessionUseCase } from './application/get-revision-session.use-case';
@@ -20,11 +26,12 @@ import { SaveRevisionSessionDraftAnswerUseCase } from './application/save-revisi
 import { StartRevisionSessionUseCase } from './application/start-revision-session.use-case';
 import { GenkitRevisionCoachNextActionGenerator } from './infrastructure/genkit-revision-coach-next-action.generator';
 import { PrismaRevisionSessionsRepository } from './infrastructure/prisma-revision-sessions.repository';
+import { ExamPreparationSessionsController } from './interfaces/exam-preparation-sessions.controller';
 import { RevisionSessionsController } from './interfaces/revision-sessions.controller';
 
 @Module({
   imports: [ActivitiesModule, AiModule, AuthModule, PrismaModule],
-  controllers: [RevisionSessionsController],
+  controllers: [RevisionSessionsController, ExamPreparationSessionsController],
   providers: [
     StartRevisionSessionUseCase,
     GetRevisionSessionUseCase,
@@ -32,6 +39,10 @@ import { RevisionSessionsController } from './interfaces/revision-sessions.contr
     SaveRevisionSessionDraftAnswerUseCase,
     DeleteRevisionSessionDraftAnswerUseCase,
     CompleteQuickRevisionSessionUseCase,
+    GetExamPreparationSessionUseCase,
+    SubmitExamPreparationSessionUseCase,
+    GetExamPreparationSessionResultUseCase,
+    ListCourseExamPreparationSessionHistoryUseCase,
     GetRevisionSessionResultUseCase,
     ListCourseRevisionSessionHistoryUseCase,
     ListRevisionSessionHistoryUseCase,
@@ -50,6 +61,7 @@ import { RevisionSessionsController } from './interfaces/revision-sessions.contr
     StartRevisionSessionUseCase,
     GetResumableCourseRevisionSessionUseCase,
     ListCourseRevisionSessionHistoryUseCase,
+    ListCourseExamPreparationSessionHistoryUseCase,
   ],
 })
 export class RevisionSessionsModule {}

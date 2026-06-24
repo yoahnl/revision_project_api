@@ -35,6 +35,7 @@ import { GetCourseExamPreparationOptionsUseCase } from './application/get-course
 import { GetCourseUseCase } from './application/get-course.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from './application/list-subject-courses-with-stats.use-case';
 import { ListSubjectCoursesUseCase } from './application/list-subject-courses.use-case';
+import { StartCourseExamPreparationSessionUseCase } from './application/start-course-exam-preparation-session.use-case';
 import { StartCourseQuickRevisionSessionUseCase } from './application/start-course-quick-revision-session.use-case';
 import { UpdateCourseUseCase } from './application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from './application/upload-course-pdf-for-course.use-case';
@@ -73,6 +74,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GenerateCourseRevisionSheetUseCase,
     GetCourseQuestionBankReadinessUseCase,
     PrepareCourseQuestionBankUseCase,
+    StartCourseExamPreparationSessionUseCase,
     StartCourseQuickRevisionSessionUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,
@@ -105,6 +107,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GenerateCourseRevisionSheetUseCase,
     GetCourseQuestionBankReadinessUseCase,
     PrepareCourseQuestionBankUseCase,
+    StartCourseExamPreparationSessionUseCase,
     StartCourseQuickRevisionSessionUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,

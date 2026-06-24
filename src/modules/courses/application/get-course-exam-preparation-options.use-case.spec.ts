@@ -98,7 +98,8 @@ describe('GetCourseExamPreparationOptionsUseCase', () => {
       },
       nextStep: {
         kind: 'configuration_ready',
-        userMessage: 'Configuration prête. La session complète arrive ensuite.',
+        userMessage:
+          'Configuration prête. Tu peux démarrer un entraînement examen.',
       },
     });
     expect(JSON.stringify(options)).not.toMatch(/correct|correction|answer/i);

@@ -265,6 +265,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     courseId?: string | null;
     documentId: string | null;
     knowledgeUnitId: string | null;
+    mode?: RevisionSessionModeValue;
     action: {
       kind: RevisionSessionActionKindValue;
       status: RevisionSessionActionStatusValue;
@@ -283,7 +284,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
           documentId: input.documentId,
           knowledgeUnitId: input.knowledgeUnitId,
           status: RevisionSessionStatus.STARTED,
-          mode: RevisionSessionMode.QUICK,
+          mode: toPrismaSessionMode(input.mode ?? 'QUICK'),
         },
       });
       const action = await tx.revisionSessionAction.create({
@@ -402,6 +403,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       where: {
         studentId: input.studentId,
         courseId: input.courseId,
+        mode: RevisionSessionMode.QUICK,
         status: RevisionSessionStatus.STARTED,
         completedAt: null,
         course: {
@@ -488,6 +490,34 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       where: {
         studentId: input.studentId,
         courseId: input.courseId,
+        mode: RevisionSessionMode.QUICK,
+        status: RevisionSessionStatus.COMPLETED,
+        completedAt: { not: null },
+        course: {
+          archivedAt: null,
+          subject: {
+            archivedAt: null,
+          },
+        },
+      },
+      orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
+      take: input.limit,
+      select: revisionSessionHistorySelect(),
+    })) as unknown as RevisionSessionHistoryRecord[];
+
+    return toRevisionSessionHistoryResponse(sessions);
+  }
+
+  async findCompletedCourseExamSessionsForStudent(input: {
+    studentId: string;
+    courseId: string;
+    limit: number;
+  }): Promise<RevisionSessionHistoryResponseDto> {
+    const sessions = (await this.prisma.revisionSession.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        mode: RevisionSessionMode.EXAM,
         status: RevisionSessionStatus.COMPLETED,
         completedAt: { not: null },
         course: {
@@ -512,6 +542,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     const sessions = (await this.prisma.revisionSession.findMany({
       where: {
         studentId: input.studentId,
+        mode: RevisionSessionMode.QUICK,
         status: RevisionSessionStatus.COMPLETED,
         completedAt: { not: null },
         course: {
@@ -605,6 +636,25 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     sessionId: string;
     completedAt: Date;
   }): Promise<RevisionSessionResultDto> {
+    return this.completeDiagnosticSession(input, RevisionSessionMode.QUICK);
+  }
+
+  async completeExamSession(input: {
+    studentId: string;
+    sessionId: string;
+    completedAt: Date;
+  }): Promise<RevisionSessionResultDto> {
+    return this.completeDiagnosticSession(input, RevisionSessionMode.EXAM);
+  }
+
+  private async completeDiagnosticSession(
+    input: {
+      studentId: string;
+      sessionId: string;
+      completedAt: Date;
+    },
+    mode: RevisionSessionMode,
+  ): Promise<RevisionSessionResultDto> {
     return this.prisma.$transaction(async (tx) => {
       const session = (await tx.revisionSession.findFirst({
         where: {
@@ -622,7 +672,7 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
         throw new Error('Revision session not found');
       }
 
-      if (session.mode !== RevisionSessionMode.QUICK) {
+      if (session.mode !== mode) {
         throw new Error('Revision session completion unsupported');
       }
 
@@ -1712,6 +1762,18 @@ function toPrismaActionKind(kind: RevisionSessionActionKindValue) {
   }
 
   return RevisionSessionActionKind.DIAGNOSTIC_QUIZ;
+}
+
+function toPrismaSessionMode(mode: RevisionSessionModeValue) {
+  if (mode === 'EXAM') {
+    return RevisionSessionMode.EXAM;
+  }
+
+  if (mode === 'DEEP') {
+    return RevisionSessionMode.DEEP;
+  }
+
+  return RevisionSessionMode.QUICK;
 }
 
 function toPrismaActionStatus(status: RevisionSessionActionStatusValue) {

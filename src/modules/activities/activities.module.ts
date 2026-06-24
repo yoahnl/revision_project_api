@@ -72,6 +72,7 @@ import { ActivitiesController } from './interfaces/activities.controller';
     StartNextActivityUseCase,
     StartOpenQuestionActivityUseCase,
     ListCourseRichClosedExerciseHistoryUseCase,
+    SubmitActivityResultUseCase,
     QuestionBankService,
     QUESTION_BANK_REPOSITORY,
   ],
