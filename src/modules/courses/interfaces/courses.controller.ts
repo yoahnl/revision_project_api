@@ -50,6 +50,7 @@ import {
 } from '../application/start-course-quick-revision-session.use-case';
 import { GetResumableCourseRevisionSessionUseCase } from '../../revision-sessions/application/get-resumable-course-revision-session.use-case';
 import { ListCourseRevisionSessionHistoryUseCase } from '../../revision-sessions/application/list-revision-session-history.use-case';
+import { ListCourseRichClosedExerciseHistoryUseCase } from '../../activities/application/rich-closed-questions/list-course-rich-closed-exercise-history.use-case';
 import { toPublicRevisionSheet } from '../../study-artifacts/interfaces/study-artifact-response.mapper';
 import {
   MAX_DOCUMENT_BYTES,
@@ -108,6 +109,7 @@ export class CoursesController {
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getResumableCourseRevisionSessionUseCase: GetResumableCourseRevisionSessionUseCase,
     private readonly listCourseRevisionSessionHistoryUseCase: ListCourseRevisionSessionHistoryUseCase,
+    private readonly listCourseRichClosedExerciseHistoryUseCase: ListCourseRichClosedExerciseHistoryUseCase,
     private readonly getCourseProgressUseCase: GetCourseProgressUseCase,
     private readonly getSubjectProgressUseCase: GetSubjectProgressUseCase,
     private readonly getCourseSourceLifecycleUseCase: GetCourseSourceLifecycleUseCase,
@@ -449,6 +451,21 @@ export class CoursesController {
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
         limit: normalizeOptionalHistoryLimitQuery(limit),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/rich-closed/history')
+  getCourseRichClosedHistory(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.listCourseRichClosedExerciseHistoryUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        limit: normalizeOptionalHistoryLimitQuery(limit) ?? 5,
       })
       .catch(normalizeCourseError);
   }

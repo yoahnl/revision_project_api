@@ -11,6 +11,7 @@ import { OPEN_QUESTION_GENERATOR } from './application/open-question-generator';
 import { QUESTION_BANK_REPOSITORY } from './application/question-bank.repository';
 import { GetRichClosedExerciseResultUseCase } from './application/rich-closed-questions/get-rich-closed-exercise-result.use-case';
 import { GetRichClosedExerciseUseCase } from './application/rich-closed-questions/get-rich-closed-exercise.use-case';
+import { ListCourseRichClosedExerciseHistoryUseCase } from './application/rich-closed-questions/list-course-rich-closed-exercise-history.use-case';
 import { RICH_CLOSED_QUESTION_GENERATOR } from './application/rich-closed-questions/rich-closed-question-generator';
 import { StartRichClosedExerciseUseCase } from './application/rich-closed-questions/start-rich-closed-exercise.use-case';
 import { SubmitRichClosedExerciseUseCase } from './application/rich-closed-questions/submit-rich-closed-exercise.use-case';
@@ -38,6 +39,7 @@ import { ActivitiesController } from './interfaces/activities.controller';
     GetRichClosedExerciseUseCase,
     SubmitRichClosedExerciseUseCase,
     GetRichClosedExerciseResultUseCase,
+    ListCourseRichClosedExerciseHistoryUseCase,
     SubmitActivityResultUseCase,
     SubmitOpenAnswerUseCase,
     QuestionBankService,
@@ -69,6 +71,7 @@ import { ActivitiesController } from './interfaces/activities.controller';
   exports: [
     StartNextActivityUseCase,
     StartOpenQuestionActivityUseCase,
+    ListCourseRichClosedExerciseHistoryUseCase,
     QuestionBankService,
     QUESTION_BANK_REPOSITORY,
   ],

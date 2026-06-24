@@ -79,11 +79,7 @@ describe('rich closed exercise use cases', () => {
       sessionId: 'rich-session-1',
       status: 'COMPLETED',
       exercise: richClosedExerciseFixture(),
-      result: scoreRichClosedExerciseSubmission({
-        sessionId: 'rich-session-1',
-        exercise: richClosedExerciseFixture(),
-        answers: correctAnswers(),
-      }),
+      result: richClosedResult(),
     });
 
     await expect(
@@ -107,6 +103,10 @@ describe('rich closed exercise use cases', () => {
     ).resolves.toMatchObject({
       sessionId: 'rich-session-1',
       status: 'completed',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      durationSeconds: 420,
     });
 
     repository.getRichClosedExerciseResultForStudent.mockRejectedValueOnce(
@@ -123,11 +123,7 @@ describe('rich closed exercise use cases', () => {
 
 function createActivitiesRepository(): jest.Mocked<ActivitiesRepository> {
   const exercise = richClosedExerciseFixture();
-  const result = scoreRichClosedExerciseSubmission({
-    sessionId: 'rich-session-1',
-    exercise,
-    answers: correctAnswers(),
-  });
+  const result = richClosedResult();
 
   return {
     findDiagnosticQuizGenerationContext: jest.fn(),
@@ -158,6 +154,23 @@ function createActivitiesRepository(): jest.Mocked<ActivitiesRepository> {
     }),
     saveRichClosedExerciseResult: jest.fn().mockResolvedValue(result),
     getRichClosedExerciseResultForStudent: jest.fn().mockResolvedValue(result),
+    listCourseRichClosedExerciseHistoryForStudent: jest.fn(),
+  };
+}
+
+function richClosedResult() {
+  return {
+    ...scoreRichClosedExerciseSubmission({
+      sessionId: 'rich-session-1',
+      exercise: richClosedExerciseFixture(),
+      answers: correctAnswers(),
+    }),
+    subjectId: 'subject-1',
+    documentId: 'document-1',
+    knowledgeUnitId: 'unit-1',
+    createdAt: new Date('2026-06-18T10:00:00.000Z'),
+    completedAt: new Date('2026-06-18T10:07:00.000Z'),
+    durationSeconds: 420,
   };
 }
 

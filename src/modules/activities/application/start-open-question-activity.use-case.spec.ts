@@ -170,6 +170,7 @@ function createActivitiesRepository(): jest.Mocked<ActivitiesRepository> {
     createOpenQuestionActivity: jest.fn(),
     findOpenAnswerEvaluationContext: jest.fn(),
     saveOpenAnswerEvaluation: jest.fn(),
+    listCourseRichClosedExerciseHistoryForStudent: jest.fn(),
   };
 }
 

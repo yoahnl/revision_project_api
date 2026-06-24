@@ -45,6 +45,8 @@ import { toRichClosedPublicExerciseEnvelope } from '../application/rich-closed-q
 import type {
   RichClosedAnswer,
   RichClosedExercise,
+  RichClosedExerciseHistoryItem,
+  RichClosedExerciseHistoryResponse,
   RichClosedExerciseResult,
   RichClosedPublicExerciseEnvelope,
 } from '../application/rich-closed-questions/rich-closed-question.types';
@@ -94,12 +96,15 @@ type QuestionVisualRecord = {
 
 type ActivitySessionRecord = {
   id: string;
+  studentId?: string;
   subjectId: string;
   knowledgeUnitId: string;
   type: ActivityType;
   status: ActivityStatus;
   version?: number;
   documentId?: string | null;
+  createdAt?: Date;
+  completedAt?: Date | null;
   questions: QuestionRecord[];
   result?: object | null;
 };
@@ -187,6 +192,32 @@ type RichClosedExerciseSessionRecord = ActivitySessionRecord & {
 
 type RichClosedPersistedSessionRecord = RichClosedExerciseSessionRecord & {
   richClosedExercisePayload: RichClosedExercisePayloadRecord;
+};
+
+type RichClosedHistorySessionRecord = {
+  id: string;
+  subjectId: string;
+  knowledgeUnitId: string;
+  type: ActivityType;
+  status: ActivityStatus;
+  documentId: string | null;
+  createdAt: Date;
+  completedAt: Date | null;
+  richClosedExercisePayload: RichClosedExercisePayloadRecord;
+  richClosedExerciseResult: RichClosedExerciseResultRecord;
+  knowledgeUnit: {
+    id: string;
+    title: string;
+    documentId: string | null;
+  };
+};
+
+type RichClosedCourseRecord = {
+  id: string;
+  title: string;
+  documents: Array<{
+    id: string;
+  }>;
 };
 
 type DocumentChunkRecord = {
@@ -658,7 +689,7 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
   }): Promise<RichClosedExerciseInternalEnvelope> {
     const session = await this.findRichClosedExerciseSession(input);
     const result = session.richClosedExerciseResult
-      ? toRichClosedExerciseResult(session.id, session.richClosedExerciseResult)
+      ? toRichClosedExerciseResult(session, session.richClosedExerciseResult)
       : null;
 
     return {
@@ -696,6 +727,8 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
         throw new Error(RICH_CLOSED_SESSION_ALREADY_COMPLETED);
       }
 
+      const completedAt = new Date();
+
       await tx.richClosedExerciseResult.create({
         data: {
           activitySessionId: session.id,
@@ -713,11 +746,15 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
         },
         data: {
           status: ActivityStatus.COMPLETED,
-          completedAt: new Date(),
+          completedAt,
         },
       });
 
-      return input.result;
+      return enrichRichClosedExerciseResult({
+        session,
+        result: input.result,
+        completedAt,
+      });
     });
   }
 
@@ -732,9 +769,89 @@ export class PrismaActivitiesRepository implements ActivitiesRepository {
     }
 
     return toRichClosedExerciseResult(
-      session.id,
+      session,
       session.richClosedExerciseResult,
     );
+  }
+
+  async listCourseRichClosedExerciseHistoryForStudent(input: {
+    studentId: string;
+    courseId: string;
+    limit: number;
+  }): Promise<RichClosedExerciseHistoryResponse> {
+    const course = (await this.prisma.course.findFirst({
+      where: {
+        id: input.courseId,
+        studentId: input.studentId,
+        archivedAt: null,
+        subject: {
+          archivedAt: null,
+        },
+      },
+      include: {
+        documents: {
+          where: {
+            archivedAt: null,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    })) as RichClosedCourseRecord | null;
+
+    if (!course) {
+      throw new Error('Course not found');
+    }
+
+    const documentIds = course.documents.map((document) => document.id);
+    if (documentIds.length === 0) {
+      return { items: [] };
+    }
+
+    const sessions = (await this.prisma.activitySession.findMany({
+      where: {
+        studentId: input.studentId,
+        type: ActivityType.RICH_CLOSED_EXERCISE,
+        status: ActivityStatus.COMPLETED,
+        richClosedExerciseResult: {
+          isNot: null,
+        },
+        OR: [
+          {
+            documentId: {
+              in: documentIds,
+            },
+          },
+          {
+            knowledgeUnit: {
+              documentId: {
+                in: documentIds,
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        richClosedExercisePayload: true,
+        richClosedExerciseResult: true,
+        knowledgeUnit: {
+          select: {
+            id: true,
+            title: true,
+            documentId: true,
+          },
+        },
+      },
+      orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
+      take: input.limit,
+    })) as unknown as RichClosedHistorySessionRecord[];
+
+    return {
+      items: sessions.map((session) =>
+        toRichClosedExerciseHistoryItem(session, course),
+      ),
+    };
   }
 
   async submitResult(input: {
@@ -1093,22 +1210,91 @@ function toRichClosedExercise(
 }
 
 function toRichClosedExerciseResult(
-  sessionId: string,
+  session: RichClosedPersistedSessionRecord,
   result: RichClosedExerciseResultRecord,
 ): RichClosedExerciseResult {
   if (!Array.isArray(result.correctionPayload)) {
     throw new Error(RICH_CLOSED_START_INVALID_INPUT);
   }
 
+  return enrichRichClosedExerciseResult({
+    session,
+    result: {
+      sessionId: session.id,
+      type: 'rich_closed_exercise',
+      status: 'completed',
+      correctAnswers: result.correctAnswers,
+      totalQuestions: result.totalQuestions,
+      score: result.score,
+      items: result.correctionPayload as RichClosedExerciseResult['items'],
+    },
+    completedAt: session.completedAt ?? result.createdAt,
+  });
+}
+
+function enrichRichClosedExerciseResult(input: {
+  session: RichClosedExerciseSessionRecord;
+  result: RichClosedExerciseResult;
+  completedAt: Date;
+}): RichClosedExerciseResult {
+  const createdAt = input.session.createdAt ?? input.completedAt;
+
   return {
-    sessionId,
+    ...input.result,
+    sessionId: input.session.id,
     type: 'rich_closed_exercise',
     status: 'completed',
-    correctAnswers: result.correctAnswers,
-    totalQuestions: result.totalQuestions,
-    score: result.score,
-    items: result.correctionPayload as RichClosedExerciseResult['items'],
+    subjectId: input.session.subjectId,
+    documentId: input.session.documentId ?? null,
+    knowledgeUnitId: input.session.knowledgeUnitId,
+    createdAt,
+    completedAt: input.completedAt,
+    durationSeconds: secondsBetween(createdAt, input.completedAt),
   };
+}
+
+function toRichClosedExerciseHistoryItem(
+  session: RichClosedHistorySessionRecord,
+  course: RichClosedCourseRecord,
+): RichClosedExerciseHistoryItem {
+  const completedAt =
+    session.completedAt ?? session.richClosedExerciseResult.createdAt;
+
+  return {
+    id: session.id,
+    sessionId: session.id,
+    type: 'rich_closed_exercise',
+    status: 'completed',
+    title: session.richClosedExercisePayload.title,
+    subjectId: session.subjectId,
+    documentId:
+      session.documentId ??
+      session.knowledgeUnit.documentId ??
+      session.richClosedExercisePayload.documentId,
+    knowledgeUnit: {
+      id: session.knowledgeUnit.id,
+      title: session.knowledgeUnit.title,
+    },
+    course: {
+      id: course.id,
+      title: course.title,
+    },
+    correctAnswers: session.richClosedExerciseResult.correctAnswers,
+    totalQuestions: session.richClosedExerciseResult.totalQuestions,
+    score: session.richClosedExerciseResult.score,
+    completedAt,
+    resultPath: `/activities/rich-closed/${session.id}/result`,
+  };
+}
+
+function secondsBetween(startedAt: Date, completedAt: Date): number | null {
+  const durationMs = completedAt.getTime() - startedAt.getTime();
+
+  if (!Number.isFinite(durationMs) || durationMs < 0) {
+    return null;
+  }
+
+  return Math.round(durationMs / 1000);
 }
 
 function collectRichClosedSourceChunkIds(

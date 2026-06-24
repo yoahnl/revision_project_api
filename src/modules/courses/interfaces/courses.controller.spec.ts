@@ -42,6 +42,7 @@ import { CoursesController } from './courses.controller';
 import { SourceDeleteBlockedError } from '../../documents/domain/source-lifecycle.entity';
 import { GetResumableCourseRevisionSessionUseCase } from '../../revision-sessions/application/get-resumable-course-revision-session.use-case';
 import { ListCourseRevisionSessionHistoryUseCase } from '../../revision-sessions/application/list-revision-session-history.use-case';
+import { ListCourseRichClosedExerciseHistoryUseCase } from '../../activities/application/rich-closed-questions/list-course-rich-closed-exercise-history.use-case';
 
 describe('CoursesController', () => {
   it('lists courses for the current student and subject', async () => {
@@ -604,6 +605,57 @@ describe('CoursesController', () => {
     expect(listCourseRevisionSessionHistory.execute).not.toHaveBeenCalled();
   });
 
+  it('returns completed rich closed history for a course', async () => {
+    const { controller, listCourseRichClosedExerciseHistory } =
+      createController();
+    listCourseRichClosedExerciseHistory.execute.mockResolvedValue({
+      items: [
+        {
+          id: 'rich-session-1',
+          sessionId: 'rich-session-1',
+          type: 'rich_closed_exercise',
+          status: 'completed',
+          title: 'Questions riches',
+          subjectId: 'subject-1',
+          documentId: 'document-1',
+          knowledgeUnit: {
+            id: 'unit-1',
+            title: 'Séparation des pouvoirs',
+          },
+          course: {
+            id: 'course-1',
+            title: 'Droit constitutionnel',
+          },
+          correctAnswers: 5,
+          totalQuestions: 6,
+          score: 0.833,
+          completedAt: new Date('2026-06-18T10:07:00.000Z'),
+          resultPath: '/activities/rich-closed/rich-session-1/result',
+        },
+      ],
+    });
+
+    await expect(
+      controller.getCourseRichClosedHistory(currentStudent, ' course-1 ', '5'),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          sessionId: 'rich-session-1',
+          type: 'rich_closed_exercise',
+          correctAnswers: 5,
+          totalQuestions: 6,
+          resultPath: '/activities/rich-closed/rich-session-1/result',
+        },
+      ],
+    });
+
+    expect(listCourseRichClosedExerciseHistory.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 5,
+    });
+  });
+
   it('returns course question bank readiness and starts async preparation', async () => {
     const {
       controller,
@@ -783,6 +835,7 @@ function createController() {
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getResumableCourseRevisionSession = { execute: jest.fn() };
   const listCourseRevisionSessionHistory = { execute: jest.fn() };
+  const listCourseRichClosedExerciseHistory = { execute: jest.fn() };
   const getCourseProgress = { execute: jest.fn() };
   const getSubjectProgress = { execute: jest.fn() };
   const getCourseSourceLifecycle = { execute: jest.fn() };
@@ -806,6 +859,7 @@ function createController() {
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getResumableCourseRevisionSession as unknown as GetResumableCourseRevisionSessionUseCase,
       listCourseRevisionSessionHistory as unknown as ListCourseRevisionSessionHistoryUseCase,
+      listCourseRichClosedExerciseHistory as unknown as ListCourseRichClosedExerciseHistoryUseCase,
       getCourseProgress as unknown as GetCourseProgressUseCase,
       getSubjectProgress as unknown as GetSubjectProgressUseCase,
       getCourseSourceLifecycle as unknown as GetCourseSourceLifecycleUseCase,
@@ -827,6 +881,7 @@ function createController() {
     startCourseQuickRevisionSession,
     getResumableCourseRevisionSession,
     listCourseRevisionSessionHistory,
+    listCourseRichClosedExerciseHistory,
     getCourseProgress,
     getSubjectProgress,
     getCourseSourceLifecycle,

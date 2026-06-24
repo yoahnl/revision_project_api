@@ -590,10 +590,43 @@ export interface RichClosedExerciseResult {
   sessionId: string;
   type: 'rich_closed_exercise';
   status: 'completed';
+  subjectId?: string;
+  documentId?: string | null;
+  knowledgeUnitId?: string;
+  createdAt?: Date;
+  completedAt?: Date;
+  durationSeconds?: number | null;
   correctAnswers: number;
   totalQuestions: number;
   score: number;
   items: RichClosedCorrectionItem[];
+}
+
+export interface RichClosedExerciseHistoryResponse {
+  items: RichClosedExerciseHistoryItem[];
+}
+
+export interface RichClosedExerciseHistoryItem {
+  id: string;
+  sessionId: string;
+  type: 'rich_closed_exercise';
+  status: 'completed';
+  title: string;
+  subjectId: string;
+  documentId: string | null;
+  knowledgeUnit: {
+    id: string;
+    title: string;
+  };
+  course: {
+    id: string;
+    title: string;
+  };
+  correctAnswers: number;
+  totalQuestions: number;
+  score: number;
+  completedAt: Date;
+  resultPath: string;
 }
 
 export interface RichClosedExercise {

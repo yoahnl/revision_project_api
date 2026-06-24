@@ -17,6 +17,7 @@ import type {
 import type {
   RichClosedAnswer,
   RichClosedExercise,
+  RichClosedExerciseHistoryResponse,
   RichClosedExerciseResult,
   RichClosedPublicExerciseEnvelope,
 } from './rich-closed-questions/rich-closed-question.types';
@@ -282,6 +283,12 @@ export interface ActivitiesRepository {
     studentId: string;
     sessionId: string;
   }): Promise<RichClosedExerciseResult>;
+
+  listCourseRichClosedExerciseHistoryForStudent(input: {
+    studentId: string;
+    courseId: string;
+    limit: number;
+  }): Promise<RichClosedExerciseHistoryResponse>;
 
   submitResult(input: {
     studentId: string;

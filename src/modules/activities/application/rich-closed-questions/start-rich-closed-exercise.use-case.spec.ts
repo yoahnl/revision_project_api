@@ -276,6 +276,7 @@ function createActivitiesRepository(): jest.Mocked<ActivitiesRepository> {
     getInternalRichClosedExerciseForStudent: jest.fn(),
     saveRichClosedExerciseResult: jest.fn(),
     getRichClosedExerciseResultForStudent: jest.fn(),
+    listCourseRichClosedExerciseHistoryForStudent: jest.fn(),
   };
 }
 

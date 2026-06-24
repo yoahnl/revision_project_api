@@ -21,6 +21,8 @@ type ActivitySessionRecord = {
   generationSchemaVersion: string | null;
   generationInputSize: number | null;
   status: 'STARTED' | 'SUBMITTED' | 'COMPLETED';
+  type: 'DIAGNOSTIC_QUIZ' | 'OPEN_QUESTION' | 'RICH_CLOSED_EXERCISE';
+  createdAt: Date;
   completedAt: Date | null;
 };
 
@@ -239,6 +241,26 @@ type RichClosedExerciseSessionRecord = ActivitySessionRecord & {
   richClosedExerciseResult: RichClosedExerciseResultRecord | null;
 };
 
+type RichClosedExerciseHistorySessionRecord =
+  RichClosedExerciseSessionRecord & {
+    richClosedExercisePayload: RichClosedExercisePayloadRecord;
+    richClosedExerciseResult: RichClosedExerciseResultRecord;
+    knowledgeUnit: {
+      id: string;
+      title: string;
+      documentId: string | null;
+    };
+  };
+
+type CourseRecord = {
+  id: string;
+  subjectId: string;
+  title: string;
+  documents: Array<{
+    id: string;
+  }>;
+};
+
 type KnowledgeUnitRecord = {
   id: string;
   subjectId: string;
@@ -257,6 +279,9 @@ type SessionWithQuestions = ActivitySessionRecord & {
 };
 
 type PrismaActivitiesMock = {
+  course: {
+    findFirst: jest.Mock;
+  };
   knowledgeUnit: {
     findFirst: jest.Mock;
   };
@@ -266,6 +291,7 @@ type PrismaActivitiesMock = {
   activitySession: {
     create: jest.Mock<ActivitySessionRecord, [ActivitySessionCreatePayload]>;
     findFirst: jest.Mock;
+    findMany: jest.Mock;
     update: jest.Mock<ActivitySessionRecord, [ActivitySessionUpdatePayload]>;
   };
   question: {
@@ -318,6 +344,9 @@ describe('PrismaActivitiesRepository', () => {
 
   const createRepository = () => {
     const prisma: PrismaActivitiesMock = {
+      course: {
+        findFirst: jest.fn(),
+      },
       knowledgeUnit: {
         findFirst: jest.fn(),
       },
@@ -330,6 +359,7 @@ describe('PrismaActivitiesRepository', () => {
           [ActivitySessionCreatePayload]
         >(),
         findFirst: jest.fn(),
+        findMany: jest.fn(),
         update: jest.fn<
           ActivitySessionRecord,
           [ActivitySessionUpdatePayload]
@@ -403,6 +433,8 @@ describe('PrismaActivitiesRepository', () => {
     generationSchemaVersion: null,
     generationInputSize: null,
     status: 'STARTED',
+    type: 'DIAGNOSTIC_QUIZ',
+    createdAt,
     completedAt: null,
     ...input,
   });
@@ -570,6 +602,38 @@ describe('PrismaActivitiesRepository', () => {
     }),
     richClosedExercisePayload: richClosedPayloadRecord(),
     richClosedExerciseResult: null,
+    ...input,
+  });
+
+  const richClosedHistorySessionRecord = (
+    input: Partial<RichClosedExerciseHistorySessionRecord> = {},
+  ): RichClosedExerciseHistorySessionRecord => ({
+    ...richClosedSessionRecord({
+      status: 'COMPLETED',
+      createdAt: new Date('2026-06-18T10:00:00.000Z'),
+      completedAt: new Date('2026-06-18T10:07:00.000Z'),
+    }),
+    richClosedExercisePayload: richClosedPayloadRecord({
+      title: 'Questions riches - Constitution',
+    }),
+    richClosedExerciseResult: richClosedResultRecord({
+      correctAnswers: 5,
+      totalQuestions: 6,
+      score: 0.833,
+    }),
+    knowledgeUnit: {
+      id: 'unit-1',
+      title: 'Séparation des pouvoirs',
+      documentId: 'document-1',
+    },
+    ...input,
+  });
+
+  const courseRecord = (input: Partial<CourseRecord> = {}): CourseRecord => ({
+    id: 'course-1',
+    subjectId: 'subject-1',
+    title: 'Droit constitutionnel',
+    documents: [{ id: 'document-1' }],
     ...input,
   });
 
@@ -1969,7 +2033,15 @@ describe('PrismaActivitiesRepository', () => {
         completedAt: expect.any(Date) as Date,
       },
     });
-    expect(saved).toEqual(result);
+    expect(saved).toMatchObject({
+      ...result,
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      createdAt,
+      completedAt: expect.any(Date) as Date,
+      durationSeconds: expect.any(Number) as number,
+    });
 
     prisma.activitySession.findFirst.mockResolvedValue(
       richClosedSessionRecord({
@@ -1986,10 +2058,116 @@ describe('PrismaActivitiesRepository', () => {
       sessionId: 'session-1',
       type: 'rich_closed_exercise',
       status: 'completed',
+      subjectId: 'subject-1',
+      documentId: 'document-1',
+      knowledgeUnitId: 'unit-1',
+      createdAt,
+      completedAt: expect.any(Date) as Date,
+      durationSeconds: expect.any(Number) as number,
       correctAnswers: 6,
       totalQuestions: 6,
       score: 1,
     });
+  });
+
+  it('lists lightweight completed rich closed history for a course owner', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue(courseRecord());
+    prisma.activitySession.findMany.mockResolvedValue([
+      richClosedHistorySessionRecord(),
+    ]);
+
+    const history =
+      await repository.listCourseRichClosedExerciseHistoryForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        limit: 5,
+      });
+
+    expect(prisma.course.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'course-1',
+        studentId: 'student-1',
+        archivedAt: null,
+        subject: {
+          archivedAt: null,
+        },
+      },
+      include: {
+        documents: {
+          where: {
+            archivedAt: null,
+          },
+          select: {
+            id: true,
+          },
+        },
+      },
+    });
+    expect(prisma.activitySession.findMany).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        type: 'RICH_CLOSED_EXERCISE',
+        status: 'COMPLETED',
+        richClosedExerciseResult: {
+          isNot: null,
+        },
+        OR: [
+          {
+            documentId: {
+              in: ['document-1'],
+            },
+          },
+          {
+            knowledgeUnit: {
+              documentId: {
+                in: ['document-1'],
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        richClosedExercisePayload: true,
+        richClosedExerciseResult: true,
+        knowledgeUnit: {
+          select: {
+            id: true,
+            title: true,
+            documentId: true,
+          },
+        },
+      },
+      orderBy: [{ completedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 5,
+    });
+    expect(history.items).toEqual([
+      expect.objectContaining({
+        id: 'session-1',
+        sessionId: 'session-1',
+        type: 'rich_closed_exercise',
+        status: 'completed',
+        title: 'Questions riches - Constitution',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        correctAnswers: 5,
+        totalQuestions: 6,
+        score: 0.833,
+        resultPath: '/activities/rich-closed/session-1/result',
+        course: {
+          id: 'course-1',
+          title: 'Droit constitutionnel',
+        },
+        knowledgeUnit: {
+          id: 'unit-1',
+          title: 'Séparation des pouvoirs',
+        },
+      }),
+    ]);
+    expect(JSON.stringify(history)).not.toContain('correctionPayload');
+    expect(JSON.stringify(history)).not.toContain('answersPayload');
+    expect(JSON.stringify(history)).not.toContain('submittedAnswer');
+    expect(JSON.stringify(history)).not.toContain('questionId');
   });
 
   it('rejects rich closed double submit', async () => {
