@@ -1,0 +1,66 @@
+# Roadmap V3 handoff to Codex - Neralune post-MVP
+
+Version commune API/App. Miroir attendu côté App : `revision_project_app/docs/roadmap/v3/ROADMAP_V3_HANDOFF_TO_CODEX.md`.
+
+## Où en est le projet
+
+Neralune, anciennement Revision Project, sort d'un MVP core fermé. Les baselines de reprise sont :
+
+- API : `4e0f0c398b6faddd11465362a3720246c9c79a72`
+- App : `467b6c18ed66b71a614bca35be11fa4079cebf22`
+
+Les lots `CORE-09`, `CORE-10`, `CORE-11`, `RELEASE-01A` et `RELEASE-01` sont considérés `DONE`. Le smoke MVP complet a été confirmé manuellement par l'opérateur humain. La suite doit être calme, lotie et vérifiable.
+
+## Ce qui est stable
+
+- Source/course/subject lifecycle : delete/archive safe.
+- Course question bank : readiness, préparation async, sélection multi-KU, concurrence.
+- Quick revision : session, draft/resume, complete, result, history.
+- App shell : navigation principale, cours, sources, fiche V0, progression, historique, résultat.
+- Rich closed building blocks : API et App contiennent déjà des types, widgets et résultats partiels utiles.
+- Today/coach : fondations présentes, mais pas encore produit adaptatif final.
+
+## Ce qui ne doit pas être cassé
+
+- Quick revision MVP.
+- Session result/history existants.
+- Source lifecycle et ownership.
+- Readiness question bank course-level.
+- Trackers V2 et rapports historiques.
+- Prompts IA, providers IA, Prisma et migrations hors lot explicitement prévu.
+- Secrets et variables d'environnement réelles.
+
+## Comment lire les trackers V3
+
+1. Lire `ROADMAP_V3_POST_MVP_PLAN.md` pour l'ordre et les dépendances.
+2. Lire `LOT_TRACKER_V3.md` pour les parents produit.
+3. Lire `EXECUTION_LOT_TRACKER_V3.md` pour les lots exécutables.
+4. Lire `ROADMAP_V3_DECISIONS.md` si l'ordre semble surprenant.
+5. Pour chaque lot, créer un rapport dédié dans `docs/roadmap/v3/`.
+
+Statuts autorisés : `TODO`, `IN_PROGRESS`, `BLOCKED`, `READY_FOR_REVIEW`, `DONE`, `POSTPONED`.
+
+## Prochain lot recommandé
+
+`PLUS-02A - QCM complet / rich questions recovery`.
+
+Pourquoi : la préparation examen V1 dépend de questions riches, de sources, de visuels bornés, de corrections claires et d'une compatibilité session/result/history. Le produit a déjà eu une forme riche dans V1 et des briques existent dans API/App, mais V3 doit le restaurer proprement au lieu de partir vers l'examen ou le coach.
+
+## Validations à exécuter pour le prochain lot
+
+À adapter selon les fichiers touchés, mais au minimum :
+
+- API : tests ciblés sur rich closed/question bank/session touchés.
+- App : tests ciblés parsing/rendu/flow QCM touchés.
+- Toujours : `git diff --check` dans chaque repo touché.
+- Ne pas lancer full Flutter/Jest si aucun code correspondant n'a été modifié.
+
+## Pièges à éviter
+
+- Ne pas fusionner `PLUS-02A` avec `PLUS-03A`.
+- Ne pas lancer `QUALITY-01` avant QCM/exam stabilisés.
+- Ne pas utiliser Rena pour masquer des loaders ou erreurs non polis.
+- Ne pas transformer Today en coach adaptatif tant que les signaux produit sont incomplets.
+- Ne pas documenter de secret dans les rapports release.
+- Ne pas modifier les changements non commités préexistants dans l'API sauf demande explicite.
+- Ne pas supprimer ou réécrire V2.
