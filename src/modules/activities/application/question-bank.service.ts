@@ -27,6 +27,8 @@ export const QUICK_QUESTION_BANK_ACTIVE_CAP_PER_COURSE = 100;
 
 export const QUICK_QUESTION_BANK_COUNT_INVALID =
   'QUICK_QUESTION_BANK_COUNT_INVALID';
+export const QUICK_QUESTION_BANK_PREPARATION_TARGET_COUNT_INVALID =
+  'QUICK_QUESTION_BANK_PREPARATION_TARGET_COUNT_INVALID';
 export const QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY =
   'QUICK_QUESTION_BANK_SOURCE_CONTEXT_NOT_READY';
 export const QUICK_QUESTION_BANK_INSUFFICIENT_QUESTIONS =
@@ -123,7 +125,7 @@ export class QuestionBankService {
     preparationJobId?: string;
     questionCount?: number;
   }): Promise<CourseQuickQuestionBankPreparationStats> {
-    const questionCount = resolveQuickQuestionBankQuestionCount(
+    const questionCount = resolveQuickQuestionBankPreparationTargetCount(
       input.questionCount,
     );
     this.logger.log({
@@ -164,6 +166,17 @@ export class QuestionBankService {
     knowledgeUnitIds?: string[];
   }): Promise<number> {
     return this.questionBankRepository.countActiveCourseQuickQuestions(input);
+  }
+
+  async countActiveCourseQuickQuestionsByKnowledgeUnit(input: {
+    studentId: string;
+    subjectId: string;
+    courseId: string;
+    knowledgeUnitIds: string[];
+  }): Promise<Map<string, number>> {
+    return this.questionBankRepository.countActiveCourseQuickQuestionsByKnowledgeUnit(
+      input,
+    );
   }
 
   private async ensureQuestionPool(input: {
@@ -341,6 +354,23 @@ export function resolveQuickQuestionBankQuestionCount(
     resolvedQuestionCount > QUICK_QUESTION_BANK_MAX_QUESTION_COUNT
   ) {
     throw new Error(QUICK_QUESTION_BANK_COUNT_INVALID);
+  }
+
+  return resolvedQuestionCount;
+}
+
+export function resolveQuickQuestionBankPreparationTargetCount(
+  questionCount: number | undefined,
+): number {
+  const resolvedQuestionCount =
+    questionCount ?? QUICK_QUESTION_BANK_DEFAULT_QUESTION_COUNT;
+
+  if (
+    !Number.isInteger(resolvedQuestionCount) ||
+    resolvedQuestionCount < 1 ||
+    resolvedQuestionCount > QUICK_QUESTION_BANK_MAX_QUESTION_COUNT
+  ) {
+    throw new Error(QUICK_QUESTION_BANK_PREPARATION_TARGET_COUNT_INVALID);
   }
 
   return resolvedQuestionCount;

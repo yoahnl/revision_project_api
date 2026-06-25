@@ -32,6 +32,41 @@ describe('PrismaQuestionBankRepository', () => {
     });
   });
 
+  it('counts active course quick questions grouped by knowledge unit', async () => {
+    const { mocks, repository } = createHarness();
+    mocks.questionBankItemGroupBy.mockResolvedValue([
+      { knowledgeUnitId: 'ku-1', _count: { _all: 3 } },
+      { knowledgeUnitId: 'ku-3', _count: { _all: 1 } },
+    ]);
+
+    await expect(
+      repository.countActiveCourseQuickQuestionsByKnowledgeUnit({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        knowledgeUnitIds: ['ku-1', 'ku-2', 'ku-3'],
+      }),
+    ).resolves.toEqual(
+      new Map([
+        ['ku-1', 3],
+        ['ku-2', 0],
+        ['ku-3', 1],
+      ]),
+    );
+
+    expect(mocks.questionBankItemGroupBy).toHaveBeenCalledWith({
+      by: ['knowledgeUnitId'],
+      where: {
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        knowledgeUnitId: { in: ['ku-1', 'ku-2', 'ku-3'] },
+        status: QuestionBankItemStatus.ACTIVE,
+      },
+      _count: { _all: true },
+    });
+  });
+
   it('persists generated questions with sources and visuals', async () => {
     const { mocks, repository } = createHarness();
     mocks.questionBankItemFindUnique.mockResolvedValue(null);
@@ -177,6 +212,7 @@ describe('PrismaQuestionBankRepository', () => {
 function createHarness() {
   const mocks = {
     questionBankItemCount: jest.fn(),
+    questionBankItemGroupBy: jest.fn(),
     questionBankItemFindUnique: jest.fn(),
     questionBankItemCreate: jest.fn<
       Promise<QuestionBankItemIdOnly>,
@@ -194,6 +230,7 @@ function createHarness() {
   const prisma = {
     questionBankItem: {
       count: mocks.questionBankItemCount,
+      groupBy: mocks.questionBankItemGroupBy,
       findUnique: mocks.questionBankItemFindUnique,
     },
     $transaction: transaction,

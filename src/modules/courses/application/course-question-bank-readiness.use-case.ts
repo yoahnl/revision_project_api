@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import {
+  QUICK_QUESTION_BANK_ACTIVE_CAP_PER_COURSE,
   QuestionBankService,
   resolveQuickQuestionBankQuestionCount,
 } from '../../activities/application/question-bank.service';
@@ -12,6 +13,7 @@ import {
   buildCourseQuestionBankReadiness,
   type CourseQuestionBankReadiness,
 } from '../domain/course-question-bank-readiness.entity';
+import { buildCourseQuestionBankPreparationPlan } from './course-question-bank-preparation-plan';
 import {
   COURSE_QUESTION_BANK_PREPARATION_REPOSITORY,
   type CourseQuestionBankPreparationJobDto,
@@ -24,8 +26,6 @@ import {
   type CourseQuickRevisionKnowledgeUnitDto,
   type CoursesRepository,
 } from './courses.repository';
-
-const QUICK_QUESTION_BANK_PREPARATION_MIN_PER_KU = 5;
 
 @Injectable()
 export class GetCourseQuestionBankReadinessUseCase {
@@ -177,8 +177,6 @@ export class GetCourseQuestionBankReadinessUseCase {
       jobs,
       now: new Date(),
       staleAfterMs,
-      targetQuestionCount: input.targetQuestionCount,
-      knowledgeUnitCount: knowledgeUnits.length,
     });
 
     this.logReadiness({
@@ -248,7 +246,7 @@ export class PrepareCourseQuestionBankUseCase {
     courseId: string;
     questionCount?: number;
   }): Promise<CourseQuestionBankReadiness> {
-    const targetQuestionCount = resolveQuickQuestionBankQuestionCount(
+    const sessionQuestionCount = resolveQuickQuestionBankQuestionCount(
       input.questionCount,
     );
     const readinessUseCase = new GetCourseQuestionBankReadinessUseCase(
@@ -259,7 +257,7 @@ export class PrepareCourseQuestionBankUseCase {
     const context = await readinessUseCase.resolveContext({
       studentId: input.studentId,
       courseId: input.courseId,
-      targetQuestionCount,
+      targetQuestionCount: sessionQuestionCount,
     });
 
     if (!context.readiness.canPrepare) {
@@ -270,21 +268,39 @@ export class PrepareCourseQuestionBankUseCase {
       return context.readiness;
     }
 
-    const targetQuestionCountPerKnowledgeUnit = Math.max(
-      QUICK_QUESTION_BANK_PREPARATION_MIN_PER_KU,
-      Math.ceil(targetQuestionCount / context.knowledgeUnits.length),
-    );
+    if (context.readiness.readyQuestionCount >= sessionQuestionCount) {
+      return context.readiness;
+    }
+
+    const activeQuestionCountsByKnowledgeUnit =
+      await this.questionBank.countActiveCourseQuickQuestionsByKnowledgeUnit({
+        studentId: input.studentId,
+        subjectId: context.subjectId,
+        courseId: input.courseId,
+        knowledgeUnitIds: context.knowledgeUnits.map((unit) => unit.id),
+      });
+    const plan = buildCourseQuestionBankPreparationPlan({
+      sessionQuestionCount,
+      activeCourseQuestionCount: context.readiness.readyQuestionCount,
+      activeCourseCap: QUICK_QUESTION_BANK_ACTIVE_CAP_PER_COURSE,
+      candidateKnowledgeUnits: context.knowledgeUnits.map((unit) => ({
+        knowledgeUnitId: unit.id,
+        documentId: unit.documentId,
+        activeQuestionCount:
+          activeQuestionCountsByKnowledgeUnit.get(unit.id) ?? 0,
+      })),
+    });
     const ensuredJobs: Array<{ id: string; created: boolean }> = [];
 
-    for (const knowledgeUnit of context.knowledgeUnits) {
+    for (const job of plan.jobs) {
       const ensured =
         await this.preparationRepository.ensurePendingForCourseContext({
           studentId: input.studentId,
           subjectId: context.subjectId,
           courseId: input.courseId,
-          documentId: knowledgeUnit.documentId,
-          knowledgeUnitId: knowledgeUnit.id,
-          targetQuestionCount: targetQuestionCountPerKnowledgeUnit,
+          documentId: job.documentId,
+          knowledgeUnitId: job.knowledgeUnitId,
+          targetQuestionCount: job.targetQuestionCount,
         });
 
       ensuredJobs.push({
@@ -300,9 +316,17 @@ export class PrepareCourseQuestionBankUseCase {
       event: 'course_question_bank_prepare_requested',
       courseId: input.courseId,
       studentRef: safeStudentRef(input.studentId),
-      questionCount: targetQuestionCount,
+      questionCount: sessionQuestionCount,
+      sessionQuestionCount,
+      poolTarget: plan.poolTarget,
+      missingForSession: plan.missingForSession,
       readyQuestionCount: context.readiness.readyQuestionCount,
       candidateKnowledgeUnitCount: context.knowledgeUnits.length,
+      plannedJobCount: plan.jobs.length,
+      plannedQuestionsToGenerate: plan.jobs.reduce(
+        (sum, job) => sum + job.questionsToGenerate,
+        0,
+      ),
       createdJobCount: ensuredJobs.filter((job) => job.created).length,
       reusedJobCount: ensuredJobs.filter((job) => !job.created).length,
       preparationJobIds: ensuredJobs.map((job) => job.id),
@@ -311,9 +335,9 @@ export class PrepareCourseQuestionBankUseCase {
 
     return buildCourseQuestionBankReadiness({
       courseId: input.courseId,
-      status: 'PREPARING',
+      status: ensuredJobs.length > 0 ? 'PREPARING' : context.readiness.status,
       readyQuestionCount: context.readiness.readyQuestionCount,
-      targetQuestionCount,
+      targetQuestionCount: sessionQuestionCount,
     });
   }
 }
@@ -322,21 +346,13 @@ function summarizePreparationJobs(input: {
   jobs: CourseQuestionBankPreparationJobDto[];
   now: Date;
   staleAfterMs: number;
-  targetQuestionCount: number;
-  knowledgeUnitCount: number;
 }) {
   let activeJobCount = 0;
   let failedJobCount = 0;
   let staleJobCount = 0;
-  const expectedJobTargetQuestionCount = Math.max(
-    QUICK_QUESTION_BANK_PREPARATION_MIN_PER_KU,
-    Math.ceil(
-      input.targetQuestionCount / Math.max(input.knowledgeUnitCount, 1),
-    ),
-  );
 
   for (const job of input.jobs) {
-    if (job.targetQuestionCount < expectedJobTargetQuestionCount) {
+    if (job.targetQuestionCount <= 0) {
       continue;
     }
 

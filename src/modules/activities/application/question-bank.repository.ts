@@ -14,6 +14,13 @@ export interface CountActiveCourseQuickQuestionsInput {
   knowledgeUnitIds?: string[];
 }
 
+export interface CountActiveCourseQuickQuestionsByKnowledgeUnitInput {
+  studentId: string;
+  subjectId: string;
+  courseId: string;
+  knowledgeUnitIds: string[];
+}
+
 export interface PersistGeneratedQuestionsInput {
   studentId: string;
   subjectId: string;
@@ -64,6 +71,10 @@ export interface QuestionBankRepository {
   countActiveCourseQuickQuestions(
     input: CountActiveCourseQuickQuestionsInput,
   ): Promise<number>;
+
+  countActiveCourseQuickQuestionsByKnowledgeUnit(
+    input: CountActiveCourseQuickQuestionsByKnowledgeUnitInput,
+  ): Promise<Map<string, number>>;
 
   persistGeneratedQuestions(
     input: PersistGeneratedQuestionsInput,

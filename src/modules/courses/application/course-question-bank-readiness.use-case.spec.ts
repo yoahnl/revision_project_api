@@ -203,7 +203,7 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
     });
   });
 
-  it('ignores active per-KU jobs that are too small for the requested course-level target', async () => {
+  it('keeps reporting active smaller per-KU jobs as preparing work', async () => {
     const { coursesRepository, preparationRepository, questionBank, useCase } =
       createReadinessHarness();
     coursesRepository.findCourseOwnershipContext.mockResolvedValue(
@@ -248,10 +248,10 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
         questionCount: 30,
       }),
     ).resolves.toMatchObject({
-      status: 'NOT_PREPARED',
+      status: 'PREPARING',
       readyQuestionCount: 9,
       targetQuestionCount: 30,
-      canPrepare: true,
+      canPrepare: false,
     });
   });
 
@@ -462,7 +462,7 @@ describe('GetCourseQuestionBankReadinessUseCase', () => {
 });
 
 describe('PrepareCourseQuestionBankUseCase', () => {
-  it('creates one pending preparation job and enqueues it when questions are missing', async () => {
+  it('creates pending preparation jobs only for the missing deficit', async () => {
     const {
       coursesRepository,
       preparationQueue,
@@ -480,13 +480,35 @@ describe('PrepareCourseQuestionBankUseCase', () => {
       [
         knowledgeUnit({ id: 'ku-1', documentId: 'document-1' }),
         knowledgeUnit({ id: 'ku-2', documentId: 'document-2' }),
+        knowledgeUnit({ id: 'ku-3', documentId: 'document-3' }),
+        knowledgeUnit({ id: 'ku-4', documentId: 'document-4' }),
+        knowledgeUnit({ id: 'ku-5', documentId: 'document-5' }),
+        knowledgeUnit({ id: 'ku-6', documentId: 'document-6' }),
+        knowledgeUnit({ id: 'ku-7', documentId: 'document-7' }),
       ],
     );
-    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(1);
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(0);
+    questionBank.countActiveCourseQuickQuestionsByKnowledgeUnit.mockResolvedValue(
+      new Map([
+        ['ku-1', 0],
+        ['ku-2', 0],
+        ['ku-3', 0],
+        ['ku-4', 0],
+        ['ku-5', 0],
+        ['ku-6', 0],
+        ['ku-7', 0],
+      ]),
+    );
     preparationRepository.findRecentForCourse.mockResolvedValue([]);
     preparationRepository.ensurePendingForCourseContext
       .mockResolvedValueOnce({
-        job: preparationJob({ id: 'prep-1', status: 'PENDING' }),
+        job: preparationJob({
+          id: 'prep-1',
+          documentId: 'document-1',
+          knowledgeUnitId: 'ku-1',
+          targetQuestionCount: 2,
+          status: 'PENDING',
+        }),
         created: true,
       })
       .mockResolvedValueOnce({
@@ -494,23 +516,78 @@ describe('PrepareCourseQuestionBankUseCase', () => {
           id: 'prep-2',
           documentId: 'document-2',
           knowledgeUnitId: 'ku-2',
+          targetQuestionCount: 2,
           status: 'PENDING',
         }),
-        created: false,
+        created: true,
+      })
+      .mockResolvedValueOnce({
+        job: preparationJob({
+          id: 'prep-3',
+          documentId: 'document-3',
+          knowledgeUnitId: 'ku-3',
+          targetQuestionCount: 2,
+          status: 'PENDING',
+        }),
+        created: true,
+      })
+      .mockResolvedValueOnce({
+        job: preparationJob({
+          id: 'prep-4',
+          documentId: 'document-4',
+          knowledgeUnitId: 'ku-4',
+          targetQuestionCount: 1,
+          status: 'PENDING',
+        }),
+        created: true,
+      })
+      .mockResolvedValueOnce({
+        job: preparationJob({
+          id: 'prep-5',
+          documentId: 'document-5',
+          knowledgeUnitId: 'ku-5',
+          targetQuestionCount: 1,
+          status: 'PENDING',
+        }),
+        created: true,
+      })
+      .mockResolvedValueOnce({
+        job: preparationJob({
+          id: 'prep-6',
+          documentId: 'document-6',
+          knowledgeUnitId: 'ku-6',
+          targetQuestionCount: 1,
+          status: 'PENDING',
+        }),
+        created: true,
+      })
+      .mockResolvedValueOnce({
+        job: preparationJob({
+          id: 'prep-7',
+          documentId: 'document-7',
+          knowledgeUnitId: 'ku-7',
+          targetQuestionCount: 1,
+          status: 'PENDING',
+        }),
+        created: true,
       });
 
     await expect(
       useCase.execute({
         studentId: 'student-1',
         courseId: 'course-1',
-        questionCount: 5,
+        questionCount: 10,
       }),
     ).resolves.toMatchObject({
       status: 'PREPARING',
-      readyQuestionCount: 1,
-      targetQuestionCount: 5,
+      readyQuestionCount: 0,
+      targetQuestionCount: 10,
       canStartQuickRevision: false,
     });
+
+    expect(
+      preparationRepository.ensurePendingForCourseContext,
+    ).toHaveBeenCalledTimes(7);
 
     expect(
       preparationRepository.ensurePendingForCourseContext,
@@ -520,7 +597,7 @@ describe('PrepareCourseQuestionBankUseCase', () => {
       courseId: 'course-1',
       documentId: 'document-1',
       knowledgeUnitId: 'ku-1',
-      targetQuestionCount: 5,
+      targetQuestionCount: 2,
     });
     expect(
       preparationRepository.ensurePendingForCourseContext,
@@ -530,7 +607,57 @@ describe('PrepareCourseQuestionBankUseCase', () => {
       courseId: 'course-1',
       documentId: 'document-2',
       knowledgeUnitId: 'ku-2',
-      targetQuestionCount: 5,
+      targetQuestionCount: 2,
+    });
+    expect(
+      preparationRepository.ensurePendingForCourseContext,
+    ).toHaveBeenNthCalledWith(3, {
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-3',
+      knowledgeUnitId: 'ku-3',
+      targetQuestionCount: 2,
+    });
+    expect(
+      preparationRepository.ensurePendingForCourseContext,
+    ).toHaveBeenNthCalledWith(4, {
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-4',
+      knowledgeUnitId: 'ku-4',
+      targetQuestionCount: 1,
+    });
+    expect(
+      preparationRepository.ensurePendingForCourseContext,
+    ).toHaveBeenNthCalledWith(5, {
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-5',
+      knowledgeUnitId: 'ku-5',
+      targetQuestionCount: 1,
+    });
+    expect(
+      preparationRepository.ensurePendingForCourseContext,
+    ).toHaveBeenNthCalledWith(6, {
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-6',
+      knowledgeUnitId: 'ku-6',
+      targetQuestionCount: 1,
+    });
+    expect(
+      preparationRepository.ensurePendingForCourseContext,
+    ).toHaveBeenNthCalledWith(7, {
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      documentId: 'document-7',
+      knowledgeUnitId: 'ku-7',
+      targetQuestionCount: 1,
     });
     expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(1, {
       preparationJobId: 'prep-1',
@@ -538,6 +665,61 @@ describe('PrepareCourseQuestionBankUseCase', () => {
     expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(2, {
       preparationJobId: 'prep-2',
     });
+    expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(3, {
+      preparationJobId: 'prep-3',
+    });
+    expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(4, {
+      preparationJobId: 'prep-4',
+    });
+    expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(5, {
+      preparationJobId: 'prep-5',
+    });
+    expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(6, {
+      preparationJobId: 'prep-6',
+    });
+    expect(preparationQueue.enqueue).toHaveBeenNthCalledWith(7, {
+      preparationJobId: 'prep-7',
+    });
+  });
+
+  it('does not create preparation jobs when the active pool is sufficient', async () => {
+    const {
+      coursesRepository,
+      preparationQueue,
+      preparationRepository,
+      questionBank,
+      useCase,
+    } = createPrepareHarness();
+    coursesRepository.findCourseOwnershipContext.mockResolvedValue(
+      courseContext(),
+    );
+    coursesRepository.findFirstReadyCoursePdfDocumentForCourse.mockResolvedValue(
+      courseDocument(),
+    );
+    coursesRepository.findReadyQuickRevisionKnowledgeUnitsForCourse.mockResolvedValue(
+      [knowledgeUnit({ id: 'ku-1' })],
+    );
+    questionBank.countActiveCourseQuickQuestions.mockResolvedValue(12);
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        questionCount: 10,
+      }),
+    ).resolves.toMatchObject({
+      status: 'READY',
+      readyQuestionCount: 12,
+      targetQuestionCount: 10,
+    });
+
+    expect(
+      questionBank.countActiveCourseQuickQuestionsByKnowledgeUnit.mock.calls,
+    ).toHaveLength(0);
+    expect(
+      preparationRepository.ensurePendingForCourseContext.mock.calls,
+    ).toHaveLength(0);
+    expect(preparationQueue.enqueue.mock.calls).toHaveLength(0);
   });
 });
 
@@ -607,6 +789,7 @@ function createPreparationRepositoryMock() {
 function createQuestionBankMock() {
   return {
     countActiveCourseQuickQuestions: jest.fn(),
+    countActiveCourseQuickQuestionsByKnowledgeUnit: jest.fn(),
     prepareCourseQuickQuestionBank: jest.fn(),
   } as unknown as jest.Mocked<QuestionBankService>;
 }

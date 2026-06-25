@@ -38,6 +38,42 @@ describe('ProcessCourseQuestionBankPreparationJobUseCase', () => {
     expect(preparationRepository.markFailed).not.toHaveBeenCalled();
   });
 
+  it('accepts a per-knowledge-unit target below the session minimum', async () => {
+    const { preparationRepository, questionBank, useCase } = createHarness();
+    preparationRepository.claimNextPending.mockResolvedValue(
+      preparationJob({ targetQuestionCount: 4 }),
+    );
+    questionBank.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(4);
+    questionBank.prepareCourseQuickQuestionBank.mockResolvedValue({
+      activeBefore: 1,
+      activeAfter: 4,
+      generatedCount: 3,
+      persistedCount: 3,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
+      aiGenerations: [],
+    });
+
+    await expect(
+      useCase.execute({ preparationJobId: 'prep-1' }),
+    ).resolves.toEqual({
+      processed: true,
+      preparationJobId: 'prep-1',
+    });
+
+    expect(
+      questionBank.prepareCourseQuickQuestionBank.mock.calls[0]?.[0],
+    ).toMatchObject({
+      preparationJobId: 'prep-1',
+      questionCount: 4,
+    });
+    expect(preparationRepository.markCompleted).toHaveBeenCalledWith({
+      preparationJobId: 'prep-1',
+    });
+  });
+
   it('marks already prepared jobs completed without calling the generator service', async () => {
     const { preparationRepository, questionBank, useCase } = createHarness();
     preparationRepository.claimNextPending.mockResolvedValue(preparationJob());

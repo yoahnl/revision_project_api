@@ -124,6 +124,49 @@ describe('QuestionBankService', () => {
     });
   });
 
+  it('accepts internal preparation targets below the session minimum', async () => {
+    const { activitiesRepository, generator, questionBankRepository, service } =
+      createHarness();
+    activitiesRepository.findDiagnosticQuizGenerationContext.mockResolvedValue(
+      generationContext(),
+    );
+    questionBankRepository.countActiveCourseQuickQuestions
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(4)
+      .mockResolvedValueOnce(4);
+    generator.generate
+      .mockResolvedValueOnce(generatedQuiz('internal-target-a', 2))
+      .mockResolvedValueOnce(generatedQuiz('internal-target-b', 2));
+    questionBankRepository.persistGeneratedQuestions.mockResolvedValue({
+      persistedCount: 2,
+      duplicateSkippedCount: 0,
+      structureSkippedCount: 0,
+    });
+
+    await expect(
+      service.prepareCourseQuickQuestionBank({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'ku-1',
+        questionCount: 4,
+      }),
+    ).resolves.toMatchObject({
+      activeBefore: 0,
+      activeAfter: 4,
+      generatedCount: 4,
+      persistedCount: 4,
+    });
+
+    expect(
+      generator.generate.mock.calls.map(([input]) => input.questionCount),
+    ).toEqual([2, 2]);
+  });
+
   it('reports duplicate generations when no new question can be persisted', async () => {
     const { activitiesRepository, generator, questionBankRepository, service } =
       createHarness();
@@ -339,11 +382,41 @@ describe('QuestionBankService', () => {
       questionBankRepository.countActiveCourseQuickQuestions.mock.calls,
     ).toHaveLength(0);
   });
+
+  it('counts active quick questions by knowledge unit through the repository port', async () => {
+    const { questionBankRepository, service } = createHarness();
+    const counts = new Map([
+      ['ku-1', 3],
+      ['ku-2', 0],
+    ]);
+    questionBankRepository.countActiveCourseQuickQuestionsByKnowledgeUnit.mockResolvedValue(
+      counts,
+    );
+
+    await expect(
+      service.countActiveCourseQuickQuestionsByKnowledgeUnit({
+        studentId: 'student-1',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        knowledgeUnitIds: ['ku-1', 'ku-2'],
+      }),
+    ).resolves.toBe(counts);
+
+    expect(
+      questionBankRepository.countActiveCourseQuickQuestionsByKnowledgeUnit,
+    ).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      subjectId: 'subject-1',
+      courseId: 'course-1',
+      knowledgeUnitIds: ['ku-1', 'ku-2'],
+    });
+  });
 });
 
 function createHarness() {
   const questionBankRepository = {
     countActiveCourseQuickQuestions: jest.fn(),
+    countActiveCourseQuickQuestionsByKnowledgeUnit: jest.fn(),
     persistGeneratedQuestions: jest.fn(),
     reserveCourseQuickQuestions: jest.fn(),
   } satisfies {

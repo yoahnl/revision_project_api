@@ -9,6 +9,7 @@ import {
 import { PrismaService } from '../../../shared/infrastructure/prisma/prisma.service';
 import type {
   CountActiveCourseQuickQuestionsInput,
+  CountActiveCourseQuickQuestionsByKnowledgeUnitInput,
   PersistGeneratedQuestionsInput,
   QuestionBankPersistenceStats,
   QuestionBankRepository,
@@ -57,6 +58,37 @@ export class PrismaQuestionBankRepository implements QuestionBankRepository {
         status: QuestionBankItemStatus.ACTIVE,
       },
     });
+  }
+
+  async countActiveCourseQuickQuestionsByKnowledgeUnit(
+    input: CountActiveCourseQuickQuestionsByKnowledgeUnitInput,
+  ): Promise<Map<string, number>> {
+    const knowledgeUnitIds = dedupeStrings(input.knowledgeUnitIds);
+    const counts = new Map(
+      knowledgeUnitIds.map((knowledgeUnitId) => [knowledgeUnitId, 0]),
+    );
+
+    if (knowledgeUnitIds.length === 0) {
+      return counts;
+    }
+
+    const grouped = await this.prisma.questionBankItem.groupBy({
+      by: ['knowledgeUnitId'],
+      where: {
+        studentId: input.studentId,
+        subjectId: input.subjectId,
+        courseId: input.courseId,
+        knowledgeUnitId: { in: knowledgeUnitIds },
+        status: QuestionBankItemStatus.ACTIVE,
+      },
+      _count: { _all: true },
+    });
+
+    for (const row of grouped) {
+      counts.set(row.knowledgeUnitId, row._count._all);
+    }
+
+    return counts;
   }
 
   async persistGeneratedQuestions(
