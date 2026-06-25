@@ -13,9 +13,10 @@ import {
   type RevisionSessionsRepository,
 } from '../../revision-sessions/application/revision-sessions.repository';
 import type {
-  RevisionSessionResponseDto,
-  RevisionSessionStatusValue,
-} from '../../revision-sessions/domain/revision-session.entity';
+  CourseDeepRevisionHistoryResponseDto,
+  CourseDeepRevisionResultDto,
+} from '../../revision-sessions/domain/deep-revision-result.entity';
+import type { RevisionSessionResponseDto } from '../../revision-sessions/domain/revision-session.entity';
 import {
   COURSE_DEEP_REVISION_ANSWER_GUIDELINES,
   type CourseDeepRevisionScopeKind,
@@ -39,7 +40,7 @@ export interface CourseDeepRevisionSessionResponse {
   session: {
     id: string;
     mode: 'DEEP';
-    status: RevisionSessionStatusValue;
+    status: 'STARTED';
     courseId: string;
   };
   question: OpenQuestionActivity['question'];
@@ -59,10 +60,12 @@ export interface CourseDeepRevisionSubmitResponse {
   session: {
     id: string;
     mode: 'DEEP';
-    status: 'SUBMITTED';
+    status: 'COMPLETED';
     courseId: string;
+    completedAt: Date;
   };
   evaluation: OpenAnswerSubmissionResult['evaluation'];
+  resultPath: string;
 }
 
 export class CourseDeepRevisionScopeNotReadyError extends Error {
@@ -136,7 +139,7 @@ export class StartCourseDeepRevisionSessionUseCase {
       session: {
         id: session.session.id,
         mode: 'DEEP',
-        status: session.session.status,
+        status: 'STARTED',
         courseId: detail.course.id,
       },
       question: questionPayload.question,
@@ -254,16 +257,94 @@ export class SubmitCourseDeepRevisionAnswerUseCase {
       sessionId: activitySessionId,
       answerText,
     });
+    const completedResult =
+      await this.revisionSessionsRepository.completeDeepOpenAnswerSession({
+        studentId: input.studentId,
+        sessionId: session.session.id,
+        completedAt: new Date(),
+      });
 
     return {
       session: {
         id: session.session.id,
         mode: 'DEEP',
-        status: 'SUBMITTED',
+        status: 'COMPLETED',
         courseId: detail.course.id,
+        completedAt: completedResult.session.completedAt,
       },
       evaluation: result.evaluation,
+      resultPath: `/courses/${detail.course.id}/deep-revision/sessions/${session.session.id}/result`,
     };
+  }
+}
+
+@Injectable()
+export class GetCourseDeepRevisionResultUseCase {
+  constructor(
+    @Inject(COURSES_REPOSITORY)
+    private readonly coursesRepository: CoursesRepository,
+    @Inject(REVISION_SESSIONS_REPOSITORY)
+    private readonly revisionSessionsRepository: RevisionSessionsRepository,
+  ) {}
+
+  async execute(input: {
+    studentId: string;
+    courseId: string;
+    sessionId: string;
+  }): Promise<CourseDeepRevisionResultDto> {
+    const detail = await this.coursesRepository.findDetailByIdForStudent({
+      studentId: input.studentId,
+      courseId: input.courseId,
+    });
+
+    if (!detail) {
+      throw new Error('Course not found');
+    }
+
+    const result =
+      await this.revisionSessionsRepository.findDeepResultByIdForStudent({
+        studentId: input.studentId,
+        sessionId: input.sessionId,
+      });
+
+    if (result.session.courseId !== detail.course.id) {
+      throw new CourseDeepRevisionSessionNotReadyError();
+    }
+
+    return result;
+  }
+}
+
+@Injectable()
+export class ListCourseDeepRevisionHistoryUseCase {
+  constructor(
+    @Inject(COURSES_REPOSITORY)
+    private readonly coursesRepository: CoursesRepository,
+    @Inject(REVISION_SESSIONS_REPOSITORY)
+    private readonly revisionSessionsRepository: RevisionSessionsRepository,
+  ) {}
+
+  async execute(input: {
+    studentId: string;
+    courseId: string;
+    limit?: number;
+  }): Promise<CourseDeepRevisionHistoryResponseDto> {
+    const detail = await this.coursesRepository.findDetailByIdForStudent({
+      studentId: input.studentId,
+      courseId: input.courseId,
+    });
+
+    if (!detail) {
+      throw new Error('Course not found');
+    }
+
+    return this.revisionSessionsRepository.findCompletedCourseDeepSessionsForStudent(
+      {
+        studentId: input.studentId,
+        courseId: detail.course.id,
+        limit: normalizeHistoryLimit(input.limit),
+      },
+    );
   }
 }
 
@@ -364,4 +445,19 @@ function isOpenQuestionPayload(
 
 function isReadyCoursePdfSource(source: CourseDocumentDto): boolean {
   return source.kind === 'COURSE_PDF' && source.status === 'READY';
+}
+
+const DEFAULT_DEEP_HISTORY_LIMIT = 5;
+const MAX_DEEP_HISTORY_LIMIT = 50;
+
+function normalizeHistoryLimit(input: number | undefined): number {
+  if (input === undefined) {
+    return DEFAULT_DEEP_HISTORY_LIMIT;
+  }
+
+  if (!Number.isInteger(input) || input < 1 || input > MAX_DEEP_HISTORY_LIMIT) {
+    throw new Error('History limit invalid');
+  }
+
+  return input;
 }

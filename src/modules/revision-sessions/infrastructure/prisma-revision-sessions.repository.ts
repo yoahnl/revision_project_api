@@ -19,6 +19,12 @@ import type {
   RevisionSessionResponseDto,
   RevisionSessionStatusValue,
 } from '../domain/revision-session.entity';
+import type {
+  CourseDeepRevisionHistoryItemDto,
+  CourseDeepRevisionHistoryResponseDto,
+  CourseDeepRevisionResultDto,
+  CourseDeepRevisionSourceDto,
+} from '../domain/deep-revision-result.entity';
 import {
   revisionSessionResultStateForScore,
   type RevisionSessionHistoryItemDto,
@@ -176,6 +182,79 @@ type RevisionSessionActivityWithResultRecord =
   RevisionSessionActivityForResultRecord & {
     result: RevisionSessionActivityResultRecord;
   };
+
+type DeepRevisionChunkRecord = {
+  id: string;
+  text: string;
+  pageNumber: number | null;
+  index: number;
+};
+
+type DeepRevisionEvaluationRecord = {
+  id: string;
+  status: 'READY' | 'FAILED';
+  answerText: string;
+  score: number | null;
+  maxScore: number | null;
+  feedback: string | null;
+  presentPoints: unknown;
+  missingPoints: unknown;
+  errors: unknown;
+  modelAnswer: string | null;
+  advice: string | null;
+  createdAt: Date;
+};
+
+type DeepRevisionOpenQuestionRecord = {
+  id: string;
+  prompt: string;
+  instructions: string | null;
+  sources: Array<{
+    chunkId: string;
+    chunk: DeepRevisionChunkRecord;
+  }>;
+};
+
+type DeepRevisionActivityRecord = {
+  id: string;
+  status: string;
+  type: string;
+  completedAt: Date | null;
+  knowledgeUnit: {
+    id: string;
+    title: string;
+    document: {
+      fileName: string;
+    } | null;
+  };
+  openQuestion: DeepRevisionOpenQuestionRecord | null;
+  openAnswerEvaluation: DeepRevisionEvaluationRecord | null;
+};
+
+type DeepRevisionActionRecord = {
+  id: string;
+  kind: RevisionSessionActionKindValue;
+  status: RevisionSessionActionStatusValue;
+  displayOrder: number;
+  activitySessionId: string | null;
+  completedAt: Date | null;
+  activitySession: DeepRevisionActivityRecord | null;
+};
+
+type DeepRevisionSessionRecord = Omit<RevisionSessionRecord, 'actions'> & {
+  course: {
+    id: string;
+    title: string;
+  } | null;
+  actions: DeepRevisionActionRecord[];
+};
+
+type DeepRevisionSessionWithResultRecord = DeepRevisionSessionRecord & {
+  course: {
+    id: string;
+    title: string;
+  };
+};
 
 @Injectable()
 export class PrismaRevisionSessionsRepository implements RevisionSessionsRepository {
@@ -535,6 +614,56 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     return toRevisionSessionHistoryResponse(sessions);
   }
 
+  async findCompletedCourseDeepSessionsForStudent(input: {
+    studentId: string;
+    courseId: string;
+    limit: number;
+  }): Promise<CourseDeepRevisionHistoryResponseDto> {
+    const sessions = (await this.prisma.revisionSession.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        mode: RevisionSessionMode.DEEP,
+        course: {
+          archivedAt: null,
+          subject: {
+            archivedAt: null,
+          },
+        },
+        actions: {
+          some: {
+            kind: RevisionSessionActionKind.OPEN_QUESTION,
+            activitySession: {
+              is: {
+                type: ActivityType.OPEN_QUESTION,
+                openAnswerEvaluation: {
+                  is: {
+                    status: 'READY',
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      orderBy: [
+        { completedAt: 'desc' },
+        { updatedAt: 'desc' },
+        { createdAt: 'desc' },
+      ],
+      take: input.limit,
+      include: deepRevisionResultInclude(),
+    })) as unknown as DeepRevisionSessionRecord[];
+
+    return {
+      items: sessions
+        .map(toDeepRevisionHistoryItem)
+        .filter(
+          (item): item is CourseDeepRevisionHistoryItemDto => item !== null,
+        ),
+    };
+  }
+
   async findCompletedSessionsForStudent(input: {
     studentId: string;
     limit: number;
@@ -645,6 +774,48 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     completedAt: Date;
   }): Promise<RevisionSessionResultDto> {
     return this.completeDiagnosticSession(input, RevisionSessionMode.EXAM);
+  }
+
+  async completeDeepOpenAnswerSession(input: {
+    studentId: string;
+    sessionId: string;
+    completedAt: Date;
+  }): Promise<CourseDeepRevisionResultDto> {
+    return this.prisma.$transaction(async (tx) => {
+      const session = (await tx.revisionSession.findFirst({
+        where: {
+          id: input.sessionId,
+          studentId: input.studentId,
+        },
+        include: deepRevisionResultInclude(),
+      })) as unknown as DeepRevisionSessionRecord | null;
+
+      assertDeepRevisionSessionWithResult(session);
+
+      const { action, activity, evaluation } =
+        resolveDeepRevisionResultParts(session);
+      const completedAt =
+        session.completedAt ?? activity.completedAt ?? input.completedAt;
+
+      if (session.status !== RevisionSessionStatus.COMPLETED) {
+        await tx.revisionSessionAction.update({
+          where: { id: action.id },
+          data: {
+            status: RevisionSessionActionStatus.COMPLETED,
+            completedAt,
+          },
+        });
+        await tx.revisionSession.update({
+          where: { id: session.id },
+          data: {
+            status: RevisionSessionStatus.COMPLETED,
+            completedAt,
+          },
+        });
+      }
+
+      return toDeepRevisionResult(session, activity, evaluation, completedAt);
+    });
   }
 
   private async completeDiagnosticSession(
@@ -861,6 +1032,27 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
     };
 
     return toRevisionSessionResult(completedSession, activityWithResult);
+  }
+
+  async findDeepResultByIdForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<CourseDeepRevisionResultDto> {
+    const session = (await this.prisma.revisionSession.findFirst({
+      where: {
+        id: input.sessionId,
+        studentId: input.studentId,
+      },
+      include: deepRevisionResultInclude(),
+    })) as unknown as DeepRevisionSessionRecord | null;
+
+    assertDeepRevisionSessionWithResult(session);
+
+    const { activity, evaluation } = resolveDeepRevisionResultParts(session);
+    const completedAt =
+      session.completedAt ?? activity.completedAt ?? evaluation.createdAt;
+
+    return toDeepRevisionResult(session, activity, evaluation, completedAt);
   }
 
   async findPlanningContextByIdForStudent(input: {
@@ -1080,6 +1272,247 @@ export class PrismaRevisionSessionsRepository implements RevisionSessionsReposit
       question,
     };
   }
+}
+
+const DEEP_REVISION_SOURCE_EXCERPT_MAX_LENGTH = 600;
+
+function deepRevisionResultInclude(): Prisma.RevisionSessionInclude {
+  return {
+    course: {
+      select: {
+        id: true,
+        title: true,
+      },
+    },
+    actions: {
+      orderBy: [{ displayOrder: 'asc' }, { createdAt: 'asc' }],
+      include: {
+        activitySession: {
+          include: {
+            knowledgeUnit: {
+              select: {
+                id: true,
+                title: true,
+                document: {
+                  select: {
+                    fileName: true,
+                  },
+                },
+              },
+            },
+            openQuestion: {
+              include: {
+                sources: {
+                  include: {
+                    chunk: {
+                      select: {
+                        id: true,
+                        text: true,
+                        pageNumber: true,
+                        index: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            openAnswerEvaluation: true,
+          },
+        },
+      },
+    },
+  };
+}
+
+function assertDeepRevisionSessionWithResult(
+  session: DeepRevisionSessionRecord | null,
+): asserts session is DeepRevisionSessionWithResultRecord {
+  if (!session) {
+    throw new Error('Deep revision session not found');
+  }
+
+  if (session.mode !== RevisionSessionMode.DEEP || !session.course) {
+    throw new Error('Deep revision session not found');
+  }
+}
+
+function resolveDeepRevisionResultParts(session: DeepRevisionSessionRecord): {
+  action: DeepRevisionActionRecord;
+  activity: DeepRevisionActivityRecord;
+  evaluation: DeepRevisionEvaluationRecord;
+} {
+  const action = selectCurrentDeepAction(session.actions ?? []);
+  const activity = action?.activitySession ?? null;
+
+  if (
+    !action ||
+    action.kind !== RevisionSessionActionKind.OPEN_QUESTION ||
+    !action.activitySessionId ||
+    !activity ||
+    activity.type !== ActivityType.OPEN_QUESTION ||
+    !activity.openQuestion ||
+    !activity.openAnswerEvaluation
+  ) {
+    throw new Error('Deep revision result not found');
+  }
+
+  if (
+    activity.status !== ActivityStatus.SUBMITTED &&
+    activity.status !== ActivityStatus.COMPLETED
+  ) {
+    throw new Error('Deep revision result not found');
+  }
+
+  return {
+    action,
+    activity,
+    evaluation: activity.openAnswerEvaluation,
+  };
+}
+
+function selectCurrentDeepAction(
+  actions: DeepRevisionActionRecord[],
+): DeepRevisionActionRecord | undefined {
+  return actions.length ? actions[actions.length - 1] : undefined;
+}
+
+function toDeepRevisionResult(
+  session: DeepRevisionSessionWithResultRecord,
+  activity: DeepRevisionActivityRecord,
+  evaluation: DeepRevisionEvaluationRecord,
+  completedAt: Date,
+): CourseDeepRevisionResultDto {
+  const question = activity.openQuestion;
+
+  if (!question) {
+    throw new Error('Deep revision result not found');
+  }
+
+  const sources = toDeepRevisionSources(question.sources ?? []);
+
+  return {
+    session: {
+      id: session.id,
+      mode: 'DEEP',
+      status: 'COMPLETED',
+      courseId: session.course.id,
+      createdAt: session.createdAt,
+      completedAt,
+    },
+    scope: {
+      kind: 'knowledge_unit',
+      id: activity.knowledgeUnit.id,
+      label: activity.knowledgeUnit.title,
+      sourceLabel: activity.knowledgeUnit.document?.fileName ?? null,
+    },
+    question: {
+      id: question.id,
+      prompt: question.prompt,
+      instructions: question.instructions,
+      sources,
+    },
+    answer: {
+      text: evaluation.answerText,
+      submittedAt: evaluation.createdAt,
+    },
+    evaluation: {
+      id: evaluation.id,
+      status: evaluation.status,
+      score: evaluation.score,
+      maxScore: evaluation.maxScore,
+      feedback: evaluation.feedback,
+      presentPoints: parseJsonArray(evaluation.presentPoints),
+      missingPoints: parseJsonArray(evaluation.missingPoints),
+      errors: parseJsonArray(evaluation.errors),
+      modelAnswer: evaluation.modelAnswer,
+      advice: evaluation.advice,
+      // The evaluator stores its selected chunk ids only in the immediate
+      // response. Reopen uses the persisted question sources instead.
+      sources: evaluation.status === 'READY' ? sources : [],
+    },
+  };
+}
+
+function toDeepRevisionHistoryItem(
+  session: DeepRevisionSessionRecord,
+): CourseDeepRevisionHistoryItemDto | null {
+  if (!session.course) {
+    return null;
+  }
+
+  try {
+    const { activity, evaluation } = resolveDeepRevisionResultParts(session);
+
+    if (evaluation.status !== 'READY') {
+      return null;
+    }
+
+    const submittedAt =
+      session.completedAt ?? activity.completedAt ?? evaluation.createdAt;
+
+    return {
+      sessionId: session.id,
+      type: 'deep_revision',
+      status: 'completed',
+      title: 'Révision approfondie',
+      course: {
+        id: session.course.id,
+        title: session.course.title,
+      },
+      knowledgeUnit: {
+        id: activity.knowledgeUnit.id,
+        title: activity.knowledgeUnit.title,
+      },
+      score: normalizeOpenAnswerScore(evaluation.score, evaluation.maxScore),
+      submittedAt,
+      resultPath: `/courses/${session.course.id}/deep-revision/sessions/${session.id}/result`,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function toDeepRevisionSources(
+  sources: DeepRevisionOpenQuestionRecord['sources'],
+): CourseDeepRevisionSourceDto[] {
+  return sources
+    .map((source) => ({
+      chunkId: source.chunkId,
+      text: truncateText(
+        source.chunk.text,
+        DEEP_REVISION_SOURCE_EXCERPT_MAX_LENGTH,
+      ),
+      pageNumber: source.chunk.pageNumber,
+      index: source.chunk.index,
+    }))
+    .sort((left, right) => left.index - right.index);
+}
+
+function normalizeOpenAnswerScore(
+  score: number | null,
+  maxScore: number | null,
+): number | null {
+  if (score === null) {
+    return null;
+  }
+
+  if (maxScore === null || maxScore <= 0) {
+    return score;
+  }
+
+  return score / maxScore;
+}
+
+function truncateText(text: string, maxLength: number): string {
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return text.slice(0, maxLength).trimEnd();
+}
+
+function parseJsonArray(input: unknown): unknown[] {
+  return Array.isArray(input) ? input : [];
 }
 
 function toRevisionSessionResponse(

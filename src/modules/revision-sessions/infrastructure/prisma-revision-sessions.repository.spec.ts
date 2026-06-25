@@ -1402,6 +1402,153 @@ describe('PrismaRevisionSessionsRepository', () => {
     expect(result.summary.durationSeconds).toBe(300);
     expect(result.knowledgeUnits).toEqual([]);
   });
+
+  it('completes a DEEP open answer session and returns its persisted result', async () => {
+    const { prisma, repository } = createRepository();
+    const completedAt = new Date('2026-06-25T10:12:00.000Z');
+    prisma.$transaction.mockImplementation((callback: TransactionCallback) =>
+      callback(prisma),
+    );
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      deepRevisionSessionRecord(),
+    );
+
+    const result = await repository.completeDeepOpenAnswerSession({
+      studentId: 'student-1',
+      sessionId: 'deep-session-1',
+      completedAt,
+    });
+
+    expect(prisma.revisionSessionAction.update).toHaveBeenCalledWith({
+      where: { id: 'deep-action-1' },
+      data: {
+        status: 'COMPLETED',
+        completedAt,
+      },
+    });
+    expect(prisma.revisionSession.update).toHaveBeenCalledWith({
+      where: { id: 'deep-session-1' },
+      data: {
+        status: 'COMPLETED',
+        completedAt,
+      },
+    });
+    expect(result).toMatchObject({
+      session: {
+        id: 'deep-session-1',
+        mode: 'DEEP',
+        status: 'COMPLETED',
+        courseId: 'course-1',
+      },
+      scope: {
+        id: 'ku-1',
+        label: 'La souveraineté',
+        sourceLabel: 'CM.pdf',
+      },
+      answer: {
+        text: 'La souveraineté appartient à la nation.',
+      },
+      evaluation: {
+        score: 0.75,
+        maxScore: 1,
+      },
+    });
+  });
+
+  it('loads a completed DEEP result without requiring the source to still be ready', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findFirst.mockResolvedValue(
+      deepRevisionSessionRecord({
+        status: 'COMPLETED',
+        completedAt: new Date('2026-06-25T10:12:00.000Z'),
+      }),
+    );
+
+    const result = await repository.findDeepResultByIdForStudent({
+      studentId: 'student-1',
+      sessionId: 'deep-session-1',
+    });
+
+    expect(prisma.revisionSession.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'deep-session-1',
+          studentId: 'student-1',
+        },
+      }),
+    );
+    expect(result.question.sources).toEqual([
+      {
+        chunkId: 'chunk-1',
+        text: 'La souveraineté appartient à la nation.',
+        pageNumber: 4,
+        index: 0,
+      },
+    ]);
+    expect(result.evaluation.sources).toHaveLength(1);
+  });
+
+  it('lists only corrected DEEP sessions in course history', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.revisionSession.findMany.mockResolvedValue([
+      deepRevisionSessionRecord({
+        status: 'COMPLETED',
+        completedAt: new Date('2026-06-25T10:12:00.000Z'),
+      }),
+      deepRevisionSessionRecord({
+        id: 'failed-deep-session',
+        actions: [
+          deepActionRecord({
+            activitySession: deepActivityRecord({
+              openAnswerEvaluation: deepEvaluationRecord({
+                status: 'FAILED',
+                score: null,
+                maxScore: null,
+              }),
+            }),
+          }),
+        ],
+      }),
+    ]);
+
+    const history = await repository.findCompletedCourseDeepSessionsForStudent({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 5,
+    });
+
+    const expectedWhere: unknown = expect.objectContaining({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      mode: 'DEEP',
+    });
+    expect(prisma.revisionSession.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expectedWhere,
+        take: 5,
+      }),
+    );
+    expect(history.items).toEqual([
+      {
+        sessionId: 'deep-session-1',
+        type: 'deep_revision',
+        status: 'completed',
+        title: 'Révision approfondie',
+        course: {
+          id: 'course-1',
+          title: 'Droit constitutionnel',
+        },
+        knowledgeUnit: {
+          id: 'ku-1',
+          title: 'La souveraineté',
+        },
+        score: 0.75,
+        submittedAt: new Date('2026-06-25T10:12:00.000Z'),
+        resultPath:
+          '/courses/course-1/deep-revision/sessions/deep-session-1/result',
+      },
+    ]);
+  });
 });
 
 type PrismaRevisionSessionsMock = ReturnType<typeof createPrismaMock>;
@@ -1590,6 +1737,119 @@ function diagnosticActivityRecordShape() {
       score: 1,
     },
     answers: [answerRecord()],
+  };
+}
+
+function deepRevisionSessionRecord(
+  overrides: Partial<ReturnType<typeof deepRevisionSessionRecordShape>> = {},
+) {
+  return { ...deepRevisionSessionRecordShape(), ...overrides };
+}
+
+function deepRevisionSessionRecordShape() {
+  return {
+    id: 'deep-session-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    courseId: 'course-1',
+    documentId: 'document-1',
+    knowledgeUnitId: 'ku-1',
+    mode: 'DEEP',
+    status: 'STARTED',
+    createdAt: new Date('2026-06-25T10:00:00.000Z'),
+    updatedAt: new Date('2026-06-25T10:12:00.000Z'),
+    completedAt: null,
+    course: {
+      id: 'course-1',
+      title: 'Droit constitutionnel',
+    },
+    actions: [deepActionRecord()],
+  };
+}
+
+function deepActionRecord(
+  overrides: Partial<ReturnType<typeof deepActionRecordShape>> = {},
+) {
+  return { ...deepActionRecordShape(), ...overrides };
+}
+
+function deepActionRecordShape() {
+  return {
+    id: 'deep-action-1',
+    sessionId: 'deep-session-1',
+    studentId: 'student-1',
+    subjectId: 'subject-1',
+    kind: 'OPEN_QUESTION',
+    status: 'READY',
+    displayOrder: 0,
+    activitySessionId: 'open-session-1',
+    documentId: 'document-1',
+    knowledgeUnitId: 'ku-1',
+    createdAt: new Date('2026-06-25T10:00:00.000Z'),
+    completedAt: null,
+    activitySession: deepActivityRecord(),
+  };
+}
+
+function deepActivityRecord(
+  overrides: Partial<ReturnType<typeof deepActivityRecordShape>> = {},
+) {
+  return { ...deepActivityRecordShape(), ...overrides };
+}
+
+function deepActivityRecordShape() {
+  return {
+    id: 'open-session-1',
+    status: 'SUBMITTED',
+    type: 'OPEN_QUESTION',
+    completedAt: new Date('2026-06-25T10:12:00.000Z'),
+    knowledgeUnit: {
+      id: 'ku-1',
+      title: 'La souveraineté',
+      document: {
+        fileName: 'CM.pdf',
+      },
+    },
+    openQuestion: {
+      id: 'open-question-1',
+      prompt: 'Explique la souveraineté nationale.',
+      instructions: 'Rédige une réponse structurée.',
+      sources: [
+        {
+          chunkId: 'chunk-1',
+          chunk: {
+            id: 'chunk-1',
+            text: 'La souveraineté appartient à la nation.',
+            pageNumber: 4,
+            index: 0,
+          },
+        },
+      ],
+    },
+    openAnswerEvaluation: deepEvaluationRecord(),
+  };
+}
+
+function deepEvaluationRecord(
+  overrides: Partial<ReturnType<typeof deepEvaluationRecordShape>> = {},
+) {
+  return { ...deepEvaluationRecordShape(), ...overrides };
+}
+
+function deepEvaluationRecordShape() {
+  return {
+    id: 'evaluation-1',
+    status: 'READY',
+    answerText: 'La souveraineté appartient à la nation.',
+    score: 0.75,
+    maxScore: 1,
+    feedback: 'Réponse structurée.',
+    presentPoints: ['La nation est identifiée.'],
+    missingPoints: ['La distinction avec la souveraineté populaire manque.'],
+    errors: [],
+    modelAnswer: 'Réponse modèle.',
+    advice: 'Continue.',
+    createdAt: new Date('2026-06-25T10:12:00.000Z'),
   };
 }
 

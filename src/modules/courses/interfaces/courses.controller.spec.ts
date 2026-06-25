@@ -56,6 +56,8 @@ import {
   CourseDeepRevisionAnswerInvalidError,
   CourseDeepRevisionScopeNotReadyError,
   CourseDeepRevisionSessionNotReadyError,
+  GetCourseDeepRevisionResultUseCase,
+  ListCourseDeepRevisionHistoryUseCase,
   StartCourseDeepRevisionSessionUseCase,
   SubmitCourseDeepRevisionAnswerUseCase,
 } from '../application/course-deep-revision-session.use-case';
@@ -1129,8 +1131,9 @@ describe('CoursesController', () => {
       session: {
         id: 'deep-session-1',
         mode: 'DEEP',
-        status: 'SUBMITTED',
+        status: 'COMPLETED',
         courseId: 'course-1',
+        completedAt: new Date('2026-06-25T10:12:00.000Z'),
       },
       evaluation: {
         id: 'evaluation-1',
@@ -1145,6 +1148,8 @@ describe('CoursesController', () => {
         advice: 'Continue.',
         sources: [],
       },
+      resultPath:
+        '/courses/course-1/deep-revision/sessions/deep-session-1/result',
     });
 
     await expect(
@@ -1159,7 +1164,7 @@ describe('CoursesController', () => {
     ).resolves.toMatchObject({
       session: {
         id: 'deep-session-1',
-        status: 'SUBMITTED',
+        status: 'COMPLETED',
       },
       evaluation: {
         score: 0.75,
@@ -1243,6 +1248,138 @@ describe('CoursesController', () => {
         },
       ),
     ).rejects.toThrow(BadRequestException);
+  });
+
+  it('returns a Révision approfondie result for the requested course session', async () => {
+    const { controller, getCourseDeepRevisionResult } = createController();
+    const completedAt = new Date('2026-06-25T10:12:00.000Z');
+    getCourseDeepRevisionResult.execute.mockResolvedValue({
+      session: {
+        id: 'deep-session-1',
+        mode: 'DEEP',
+        status: 'COMPLETED',
+        courseId: 'course-1',
+        createdAt: new Date('2026-06-25T10:00:00.000Z'),
+        completedAt,
+      },
+      scope: {
+        kind: 'knowledge_unit',
+        id: 'ku-1',
+        label: 'La souveraineté',
+        sourceLabel: 'CM.pdf',
+      },
+      question: {
+        id: 'open-question-1',
+        prompt: 'Explique la souveraineté nationale.',
+        instructions: 'Rédige une réponse structurée.',
+        sources: [],
+      },
+      answer: {
+        text: 'La souveraineté appartient à la nation.',
+        submittedAt: completedAt,
+      },
+      evaluation: {
+        id: 'evaluation-1',
+        status: 'READY',
+        score: 0.75,
+        maxScore: 1,
+        feedback: 'Réponse structurée.',
+        presentPoints: [],
+        missingPoints: [],
+        errors: [],
+        modelAnswer: 'Réponse modèle.',
+        advice: 'Continue.',
+        sources: [],
+      },
+    });
+
+    await expect(
+      controller.getDeepRevisionResult(
+        currentStudent,
+        ' course-1 ',
+        ' deep-session-1 ',
+      ),
+    ).resolves.toMatchObject({
+      session: {
+        id: 'deep-session-1',
+        status: 'COMPLETED',
+      },
+      answer: {
+        text: 'La souveraineté appartient à la nation.',
+      },
+      evaluation: {
+        score: 0.75,
+      },
+    });
+
+    expect(getCourseDeepRevisionResult.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      sessionId: 'deep-session-1',
+    });
+  });
+
+  it('maps unavailable Révision approfondie results to 404', async () => {
+    const { controller, getCourseDeepRevisionResult } = createController();
+    getCourseDeepRevisionResult.execute.mockRejectedValueOnce(
+      new Error('Deep revision result not found'),
+    );
+
+    await expect(
+      controller.getDeepRevisionResult(
+        currentStudent,
+        'course-1',
+        'deep-session-1',
+      ),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('returns Révision approfondie history for the requested course', async () => {
+    const { controller, listCourseDeepRevisionHistory } = createController();
+    listCourseDeepRevisionHistory.execute.mockResolvedValue({
+      items: [
+        {
+          sessionId: 'deep-session-1',
+          type: 'deep_revision',
+          status: 'completed',
+          title: 'Révision approfondie',
+          course: {
+            id: 'course-1',
+            title: 'Droit constitutionnel',
+          },
+          knowledgeUnit: {
+            id: 'ku-1',
+            title: 'La souveraineté',
+          },
+          score: 0.75,
+          submittedAt: new Date('2026-06-25T10:12:00.000Z'),
+          resultPath:
+            '/courses/course-1/deep-revision/sessions/deep-session-1/result',
+        },
+      ],
+    });
+
+    await expect(
+      controller.getCourseDeepRevisionHistory(
+        currentStudent,
+        ' course-1 ',
+        '5',
+      ),
+    ).resolves.toMatchObject({
+      items: [
+        {
+          sessionId: 'deep-session-1',
+          title: 'Révision approfondie',
+          score: 0.75,
+        },
+      ],
+    });
+
+    expect(listCourseDeepRevisionHistory.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 5,
+    });
   });
 
   it('defaults course quick revision questionCount when omitted', async () => {
@@ -1386,6 +1523,8 @@ function createController() {
   const getCourseDeepRevisionOptions = { execute: jest.fn() };
   const startCourseDeepRevisionSession = { execute: jest.fn() };
   const submitCourseDeepRevisionAnswer = { execute: jest.fn() };
+  const getCourseDeepRevisionResult = { execute: jest.fn() };
+  const listCourseDeepRevisionHistory = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getResumableCourseRevisionSession = { execute: jest.fn() };
   const listCourseRevisionSessionHistory = { execute: jest.fn() };
@@ -1418,6 +1557,8 @@ function createController() {
       getCourseDeepRevisionOptions as unknown as GetCourseDeepRevisionOptionsUseCase,
       startCourseDeepRevisionSession as unknown as StartCourseDeepRevisionSessionUseCase,
       submitCourseDeepRevisionAnswer as unknown as SubmitCourseDeepRevisionAnswerUseCase,
+      getCourseDeepRevisionResult as unknown as GetCourseDeepRevisionResultUseCase,
+      listCourseDeepRevisionHistory as unknown as ListCourseDeepRevisionHistoryUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getResumableCourseRevisionSession as unknown as GetResumableCourseRevisionSessionUseCase,
       listCourseRevisionSessionHistory as unknown as ListCourseRevisionSessionHistoryUseCase,
@@ -1448,6 +1589,8 @@ function createController() {
     getCourseDeepRevisionOptions,
     startCourseDeepRevisionSession,
     submitCourseDeepRevisionAnswer,
+    getCourseDeepRevisionResult,
+    listCourseDeepRevisionHistory,
     startCourseQuickRevisionSession,
     getResumableCourseRevisionSession,
     listCourseRevisionSessionHistory,

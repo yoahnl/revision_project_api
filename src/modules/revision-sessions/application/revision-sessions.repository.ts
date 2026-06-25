@@ -3,6 +3,10 @@ import type {
   RevisionSessionResultDto,
 } from '../domain/revision-session-result.entity';
 import type {
+  CourseDeepRevisionHistoryResponseDto,
+  CourseDeepRevisionResultDto,
+} from '../domain/deep-revision-result.entity';
+import type {
   RevisionSessionActionKindValue,
   RevisionSessionActionStatusValue,
   RevisionSessionModeValue,
@@ -96,6 +100,12 @@ export interface RevisionSessionsRepository {
     limit: number;
   }): Promise<RevisionSessionHistoryResponseDto>;
 
+  findCompletedCourseDeepSessionsForStudent(input: {
+    studentId: string;
+    courseId: string;
+    limit: number;
+  }): Promise<CourseDeepRevisionHistoryResponseDto>;
+
   findCompletedSessionsForStudent(input: {
     studentId: string;
     limit: number;
@@ -143,8 +153,19 @@ export interface RevisionSessionsRepository {
     completedAt: Date;
   }): Promise<RevisionSessionResultDto>;
 
+  completeDeepOpenAnswerSession(input: {
+    studentId: string;
+    sessionId: string;
+    completedAt: Date;
+  }): Promise<CourseDeepRevisionResultDto>;
+
   findResultByIdForStudent(input: {
     studentId: string;
     sessionId: string;
   }): Promise<RevisionSessionResultDto>;
+
+  findDeepResultByIdForStudent(input: {
+    studentId: string;
+    sessionId: string;
+  }): Promise<CourseDeepRevisionResultDto>;
 }

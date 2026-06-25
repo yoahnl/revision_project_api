@@ -85,6 +85,8 @@ import {
   CourseDeepRevisionAnswerInvalidError,
   CourseDeepRevisionScopeNotReadyError,
   CourseDeepRevisionSessionNotReadyError,
+  GetCourseDeepRevisionResultUseCase,
+  ListCourseDeepRevisionHistoryUseCase,
   StartCourseDeepRevisionSessionUseCase,
   SubmitCourseDeepRevisionAnswerUseCase,
 } from '../application/course-deep-revision-session.use-case';
@@ -137,6 +139,8 @@ export class CoursesController {
     private readonly getCourseDeepRevisionOptionsUseCase: GetCourseDeepRevisionOptionsUseCase,
     private readonly startCourseDeepRevisionSessionUseCase: StartCourseDeepRevisionSessionUseCase,
     private readonly submitCourseDeepRevisionAnswerUseCase: SubmitCourseDeepRevisionAnswerUseCase,
+    private readonly getCourseDeepRevisionResultUseCase: GetCourseDeepRevisionResultUseCase,
+    private readonly listCourseDeepRevisionHistoryUseCase: ListCourseDeepRevisionHistoryUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getResumableCourseRevisionSessionUseCase: GetResumableCourseRevisionSessionUseCase,
     private readonly listCourseRevisionSessionHistoryUseCase: ListCourseRevisionSessionHistoryUseCase,
@@ -385,6 +389,21 @@ export class CoursesController {
       .catch(normalizeCourseError);
   }
 
+  @Get('courses/:courseId/deep-revision/sessions/:sessionId/result')
+  getDeepRevisionResult(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Param('sessionId') sessionId: string,
+  ) {
+    return this.getCourseDeepRevisionResultUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        sessionId: trimRequiredString(sessionId, 'Session id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+
   @Get('subjects/:subjectId/progress')
   getSubjectProgress(
     @CurrentStudent() student: AuthenticatedStudent,
@@ -610,6 +629,21 @@ export class CoursesController {
     @Query('limit') limit?: string,
   ) {
     return this.listCourseExamPreparationSessionHistoryUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        limit: normalizeOptionalHistoryLimitQuery(limit),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/deep-revision/history')
+  getCourseDeepRevisionHistory(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Query('limit') limit?: string,
+  ) {
+    return this.listCourseDeepRevisionHistoryUseCase
       .execute({
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
@@ -1237,7 +1271,9 @@ function normalizeCourseError(error: unknown): never {
   if (
     error instanceof Error &&
     (error.message === 'Course not found' ||
-      error.message === 'Course subject not found')
+      error.message === 'Course subject not found' ||
+      error.message === 'Deep revision session not found' ||
+      error.message === 'Deep revision result not found')
   ) {
     throw new NotFoundException(error.message);
   }

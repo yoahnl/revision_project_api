@@ -41,6 +41,8 @@ import { StartCourseExamPreparationSessionUseCase } from './application/start-co
 import { StartCourseQuickRevisionSessionUseCase } from './application/start-course-quick-revision-session.use-case';
 import { StartCourseRichRevisionSessionUseCase } from './application/start-course-rich-revision-session.use-case';
 import {
+  GetCourseDeepRevisionResultUseCase,
+  ListCourseDeepRevisionHistoryUseCase,
   StartCourseDeepRevisionSessionUseCase,
   SubmitCourseDeepRevisionAnswerUseCase,
 } from './application/course-deep-revision-session.use-case';
@@ -88,6 +90,8 @@ import { CoursesController } from './interfaces/courses.controller';
     StartCourseRichRevisionSessionUseCase,
     StartCourseDeepRevisionSessionUseCase,
     SubmitCourseDeepRevisionAnswerUseCase,
+    GetCourseDeepRevisionResultUseCase,
+    ListCourseDeepRevisionHistoryUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,
     {
@@ -126,6 +130,8 @@ import { CoursesController } from './interfaces/courses.controller';
     StartCourseRichRevisionSessionUseCase,
     StartCourseDeepRevisionSessionUseCase,
     SubmitCourseDeepRevisionAnswerUseCase,
+    GetCourseDeepRevisionResultUseCase,
+    ListCourseDeepRevisionHistoryUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,
     COURSES_REPOSITORY,

@@ -51,6 +51,10 @@ export class RequestNextRevisionSessionActionUseCase {
       );
     }
 
+    if (context.session.mode === 'DEEP') {
+      throw new Error('Deep revision sessions do not support next actions');
+    }
+
     const coachInput = toCoachInput(input.studentId, context);
     const decision = await this.resolveDecision(coachInput);
     const actionPayload = await this.createActionPayload({

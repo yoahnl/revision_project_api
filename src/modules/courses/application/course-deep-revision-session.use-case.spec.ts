@@ -10,6 +10,8 @@ import {
   CourseDeepRevisionAnswerInvalidError,
   CourseDeepRevisionScopeNotReadyError,
   CourseDeepRevisionSessionNotReadyError,
+  GetCourseDeepRevisionResultUseCase,
+  ListCourseDeepRevisionHistoryUseCase,
   StartCourseDeepRevisionSessionUseCase,
   SubmitCourseDeepRevisionAnswerUseCase,
 } from './course-deep-revision-session.use-case';
@@ -212,6 +214,9 @@ describe('SubmitCourseDeepRevisionAnswerUseCase', () => {
       ],
     });
     submitOpenAnswer.execute.mockResolvedValue(openAnswerResult());
+    revisionSessionsRepository.completeDeepOpenAnswerSession.mockResolvedValue(
+      deepRevisionResult(),
+    );
 
     const response = await useCase.execute({
       studentId: 'student-1',
@@ -237,14 +242,25 @@ describe('SubmitCourseDeepRevisionAnswerUseCase', () => {
       answerText:
         'La souveraineté nationale signifie que le pouvoir vient de la nation.',
     });
+    const expectedCompletedAt: Date = expect.any(Date) as Date;
+    expect(
+      revisionSessionsRepository.completeDeepOpenAnswerSession,
+    ).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      sessionId: 'deep-session-1',
+      completedAt: expectedCompletedAt,
+    });
     expect(response).toEqual({
       session: {
         id: 'deep-session-1',
         mode: 'DEEP',
-        status: 'SUBMITTED',
+        status: 'COMPLETED',
         courseId: 'course-1',
+        completedAt: new Date('2026-06-25T10:12:00.000Z'),
       },
       evaluation: openAnswerResult().evaluation,
+      resultPath:
+        '/courses/course-1/deep-revision/sessions/deep-session-1/result',
     });
   });
 
@@ -291,6 +307,99 @@ describe('SubmitCourseDeepRevisionAnswerUseCase', () => {
   });
 });
 
+describe('GetCourseDeepRevisionResultUseCase', () => {
+  it('returns a persisted DEEP result after course ownership validation', async () => {
+    const { repository, revisionSessionsRepository, useCase } =
+      createResultHarness();
+    repository.findDetailByIdForStudent.mockResolvedValue(courseDetail());
+    revisionSessionsRepository.findDeepResultByIdForStudent.mockResolvedValue(
+      deepRevisionResult(),
+    );
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        sessionId: 'deep-session-1',
+      }),
+    ).resolves.toMatchObject({
+      session: {
+        id: 'deep-session-1',
+        status: 'COMPLETED',
+      },
+      answer: {
+        text: 'La souveraineté appartient à la nation.',
+      },
+      evaluation: {
+        score: 0.75,
+      },
+    });
+  });
+
+  it('refuses a DEEP result from another course', async () => {
+    const { repository, revisionSessionsRepository, useCase } =
+      createResultHarness();
+    repository.findDetailByIdForStudent.mockResolvedValue(courseDetail());
+    revisionSessionsRepository.findDeepResultByIdForStudent.mockResolvedValue(
+      deepRevisionResult({ courseId: 'other-course' }),
+    );
+
+    await expect(
+      useCase.execute({
+        studentId: 'student-1',
+        courseId: 'course-1',
+        sessionId: 'deep-session-1',
+      }),
+    ).rejects.toThrow(CourseDeepRevisionSessionNotReadyError);
+  });
+});
+
+describe('ListCourseDeepRevisionHistoryUseCase', () => {
+  it('lists persisted DEEP history after course ownership validation', async () => {
+    const { repository, revisionSessionsRepository, useCase } =
+      createHistoryHarness();
+    repository.findDetailByIdForStudent.mockResolvedValue(courseDetail());
+    revisionSessionsRepository.findCompletedCourseDeepSessionsForStudent.mockResolvedValue(
+      {
+        items: [
+          {
+            sessionId: 'deep-session-1',
+            type: 'deep_revision',
+            status: 'completed',
+            title: 'Révision approfondie',
+            course: {
+              id: 'course-1',
+              title: 'Droit constitutionnel',
+            },
+            knowledgeUnit: {
+              id: 'ku-1',
+              title: 'La souveraineté',
+            },
+            score: 0.75,
+            submittedAt: new Date('2026-06-25T10:12:00.000Z'),
+            resultPath:
+              '/courses/course-1/deep-revision/sessions/deep-session-1/result',
+          },
+        ],
+      },
+    );
+
+    await useCase.execute({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 3,
+    });
+
+    expect(
+      revisionSessionsRepository.findCompletedCourseDeepSessionsForStudent,
+    ).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      limit: 3,
+    });
+  });
+});
+
 function createStartHarness() {
   const repository = createCoursesRepositoryMock();
   const startRevisionSession = {
@@ -311,6 +420,7 @@ function createSubmitHarness() {
   const repository = createCoursesRepositoryMock();
   const revisionSessionsRepository = {
     findByIdForStudent: jest.fn(),
+    completeDeepOpenAnswerSession: jest.fn(),
   };
   const activitiesRepository = {
     findOpenAnswerEvaluationContext: jest.fn(),
@@ -329,6 +439,38 @@ function createSubmitHarness() {
       revisionSessionsRepository as unknown as RevisionSessionsRepository,
       activitiesRepository as unknown as ActivitiesRepository,
       submitOpenAnswer as unknown as SubmitOpenAnswerUseCase,
+    ),
+  };
+}
+
+function createResultHarness() {
+  const repository = createCoursesRepositoryMock();
+  const revisionSessionsRepository = {
+    findDeepResultByIdForStudent: jest.fn(),
+  };
+
+  return {
+    repository,
+    revisionSessionsRepository,
+    useCase: new GetCourseDeepRevisionResultUseCase(
+      repository as unknown as CoursesRepository,
+      revisionSessionsRepository as unknown as RevisionSessionsRepository,
+    ),
+  };
+}
+
+function createHistoryHarness() {
+  const repository = createCoursesRepositoryMock();
+  const revisionSessionsRepository = {
+    findCompletedCourseDeepSessionsForStudent: jest.fn(),
+  };
+
+  return {
+    repository,
+    revisionSessionsRepository,
+    useCase: new ListCourseDeepRevisionHistoryUseCase(
+      repository as unknown as CoursesRepository,
+      revisionSessionsRepository as unknown as RevisionSessionsRepository,
     ),
   };
 }
@@ -486,5 +628,35 @@ function openAnswerResult(): OpenAnswerSubmissionResult {
         },
       ],
     },
+  };
+}
+
+function deepRevisionResult(overrides: { courseId?: string } = {}) {
+  return {
+    session: {
+      id: 'deep-session-1',
+      mode: 'DEEP' as const,
+      status: 'COMPLETED' as const,
+      courseId: overrides.courseId ?? 'course-1',
+      createdAt: new Date('2026-06-25T10:00:00.000Z'),
+      completedAt: new Date('2026-06-25T10:12:00.000Z'),
+    },
+    scope: {
+      kind: 'knowledge_unit' as const,
+      id: 'ku-1',
+      label: 'La souveraineté',
+      sourceLabel: 'CM.pdf',
+    },
+    question: {
+      id: 'open-question-1',
+      prompt: 'Explique la souveraineté nationale.',
+      instructions: 'Rédige une réponse structurée.',
+      sources: [],
+    },
+    answer: {
+      text: 'La souveraineté appartient à la nation.',
+      submittedAt: new Date('2026-06-25T10:12:00.000Z'),
+    },
+    evaluation: openAnswerResult().evaluation,
   };
 }

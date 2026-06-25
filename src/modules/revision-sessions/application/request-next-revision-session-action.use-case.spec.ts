@@ -135,6 +135,54 @@ describe('RequestNextRevisionSessionActionUseCase', () => {
     expect(repository.appendAction.mock.calls).toHaveLength(0);
   });
 
+  it('rejects next actions for deep revision sessions before creating activities', async () => {
+    const repository = createRepository();
+    repository.findPlanningContextByIdForStudent.mockResolvedValueOnce({
+      session: {
+        id: 'revision-session-1',
+        status: 'STARTED',
+        subjectId: 'subject-1',
+        courseId: 'course-1',
+        documentId: 'document-1',
+        knowledgeUnitId: 'unit-course-1',
+        mode: 'DEEP',
+      },
+      actions: [],
+      allowedKnowledgeUnitIds: ['unit-course-1'],
+      allowedKnowledgeUnits: [
+        {
+          id: 'unit-course-1',
+          documentId: 'document-1',
+          title: 'Notion du cours',
+        },
+      ],
+    });
+    const generator = createGenerator({
+      actionKind: 'DIAGNOSTIC_QUIZ',
+      knowledgeUnitId: null,
+      reasonCode: 'CHECK_UNDERSTANDING',
+    });
+    const startNextActivity = createStartNextActivityUseCase();
+    const startOpenQuestionActivity = createStartOpenQuestionActivityUseCase();
+
+    await expect(
+      new RequestNextRevisionSessionActionUseCase(
+        repository,
+        generator,
+        startNextActivity,
+        startOpenQuestionActivity,
+      ).execute({
+        studentId: 'student-1',
+        sessionId: 'revision-session-1',
+      }),
+    ).rejects.toThrow('Deep revision sessions do not support next actions');
+
+    expect(generator.generate.mock.calls).toHaveLength(0);
+    expect(startNextActivity.execute.mock.calls).toHaveLength(0);
+    expect(startOpenQuestionActivity.execute.mock.calls).toHaveLength(0);
+    expect(repository.appendAction.mock.calls).toHaveLength(0);
+  });
+
   it('creates an open question from a coach decision', async () => {
     const repository = createRepository();
     const generator = createGenerator({
