@@ -30,6 +30,7 @@ import {
   PrepareCourseQuestionBankUseCase,
 } from '../application/course-question-bank-readiness.use-case';
 import { GetCourseExamPreparationOptionsUseCase } from '../application/get-course-exam-preparation-options.use-case';
+import { GetCourseRichRevisionOptionsUseCase } from '../application/get-course-rich-revision-options.use-case';
 import {
   ArchiveCourseSourceUseCase,
   GetCourseSourceLifecycleUseCase,
@@ -46,6 +47,10 @@ import { ListCourseExamPreparationSessionHistoryUseCase } from '../../revision-s
 import { ListCourseRevisionSessionHistoryUseCase } from '../../revision-sessions/application/list-revision-session-history.use-case';
 import { ListCourseRichClosedExerciseHistoryUseCase } from '../../activities/application/rich-closed-questions/list-course-rich-closed-exercise-history.use-case';
 import { StartCourseExamPreparationSessionUseCase } from '../application/start-course-exam-preparation-session.use-case';
+import {
+  CourseRichRevisionScopeNotReadyError,
+  StartCourseRichRevisionSessionUseCase,
+} from '../application/start-course-rich-revision-session.use-case';
 
 describe('CoursesController', () => {
   it('lists courses for the current student and subject', async () => {
@@ -833,6 +838,162 @@ describe('CoursesController', () => {
     });
   });
 
+  it('returns QCM complet options for the current student and course', async () => {
+    const { controller, getCourseRichRevisionOptions } = createController();
+    getCourseRichRevisionOptions.execute.mockResolvedValue({
+      course: {
+        id: 'course-1',
+        title: 'Droit constitutionnel',
+        subjectId: 'subject-1',
+      },
+      readiness: {
+        canStart: true,
+        state: 'READY',
+        userMessage: 'Ton cours est prêt pour un QCM complet.',
+        blockers: [],
+        readySourceCount: 1,
+        readyKnowledgeUnitCount: 1,
+      },
+      scopeOptions: [
+        {
+          kind: 'knowledge_unit',
+          id: 'ku-1',
+          documentId: 'document-1',
+          label: 'Responsabilité politique',
+          sourceLabel: 'CM.pdf',
+          canSelect: true,
+        },
+      ],
+      questionCountOptions: [6, 10, 13],
+      defaultQuestionCount: 6,
+      supportedQuestionKinds: ['single_choice', 'multiple_choice'],
+      complexityProfiles: ['standard', 'advanced'],
+      defaultConfig: {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+        questionCount: 6,
+        complexityProfile: 'standard',
+      },
+      nextStep: {
+        kind: 'configuration_ready',
+        userMessage: 'Choisis une notion et démarre le QCM complet.',
+      },
+    });
+
+    await expect(
+      controller.getRichRevisionOptions(currentStudent, ' course-1 '),
+    ).resolves.toMatchObject({
+      course: {
+        id: 'course-1',
+        title: 'Droit constitutionnel',
+      },
+      scopeOptions: [
+        {
+          kind: 'knowledge_unit',
+          id: 'ku-1',
+        },
+      ],
+      questionCountOptions: [6, 10, 13],
+      defaultConfig: {
+        complexityProfile: 'standard',
+      },
+    });
+
+    expect(getCourseRichRevisionOptions.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+  });
+
+  it('starts a QCM complet session from a validated configuration', async () => {
+    const { controller, startCourseRichRevisionSession } = createController();
+    startCourseRichRevisionSession.execute.mockResolvedValue(
+      richClosedExerciseResponse(),
+    );
+
+    await expect(
+      controller.startRichRevisionSession(currentStudent, ' course-1 ', {
+        scopeKind: 'knowledge_unit',
+        scopeId: ' ku-1 ',
+        questionCount: 13,
+        complexityProfile: 'advanced',
+      }),
+    ).resolves.toMatchObject({
+      sessionId: 'rich-session-1',
+      type: 'rich_closed_exercise',
+    });
+
+    expect(startCourseRichRevisionSession.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      scopeKind: 'knowledge_unit',
+      scopeId: 'ku-1',
+      questionCount: 13,
+      complexityProfile: 'advanced',
+    });
+  });
+
+  it('rejects unsupported QCM complet body fields and invalid presets', () => {
+    const { controller, startCourseRichRevisionSession } = createController();
+
+    for (const body of [
+      {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+        questionCount: 6,
+        complexityProfile: 'standard',
+        documentId: 'document-1',
+      },
+      {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+        questionCount: 6,
+        complexityProfile: 'standard',
+        questionTypeMix: {},
+      },
+      {
+        scopeKind: 'course',
+        scopeId: 'course-1',
+        questionCount: 6,
+        complexityProfile: 'standard',
+      },
+      {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+        questionCount: 14,
+        complexityProfile: 'standard',
+      },
+      {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+        questionCount: 6,
+        complexityProfile: 'exam',
+      },
+    ]) {
+      expect(() =>
+        controller.startRichRevisionSession(currentStudent, 'course-1', body),
+      ).toThrow(BadRequestException);
+    }
+
+    expect(startCourseRichRevisionSession.execute).not.toHaveBeenCalled();
+  });
+
+  it('maps unavailable QCM complet scopes to 409', async () => {
+    const { controller, startCourseRichRevisionSession } = createController();
+    startCourseRichRevisionSession.execute.mockRejectedValueOnce(
+      new CourseRichRevisionScopeNotReadyError(),
+    );
+
+    await expect(
+      controller.startRichRevisionSession(currentStudent, 'course-1', {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+        questionCount: 6,
+        complexityProfile: 'standard',
+      }),
+    ).rejects.toThrow(ConflictException);
+  });
+
   it('defaults course quick revision questionCount when omitted', async () => {
     const { controller, startCourseQuickRevisionSession } = createController();
     startCourseQuickRevisionSession.execute.mockResolvedValue(
@@ -969,6 +1130,8 @@ function createController() {
   const prepareCourseQuestionBank = { execute: jest.fn() };
   const getCourseExamPreparationOptions = { execute: jest.fn() };
   const startCourseExamPreparationSession = { execute: jest.fn() };
+  const getCourseRichRevisionOptions = { execute: jest.fn() };
+  const startCourseRichRevisionSession = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getResumableCourseRevisionSession = { execute: jest.fn() };
   const listCourseRevisionSessionHistory = { execute: jest.fn() };
@@ -996,6 +1159,8 @@ function createController() {
       prepareCourseQuestionBank as unknown as PrepareCourseQuestionBankUseCase,
       getCourseExamPreparationOptions as unknown as GetCourseExamPreparationOptionsUseCase,
       startCourseExamPreparationSession as unknown as StartCourseExamPreparationSessionUseCase,
+      getCourseRichRevisionOptions as unknown as GetCourseRichRevisionOptionsUseCase,
+      startCourseRichRevisionSession as unknown as StartCourseRichRevisionSessionUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getResumableCourseRevisionSession as unknown as GetResumableCourseRevisionSessionUseCase,
       listCourseRevisionSessionHistory as unknown as ListCourseRevisionSessionHistoryUseCase,
@@ -1021,6 +1186,8 @@ function createController() {
     prepareCourseQuestionBank,
     getCourseExamPreparationOptions,
     startCourseExamPreparationSession,
+    getCourseRichRevisionOptions,
+    startCourseRichRevisionSession,
     startCourseQuickRevisionSession,
     getResumableCourseRevisionSession,
     listCourseRevisionSessionHistory,
@@ -1043,6 +1210,33 @@ function questionBankReadiness(overrides: Record<string, unknown> = {}) {
     canPrepare: true,
     userMessage: 'Les questions doivent être préparées avant de commencer.',
     ...overrides,
+  };
+}
+
+function richClosedExerciseResponse() {
+  return {
+    sessionId: 'rich-session-1',
+    type: 'rich_closed_exercise',
+    id: 'rich-exercise-1',
+    version: 'rich-closed-question-v1',
+    title: 'QCM complet',
+    subjectId: 'subject-1',
+    documentId: 'document-1',
+    knowledgeUnitId: 'ku-1',
+    questions: [
+      {
+        id: 'question-1',
+        questionKind: 'single_choice',
+        prompt: 'Quel principe organise les pouvoirs ?',
+        difficulty: 'MEDIUM',
+        cognitiveSkill: 'comprehension',
+        sourceChunkIds: ['chunk-1'],
+        choices: [
+          { id: 'choice-a', label: 'La séparation des pouvoirs' },
+          { id: 'choice-b', label: 'Le hasard' },
+        ],
+      },
+    ],
   };
 }
 

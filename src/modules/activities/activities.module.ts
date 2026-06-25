@@ -71,6 +71,7 @@ import { ActivitiesController } from './interfaces/activities.controller';
   exports: [
     StartNextActivityUseCase,
     StartOpenQuestionActivityUseCase,
+    StartRichClosedExerciseUseCase,
     ListCourseRichClosedExerciseHistoryUseCase,
     SubmitActivityResultUseCase,
     QuestionBankService,

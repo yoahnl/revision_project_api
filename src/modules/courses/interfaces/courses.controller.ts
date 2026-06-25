@@ -64,6 +64,7 @@ import { DeleteCourseDocumentUseCase } from '../application/delete-course-docume
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
 import { GetCourseExamPreparationOptionsUseCase } from '../application/get-course-exam-preparation-options.use-case';
+import { GetCourseRichRevisionOptionsUseCase } from '../application/get-course-rich-revision-options.use-case';
 import { GetCourseLifecycleUseCase } from '../application/get-course-lifecycle.use-case';
 import { ListSubjectCoursesWithStatsUseCase } from '../application/list-subject-courses-with-stats.use-case';
 import {
@@ -73,6 +74,12 @@ import {
   StartCourseExamPreparationSessionUseCase,
   type CourseExamPreparationSessionScopeKind,
 } from '../application/start-course-exam-preparation-session.use-case';
+import {
+  CourseRichRevisionQuestionCountInvalidError,
+  CourseRichRevisionScopeNotReadyError,
+  StartCourseRichRevisionSessionUseCase,
+  type StartCourseRichRevisionSessionInput,
+} from '../application/start-course-rich-revision-session.use-case';
 import { UpdateCourseUseCase } from '../application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CourseContainsDocumentsError } from '../domain/course.entity';
@@ -117,6 +124,8 @@ export class CoursesController {
     private readonly prepareCourseQuestionBankUseCase: PrepareCourseQuestionBankUseCase,
     private readonly getCourseExamPreparationOptionsUseCase: GetCourseExamPreparationOptionsUseCase,
     private readonly startCourseExamPreparationSessionUseCase: StartCourseExamPreparationSessionUseCase,
+    private readonly getCourseRichRevisionOptionsUseCase: GetCourseRichRevisionOptionsUseCase,
+    private readonly startCourseRichRevisionSessionUseCase: StartCourseRichRevisionSessionUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getResumableCourseRevisionSessionUseCase: GetResumableCourseRevisionSessionUseCase,
     private readonly listCourseRevisionSessionHistoryUseCase: ListCourseRevisionSessionHistoryUseCase,
@@ -271,6 +280,39 @@ export class CoursesController {
     const validatedBody = validateExamPreparationSessionBody(body);
 
     return this.startCourseExamPreparationSessionUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        scopeKind: validatedBody.scopeKind,
+        scopeId: validatedBody.scopeId,
+        questionCount: validatedBody.questionCount,
+        complexityProfile: validatedBody.complexityProfile,
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/rich-revision/options')
+  getRichRevisionOptions(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getCourseRichRevisionOptionsUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/rich-revision/sessions')
+  startRichRevisionSession(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Body() body: Record<string, unknown> = {},
+  ) {
+    const validatedBody = validateRichRevisionSessionBody(body);
+
+    return this.startCourseRichRevisionSessionUseCase
       .execute({
         studentId: student.id,
         courseId: trimRequiredString(courseId, 'Course id is required'),
@@ -798,6 +840,84 @@ function validateExamPreparationSessionBody(
   };
 }
 
+function validateRichRevisionSessionBody(
+  body: Record<string, unknown> = {},
+): Pick<
+  StartCourseRichRevisionSessionInput,
+  'scopeKind' | 'scopeId' | 'questionCount' | 'complexityProfile'
+> {
+  const forbiddenFields = new Set([
+    'studentId',
+    'subjectId',
+    'courseId',
+    'documentId',
+    'knowledgeUnitId',
+    'questionTypeMix',
+  ]);
+  const forbiddenField = Object.keys(body).find((field) =>
+    forbiddenFields.has(field),
+  );
+
+  if (forbiddenField) {
+    throw new BadRequestException(
+      'Course rich revision only accepts its configuration fields',
+    );
+  }
+
+  const allowedFields = new Set([
+    'scopeKind',
+    'scopeId',
+    'questionCount',
+    'complexityProfile',
+  ]);
+  const unknownField = Object.keys(body).find(
+    (field) => !allowedFields.has(field),
+  );
+
+  if (unknownField) {
+    throw new BadRequestException(
+      'Course rich revision only accepts scopeKind, scopeId, questionCount and complexityProfile',
+    );
+  }
+
+  if (body.scopeKind !== 'knowledge_unit') {
+    throw new BadRequestException(
+      'Course rich revision scopeKind must be knowledge_unit',
+    );
+  }
+
+  const scopeId = trimRequiredString(
+    body.scopeId,
+    'Course rich revision scopeId is required',
+  );
+  const questionCount = body.questionCount;
+  if (
+    typeof questionCount !== 'number' ||
+    !Number.isInteger(questionCount) ||
+    ![6, 10, 13].includes(questionCount)
+  ) {
+    throw new BadRequestException(
+      'Course rich revision questionCount must be 6, 10 or 13',
+    );
+  }
+
+  if (
+    body.complexityProfile !== 'standard' &&
+    body.complexityProfile !== 'advanced'
+  ) {
+    throw new BadRequestException(
+      'Course rich revision complexityProfile must be standard or advanced',
+    );
+  }
+
+  return {
+    scopeKind: 'knowledge_unit',
+    scopeId,
+    questionCount,
+    complexityProfile: body.complexityProfile,
+  };
+}
+
 function validateQuestionBankPreparationBody(
   body: Record<string, unknown> = {},
 ): {
@@ -953,6 +1073,22 @@ function normalizeCourseError(error: unknown): never {
 
   if (error instanceof CourseExamPreparationInsufficientQuestionsError) {
     throw new ConflictException(error.message);
+  }
+
+  if (error instanceof CourseRichRevisionQuestionCountInvalidError) {
+    throw new BadRequestException(error.message);
+  }
+
+  if (error instanceof CourseRichRevisionScopeNotReadyError) {
+    throw new ConflictException(error.message);
+  }
+
+  if (
+    error instanceof Error &&
+    (error.message === 'RICH_CLOSED_SOURCE_CONTEXT_EMPTY' ||
+      error.message === 'RICH_CLOSED_START_INVALID_INPUT')
+  ) {
+    throw new ConflictException('QCM complet indisponible pour cette notion');
   }
 
   if (
