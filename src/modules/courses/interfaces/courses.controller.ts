@@ -63,6 +63,7 @@ import { ArchiveCourseUseCase } from '../application/archive-course.use-case';
 import { DeleteCourseDocumentUseCase } from '../application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from '../application/delete-course.use-case';
 import { GetCourseDetailUseCase } from '../application/get-course-detail.use-case';
+import { GetCourseDeepRevisionOptionsUseCase } from '../application/get-course-deep-revision-options.use-case';
 import { GetCourseExamPreparationOptionsUseCase } from '../application/get-course-exam-preparation-options.use-case';
 import { GetCourseRichRevisionOptionsUseCase } from '../application/get-course-rich-revision-options.use-case';
 import { GetCourseLifecycleUseCase } from '../application/get-course-lifecycle.use-case';
@@ -80,6 +81,13 @@ import {
   StartCourseRichRevisionSessionUseCase,
   type StartCourseRichRevisionSessionInput,
 } from '../application/start-course-rich-revision-session.use-case';
+import {
+  CourseDeepRevisionAnswerInvalidError,
+  CourseDeepRevisionScopeNotReadyError,
+  CourseDeepRevisionSessionNotReadyError,
+  StartCourseDeepRevisionSessionUseCase,
+  SubmitCourseDeepRevisionAnswerUseCase,
+} from '../application/course-deep-revision-session.use-case';
 import { UpdateCourseUseCase } from '../application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from '../application/upload-course-pdf-for-course.use-case';
 import { CourseContainsDocumentsError } from '../domain/course.entity';
@@ -126,6 +134,9 @@ export class CoursesController {
     private readonly startCourseExamPreparationSessionUseCase: StartCourseExamPreparationSessionUseCase,
     private readonly getCourseRichRevisionOptionsUseCase: GetCourseRichRevisionOptionsUseCase,
     private readonly startCourseRichRevisionSessionUseCase: StartCourseRichRevisionSessionUseCase,
+    private readonly getCourseDeepRevisionOptionsUseCase: GetCourseDeepRevisionOptionsUseCase,
+    private readonly startCourseDeepRevisionSessionUseCase: StartCourseDeepRevisionSessionUseCase,
+    private readonly submitCourseDeepRevisionAnswerUseCase: SubmitCourseDeepRevisionAnswerUseCase,
     private readonly startCourseQuickRevisionSessionUseCase: StartCourseQuickRevisionSessionUseCase,
     private readonly getResumableCourseRevisionSessionUseCase: GetResumableCourseRevisionSessionUseCase,
     private readonly listCourseRevisionSessionHistoryUseCase: ListCourseRevisionSessionHistoryUseCase,
@@ -320,6 +331,56 @@ export class CoursesController {
         scopeId: validatedBody.scopeId,
         questionCount: validatedBody.questionCount,
         complexityProfile: validatedBody.complexityProfile,
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/deep-revision/options')
+  getDeepRevisionOptions(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getCourseDeepRevisionOptionsUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/deep-revision/sessions')
+  startDeepRevisionSession(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Body() body: Record<string, unknown> = {},
+  ) {
+    const validatedBody = validateDeepRevisionSessionBody(body);
+
+    return this.startCourseDeepRevisionSessionUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        scopeKind: validatedBody.scopeKind,
+        scopeId: validatedBody.scopeId,
+      })
+      .catch(normalizeCourseError);
+  }
+
+  @Post('courses/:courseId/deep-revision/sessions/:sessionId/submit')
+  submitDeepRevisionAnswer(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+    @Param('sessionId') sessionId: string,
+    @Body() body: Record<string, unknown> = {},
+  ) {
+    const validatedBody = validateDeepRevisionAnswerBody(body);
+
+    return this.submitCourseDeepRevisionAnswerUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+        sessionId: trimRequiredString(sessionId, 'Session id is required'),
+        answer: validatedBody.answer,
       })
       .catch(normalizeCourseError);
   }
@@ -918,6 +979,77 @@ function validateRichRevisionSessionBody(
   };
 }
 
+function validateDeepRevisionSessionBody(body: Record<string, unknown> = {}): {
+  scopeKind: 'knowledge_unit';
+  scopeId: string;
+} {
+  const forbiddenFields = new Set([
+    'studentId',
+    'subjectId',
+    'courseId',
+    'documentId',
+    'knowledgeUnitId',
+    'questionTypeMix',
+    'questionCount',
+    'complexityProfile',
+  ]);
+  const forbiddenField = Object.keys(body).find((field) =>
+    forbiddenFields.has(field),
+  );
+
+  if (forbiddenField) {
+    throw new BadRequestException(
+      'Course deep revision only accepts scopeKind and scopeId',
+    );
+  }
+
+  const allowedFields = new Set(['scopeKind', 'scopeId']);
+  const unknownField = Object.keys(body).find(
+    (field) => !allowedFields.has(field),
+  );
+
+  if (unknownField) {
+    throw new BadRequestException(
+      'Course deep revision only accepts scopeKind and scopeId',
+    );
+  }
+
+  if (body.scopeKind !== 'knowledge_unit') {
+    throw new BadRequestException(
+      'Course deep revision scopeKind must be knowledge_unit',
+    );
+  }
+
+  return {
+    scopeKind: 'knowledge_unit',
+    scopeId: trimRequiredString(
+      body.scopeId,
+      'Course deep revision scopeId is required',
+    ),
+  };
+}
+
+function validateDeepRevisionAnswerBody(body: Record<string, unknown> = {}): {
+  answer: string;
+} {
+  const allowedFields = new Set(['answer']);
+  const unknownField = Object.keys(body).find(
+    (field) => !allowedFields.has(field),
+  );
+
+  if (unknownField) {
+    throw new BadRequestException('Course deep revision only accepts answer');
+  }
+
+  return {
+    answer: trimRequiredString(
+      body.answer,
+      'Course deep revision answer is required',
+      4000,
+    ),
+  };
+}
+
 function validateQuestionBankPreparationBody(
   body: Record<string, unknown> = {},
 ): {
@@ -1080,6 +1212,17 @@ function normalizeCourseError(error: unknown): never {
   }
 
   if (error instanceof CourseRichRevisionScopeNotReadyError) {
+    throw new ConflictException(error.message);
+  }
+
+  if (error instanceof CourseDeepRevisionAnswerInvalidError) {
+    throw new BadRequestException(error.message);
+  }
+
+  if (
+    error instanceof CourseDeepRevisionScopeNotReadyError ||
+    error instanceof CourseDeepRevisionSessionNotReadyError
+  ) {
     throw new ConflictException(error.message);
   }
 

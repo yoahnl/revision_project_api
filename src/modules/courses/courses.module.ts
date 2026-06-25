@@ -30,6 +30,7 @@ import { CreateCourseUseCase } from './application/create-course.use-case';
 import { DeleteCourseDocumentUseCase } from './application/delete-course-document.use-case';
 import { DeleteCourseUseCase } from './application/delete-course.use-case';
 import { GetCourseDetailUseCase } from './application/get-course-detail.use-case';
+import { GetCourseDeepRevisionOptionsUseCase } from './application/get-course-deep-revision-options.use-case';
 import { GetCourseLifecycleUseCase } from './application/get-course-lifecycle.use-case';
 import { GetCourseExamPreparationOptionsUseCase } from './application/get-course-exam-preparation-options.use-case';
 import { GetCourseRichRevisionOptionsUseCase } from './application/get-course-rich-revision-options.use-case';
@@ -39,6 +40,10 @@ import { ListSubjectCoursesUseCase } from './application/list-subject-courses.us
 import { StartCourseExamPreparationSessionUseCase } from './application/start-course-exam-preparation-session.use-case';
 import { StartCourseQuickRevisionSessionUseCase } from './application/start-course-quick-revision-session.use-case';
 import { StartCourseRichRevisionSessionUseCase } from './application/start-course-rich-revision-session.use-case';
+import {
+  StartCourseDeepRevisionSessionUseCase,
+  SubmitCourseDeepRevisionAnswerUseCase,
+} from './application/course-deep-revision-session.use-case';
 import { UpdateCourseUseCase } from './application/update-course.use-case';
 import { UploadCoursePdfForCourseUseCase } from './application/upload-course-pdf-for-course.use-case';
 import { PrismaCourseQuestionBankPreparationRepository } from './infrastructure/prisma-course-question-bank-preparation.repository';
@@ -65,6 +70,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseLifecycleUseCase,
     GetCourseExamPreparationOptionsUseCase,
     GetCourseRichRevisionOptionsUseCase,
+    GetCourseDeepRevisionOptionsUseCase,
     UpdateCourseUseCase,
     ArchiveCourseUseCase,
     DeleteCourseUseCase,
@@ -80,6 +86,8 @@ import { CoursesController } from './interfaces/courses.controller';
     StartCourseExamPreparationSessionUseCase,
     StartCourseQuickRevisionSessionUseCase,
     StartCourseRichRevisionSessionUseCase,
+    StartCourseDeepRevisionSessionUseCase,
+    SubmitCourseDeepRevisionAnswerUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,
     {
@@ -100,6 +108,7 @@ import { CoursesController } from './interfaces/courses.controller';
     GetCourseLifecycleUseCase,
     GetCourseExamPreparationOptionsUseCase,
     GetCourseRichRevisionOptionsUseCase,
+    GetCourseDeepRevisionOptionsUseCase,
     UpdateCourseUseCase,
     ArchiveCourseUseCase,
     DeleteCourseUseCase,
@@ -115,6 +124,8 @@ import { CoursesController } from './interfaces/courses.controller';
     StartCourseExamPreparationSessionUseCase,
     StartCourseQuickRevisionSessionUseCase,
     StartCourseRichRevisionSessionUseCase,
+    StartCourseDeepRevisionSessionUseCase,
+    SubmitCourseDeepRevisionAnswerUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,
     COURSES_REPOSITORY,

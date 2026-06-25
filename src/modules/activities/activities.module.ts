@@ -74,7 +74,9 @@ import { ActivitiesController } from './interfaces/activities.controller';
     StartRichClosedExerciseUseCase,
     ListCourseRichClosedExerciseHistoryUseCase,
     SubmitActivityResultUseCase,
+    SubmitOpenAnswerUseCase,
     QuestionBankService,
+    ACTIVITIES_REPOSITORY,
     QUESTION_BANK_REPOSITORY,
   ],
 })

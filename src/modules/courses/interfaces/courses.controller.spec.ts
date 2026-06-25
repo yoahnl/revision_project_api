@@ -30,6 +30,7 @@ import {
   PrepareCourseQuestionBankUseCase,
 } from '../application/course-question-bank-readiness.use-case';
 import { GetCourseExamPreparationOptionsUseCase } from '../application/get-course-exam-preparation-options.use-case';
+import { GetCourseDeepRevisionOptionsUseCase } from '../application/get-course-deep-revision-options.use-case';
 import { GetCourseRichRevisionOptionsUseCase } from '../application/get-course-rich-revision-options.use-case';
 import {
   ArchiveCourseSourceUseCase,
@@ -51,6 +52,13 @@ import {
   CourseRichRevisionScopeNotReadyError,
   StartCourseRichRevisionSessionUseCase,
 } from '../application/start-course-rich-revision-session.use-case';
+import {
+  CourseDeepRevisionAnswerInvalidError,
+  CourseDeepRevisionScopeNotReadyError,
+  CourseDeepRevisionSessionNotReadyError,
+  StartCourseDeepRevisionSessionUseCase,
+  SubmitCourseDeepRevisionAnswerUseCase,
+} from '../application/course-deep-revision-session.use-case';
 
 describe('CoursesController', () => {
   it('lists courses for the current student and subject', async () => {
@@ -994,6 +1002,249 @@ describe('CoursesController', () => {
     ).rejects.toThrow(ConflictException);
   });
 
+  it('returns Révision approfondie options for the current student and course', async () => {
+    const { controller, getCourseDeepRevisionOptions } = createController();
+    getCourseDeepRevisionOptions.execute.mockResolvedValue({
+      course: {
+        id: 'course-1',
+        title: 'Droit constitutionnel',
+        subjectId: 'subject-1',
+      },
+      readiness: {
+        canStart: true,
+        state: 'READY',
+        userMessage: 'Ton cours est prêt pour une révision approfondie.',
+        blockers: [],
+        readySourceCount: 1,
+        readyKnowledgeUnitCount: 1,
+      },
+      scopeOptions: [
+        {
+          kind: 'knowledge_unit',
+          id: 'ku-1',
+          documentId: 'document-1',
+          label: 'La souveraineté',
+          sourceLabel: 'CM.pdf',
+          canSelect: true,
+        },
+      ],
+      answerGuidelines: {
+        minLength: 12,
+        maxLength: 4000,
+        userMessage: 'Rédige une réponse structurée avec tes propres mots.',
+      },
+      defaultConfig: {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+      },
+      nextStep: {
+        kind: 'configuration_ready',
+        userMessage: 'Choisis une notion et démarre la question ouverte.',
+      },
+    });
+
+    await expect(
+      controller.getDeepRevisionOptions(currentStudent, ' course-1 '),
+    ).resolves.toMatchObject({
+      course: {
+        id: 'course-1',
+        title: 'Droit constitutionnel',
+      },
+      scopeOptions: [
+        {
+          kind: 'knowledge_unit',
+          id: 'ku-1',
+        },
+      ],
+      answerGuidelines: {
+        minLength: 12,
+        maxLength: 4000,
+      },
+    });
+
+    expect(getCourseDeepRevisionOptions.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+  });
+
+  it('starts a Révision approfondie session from a validated notion', async () => {
+    const { controller, startCourseDeepRevisionSession } = createController();
+    startCourseDeepRevisionSession.execute.mockResolvedValue(
+      deepRevisionSessionResponse(),
+    );
+
+    await expect(
+      controller.startDeepRevisionSession(currentStudent, ' course-1 ', {
+        scopeKind: 'knowledge_unit',
+        scopeId: ' ku-1 ',
+      }),
+    ).resolves.toMatchObject({
+      session: {
+        id: 'deep-session-1',
+        mode: 'DEEP',
+      },
+      question: {
+        prompt: 'Explique la souveraineté nationale.',
+      },
+    });
+
+    expect(startCourseDeepRevisionSession.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      scopeKind: 'knowledge_unit',
+      scopeId: 'ku-1',
+    });
+  });
+
+  it('rejects unsupported Révision approfondie start body fields', () => {
+    const { controller, startCourseDeepRevisionSession } = createController();
+
+    for (const body of [
+      {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+        documentId: 'document-1',
+      },
+      {
+        scopeKind: 'course',
+        scopeId: 'course-1',
+      },
+      {
+        scopeKind: 'knowledge_unit',
+        scopeId: '',
+      },
+    ]) {
+      expect(() =>
+        controller.startDeepRevisionSession(currentStudent, 'course-1', body),
+      ).toThrow(BadRequestException);
+    }
+
+    expect(startCourseDeepRevisionSession.execute).not.toHaveBeenCalled();
+  });
+
+  it('submits a Révision approfondie answer through the course endpoint', async () => {
+    const { controller, submitCourseDeepRevisionAnswer } = createController();
+    submitCourseDeepRevisionAnswer.execute.mockResolvedValue({
+      session: {
+        id: 'deep-session-1',
+        mode: 'DEEP',
+        status: 'SUBMITTED',
+        courseId: 'course-1',
+      },
+      evaluation: {
+        id: 'evaluation-1',
+        status: 'READY',
+        score: 0.75,
+        maxScore: 1,
+        feedback: 'Réponse structurée.',
+        presentPoints: [],
+        missingPoints: [],
+        errors: [],
+        modelAnswer: 'Réponse modèle.',
+        advice: 'Continue.',
+        sources: [],
+      },
+    });
+
+    await expect(
+      controller.submitDeepRevisionAnswer(
+        currentStudent,
+        ' course-1 ',
+        ' deep-session-1 ',
+        {
+          answer: ' Une réponse structurée sur la souveraineté. ',
+        },
+      ),
+    ).resolves.toMatchObject({
+      session: {
+        id: 'deep-session-1',
+        status: 'SUBMITTED',
+      },
+      evaluation: {
+        score: 0.75,
+      },
+    });
+
+    expect(submitCourseDeepRevisionAnswer.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+      sessionId: 'deep-session-1',
+      answer: 'Une réponse structurée sur la souveraineté.',
+    });
+  });
+
+  it('rejects unsupported Révision approfondie submit body fields', () => {
+    const { controller, submitCourseDeepRevisionAnswer } = createController();
+
+    for (const body of [
+      { answerText: 'Une réponse.' },
+      { answer: '' },
+      { answer: 'Une réponse.', sessionId: 'open-session-1' },
+    ]) {
+      expect(() =>
+        controller.submitDeepRevisionAnswer(
+          currentStudent,
+          'course-1',
+          'deep-session-1',
+          body,
+        ),
+      ).toThrow(BadRequestException);
+    }
+
+    expect(submitCourseDeepRevisionAnswer.execute).not.toHaveBeenCalled();
+  });
+
+  it('maps unavailable Révision approfondie scopes and sessions to 409', async () => {
+    const {
+      controller,
+      startCourseDeepRevisionSession,
+      submitCourseDeepRevisionAnswer,
+    } = createController();
+    startCourseDeepRevisionSession.execute.mockRejectedValueOnce(
+      new CourseDeepRevisionScopeNotReadyError(),
+    );
+    submitCourseDeepRevisionAnswer.execute.mockRejectedValueOnce(
+      new CourseDeepRevisionSessionNotReadyError(),
+    );
+
+    await expect(
+      controller.startDeepRevisionSession(currentStudent, 'course-1', {
+        scopeKind: 'knowledge_unit',
+        scopeId: 'ku-1',
+      }),
+    ).rejects.toThrow(ConflictException);
+
+    await expect(
+      controller.submitDeepRevisionAnswer(
+        currentStudent,
+        'course-1',
+        'deep-session-1',
+        {
+          answer: 'Une réponse suffisamment longue.',
+        },
+      ),
+    ).rejects.toThrow(ConflictException);
+  });
+
+  it('maps invalid Révision approfondie answers to 400', async () => {
+    const { controller, submitCourseDeepRevisionAnswer } = createController();
+    submitCourseDeepRevisionAnswer.execute.mockRejectedValueOnce(
+      new CourseDeepRevisionAnswerInvalidError(),
+    );
+
+    await expect(
+      controller.submitDeepRevisionAnswer(
+        currentStudent,
+        'course-1',
+        'deep-session-1',
+        {
+          answer: 'Une réponse suffisamment longue.',
+        },
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
+
   it('defaults course quick revision questionCount when omitted', async () => {
     const { controller, startCourseQuickRevisionSession } = createController();
     startCourseQuickRevisionSession.execute.mockResolvedValue(
@@ -1132,6 +1383,9 @@ function createController() {
   const startCourseExamPreparationSession = { execute: jest.fn() };
   const getCourseRichRevisionOptions = { execute: jest.fn() };
   const startCourseRichRevisionSession = { execute: jest.fn() };
+  const getCourseDeepRevisionOptions = { execute: jest.fn() };
+  const startCourseDeepRevisionSession = { execute: jest.fn() };
+  const submitCourseDeepRevisionAnswer = { execute: jest.fn() };
   const startCourseQuickRevisionSession = { execute: jest.fn() };
   const getResumableCourseRevisionSession = { execute: jest.fn() };
   const listCourseRevisionSessionHistory = { execute: jest.fn() };
@@ -1161,6 +1415,9 @@ function createController() {
       startCourseExamPreparationSession as unknown as StartCourseExamPreparationSessionUseCase,
       getCourseRichRevisionOptions as unknown as GetCourseRichRevisionOptionsUseCase,
       startCourseRichRevisionSession as unknown as StartCourseRichRevisionSessionUseCase,
+      getCourseDeepRevisionOptions as unknown as GetCourseDeepRevisionOptionsUseCase,
+      startCourseDeepRevisionSession as unknown as StartCourseDeepRevisionSessionUseCase,
+      submitCourseDeepRevisionAnswer as unknown as SubmitCourseDeepRevisionAnswerUseCase,
       startCourseQuickRevisionSession as unknown as StartCourseQuickRevisionSessionUseCase,
       getResumableCourseRevisionSession as unknown as GetResumableCourseRevisionSessionUseCase,
       listCourseRevisionSessionHistory as unknown as ListCourseRevisionSessionHistoryUseCase,
@@ -1188,6 +1445,9 @@ function createController() {
     startCourseExamPreparationSession,
     getCourseRichRevisionOptions,
     startCourseRichRevisionSession,
+    getCourseDeepRevisionOptions,
+    startCourseDeepRevisionSession,
+    submitCourseDeepRevisionAnswer,
     startCourseQuickRevisionSession,
     getResumableCourseRevisionSession,
     listCourseRevisionSessionHistory,
@@ -1537,6 +1797,40 @@ function examRevisionSessionResponse() {
       ...response.session,
       id: 'exam-session-1',
       mode: 'EXAM',
+    },
+  };
+}
+
+function deepRevisionSessionResponse() {
+  return {
+    session: {
+      id: 'deep-session-1',
+      mode: 'DEEP',
+      status: 'STARTED',
+      courseId: 'course-1',
+    },
+    question: {
+      id: 'open-question-1',
+      prompt: 'Explique la souveraineté nationale.',
+      instructions: 'Rédige une réponse structurée.',
+      maxAnswerLength: 4000,
+      sources: [
+        {
+          chunkId: 'chunk-1',
+          pageNumber: 4,
+          index: 0,
+        },
+      ],
+    },
+    scope: {
+      kind: 'knowledge_unit',
+      id: 'ku-1',
+      label: 'La souveraineté',
+      sourceLabel: 'CM.pdf',
+    },
+    answerGuidelines: {
+      minLength: 12,
+      maxLength: 4000,
     },
   };
 }

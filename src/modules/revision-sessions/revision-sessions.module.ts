@@ -62,6 +62,7 @@ import { RevisionSessionsController } from './interfaces/revision-sessions.contr
     GetResumableCourseRevisionSessionUseCase,
     ListCourseRevisionSessionHistoryUseCase,
     ListCourseExamPreparationSessionHistoryUseCase,
+    REVISION_SESSIONS_REPOSITORY,
   ],
 })
 export class RevisionSessionsModule {}
