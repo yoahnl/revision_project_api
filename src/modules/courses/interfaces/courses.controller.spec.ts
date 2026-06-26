@@ -25,6 +25,7 @@ import {
   GetCourseProgressUseCase,
   GetSubjectProgressUseCase,
 } from '../application/course-progress.use-case';
+import { GetCourseLearningPathUseCase } from '../application/get-course-learning-path.use-case';
 import {
   GetCourseQuestionBankReadinessUseCase,
   PrepareCourseQuestionBankUseCase,
@@ -219,6 +220,25 @@ describe('CoursesController', () => {
     });
   });
 
+  it('returns course learning path without exposing internal dates or source internals', async () => {
+    const { controller, getCourseLearningPath } = createController();
+    getCourseLearningPath.execute.mockResolvedValue(courseLearningPath());
+
+    await expect(
+      controller.getCourseLearningPath(currentStudent, ' course-1 '),
+    ).resolves.toEqual(publicCourseLearningPath());
+
+    expect(getCourseLearningPath.execute).toHaveBeenCalledWith({
+      studentId: 'student-1',
+      courseId: 'course-1',
+    });
+    expect(
+      JSON.stringify(
+        await controller.getCourseLearningPath(currentStudent, 'course-1'),
+      ),
+    ).not.toContain('storagePath');
+  });
+
   it('maps course and subject progress not found to 404', async () => {
     const { controller, getCourseProgress, getSubjectProgress } =
       createController();
@@ -234,6 +254,17 @@ describe('CoursesController', () => {
     ).rejects.toThrow(NotFoundException);
     await expect(
       controller.getSubjectProgress(currentStudent, 'missing-subject'),
+    ).rejects.toThrow(NotFoundException);
+  });
+
+  it('maps course learning path not found to 404', async () => {
+    const { controller, getCourseLearningPath } = createController();
+    getCourseLearningPath.execute.mockRejectedValue(
+      new Error('Course not found'),
+    );
+
+    await expect(
+      controller.getCourseLearningPath(currentStudent, 'missing-course'),
     ).rejects.toThrow(NotFoundException);
   });
 
@@ -1532,6 +1563,7 @@ function createController() {
   const listCourseRichClosedExerciseHistory = { execute: jest.fn() };
   const getCourseProgress = { execute: jest.fn() };
   const getSubjectProgress = { execute: jest.fn() };
+  const getCourseLearningPath = { execute: jest.fn() };
   const getCourseSourceLifecycle = { execute: jest.fn() };
   const archiveCourseSource = { execute: jest.fn() };
 
@@ -1566,6 +1598,7 @@ function createController() {
       listCourseRichClosedExerciseHistory as unknown as ListCourseRichClosedExerciseHistoryUseCase,
       getCourseProgress as unknown as GetCourseProgressUseCase,
       getSubjectProgress as unknown as GetSubjectProgressUseCase,
+      getCourseLearningPath as unknown as GetCourseLearningPathUseCase,
       getCourseSourceLifecycle as unknown as GetCourseSourceLifecycleUseCase,
       archiveCourseSource as unknown as ArchiveCourseSourceUseCase,
     ),
@@ -1598,6 +1631,7 @@ function createController() {
     listCourseRichClosedExerciseHistory,
     getCourseProgress,
     getSubjectProgress,
+    getCourseLearningPath,
     getCourseSourceLifecycle,
     archiveCourseSource,
   };
@@ -1714,6 +1748,128 @@ function publicCourseProgress(overrides: Record<string, unknown> = {}) {
     failedSourceCount: 0,
     lastPracticedAt: '2026-06-18T12:00:00.000Z',
     state: 'PRACTICED',
+    ...overrides,
+  };
+}
+
+function courseLearningPath(overrides: Record<string, unknown> = {}) {
+  return {
+    generatedAt: new Date('2026-06-26T12:00:00.000Z'),
+    course: {
+      id: 'course-1',
+      subjectId: 'subject-1',
+      subjectName: 'Droits',
+      title: 'Droit constitutionnel',
+    },
+    summary: {
+      knowledgeUnitCount: 1,
+      solidCount: 0,
+      inProgressCount: 0,
+      toStrengthenCount: 1,
+      undiscoveredCount: 0,
+      estimatedGlobalMastery: 0.24,
+      mastery: 0.24,
+      coverage: 1,
+      readySourceCount: 1,
+    },
+    activeNodeId: 'unit-1',
+    primaryAction: {
+      kind: 'REVIEW_ACTIVE_NODE',
+      label: 'Continuer',
+      description: 'Reprendre le parcours à la notion recommandée.',
+      estimatedMinutes: 20,
+      targetKnowledgeUnitId: 'unit-1',
+      targetNodeId: 'unit-1',
+      enabled: true,
+      unavailableReason: null,
+    },
+    nodes: [
+      {
+        id: 'unit-1',
+        knowledgeUnitId: 'unit-1',
+        courseId: 'course-1',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        title: 'Le contrôle de constitutionnalité',
+        order: 0,
+        state: 'TO_STRENGTHEN',
+        masteryScore: 0.24,
+        lastPracticedAt: new Date('2026-06-14T09:00:00.000Z'),
+        source: {
+          documentId: 'document-1',
+          fileName: 'Cours.pdf',
+        },
+        display: {
+          title: 'Le contrôle de constitutionnalité',
+          statusLabel: 'À renforcer',
+          metaLabel: 'Cours.pdf',
+          actionLabel: 'Renforcer',
+          unavailableReason: null,
+        },
+      },
+    ],
+    emptyState: null,
+    ...overrides,
+  };
+}
+
+function publicCourseLearningPath(overrides: Record<string, unknown> = {}) {
+  return {
+    generatedAt: '2026-06-26T12:00:00.000Z',
+    course: {
+      id: 'course-1',
+      subjectId: 'subject-1',
+      subjectName: 'Droits',
+      title: 'Droit constitutionnel',
+    },
+    summary: {
+      knowledgeUnitCount: 1,
+      solidCount: 0,
+      inProgressCount: 0,
+      toStrengthenCount: 1,
+      undiscoveredCount: 0,
+      estimatedGlobalMastery: 0.24,
+      mastery: 0.24,
+      coverage: 1,
+      readySourceCount: 1,
+    },
+    activeNodeId: 'unit-1',
+    primaryAction: {
+      kind: 'REVIEW_ACTIVE_NODE',
+      label: 'Continuer',
+      description: 'Reprendre le parcours à la notion recommandée.',
+      estimatedMinutes: 20,
+      targetKnowledgeUnitId: 'unit-1',
+      targetNodeId: 'unit-1',
+      enabled: true,
+      unavailableReason: null,
+    },
+    nodes: [
+      {
+        id: 'unit-1',
+        knowledgeUnitId: 'unit-1',
+        courseId: 'course-1',
+        subjectId: 'subject-1',
+        documentId: 'document-1',
+        title: 'Le contrôle de constitutionnalité',
+        order: 0,
+        state: 'TO_STRENGTHEN',
+        masteryScore: 0.24,
+        lastPracticedAt: '2026-06-14T09:00:00.000Z',
+        source: {
+          documentId: 'document-1',
+          fileName: 'Cours.pdf',
+        },
+        display: {
+          title: 'Le contrôle de constitutionnalité',
+          statusLabel: 'À renforcer',
+          metaLabel: 'Cours.pdf',
+          actionLabel: 'Renforcer',
+          unavailableReason: null,
+        },
+      },
+    ],
+    emptyState: null,
     ...overrides,
   };
 }

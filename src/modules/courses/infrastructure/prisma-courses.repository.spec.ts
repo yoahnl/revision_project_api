@@ -750,6 +750,154 @@ describe('PrismaCoursesRepository', () => {
     });
   });
 
+  it('loads learning path data from owned active course PDF sources only', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue({
+      ...courseRecord({ title: 'Droit constitutionnel', estimatedMinutes: 12 }),
+      subject: { id: 'subject-1', name: 'Droits' },
+    });
+    prisma.document.findMany.mockResolvedValue([
+      {
+        id: 'ready-doc',
+        courseId: 'course-1',
+        fileName: 'Cours.pdf',
+        kind: 'COURSE_PDF',
+        status: 'READY',
+        createdAt: new Date('2026-06-18T10:00:00.000Z'),
+      },
+      {
+        id: 'processing-doc',
+        courseId: 'course-1',
+        fileName: 'Annexe.pdf',
+        kind: 'COURSE_PDF',
+        status: 'PROCESSING',
+        createdAt: new Date('2026-06-19T10:00:00.000Z'),
+      },
+    ]);
+    prisma.knowledgeUnit.findMany.mockResolvedValue([
+      knowledgeUnitRecord({
+        id: 'unit-1',
+        documentId: 'ready-doc',
+        title: 'La Constitution',
+        displayOrder: 0,
+        mastery: [{ score: 0.8, lastPracticedAt: null }],
+      }),
+    ]);
+
+    await expect(
+      repository.findCourseLearningPathByIdForStudent({
+        studentId: 'student-1',
+        courseId: 'course-1',
+      }),
+    ).resolves.toMatchObject({
+      course: {
+        id: 'course-1',
+        subjectId: 'subject-1',
+        subjectName: 'Droits',
+        title: 'Droit constitutionnel',
+        estimatedMinutes: 12,
+      },
+      documents: [
+        {
+          id: 'ready-doc',
+          fileName: 'Cours.pdf',
+          status: 'READY',
+        },
+        {
+          id: 'processing-doc',
+          fileName: 'Annexe.pdf',
+          status: 'PROCESSING',
+        },
+      ],
+      knowledgeUnits: [
+        {
+          id: 'unit-1',
+          documentId: 'ready-doc',
+          title: 'La Constitution',
+          displayOrder: 0,
+          mastery: [{ score: 0.8, lastPracticedAt: null }],
+        },
+      ],
+    });
+
+    expect(prisma.course.findFirst).toHaveBeenCalledWith({
+      where: {
+        id: 'course-1',
+        studentId: 'student-1',
+        archivedAt: null,
+        subject: { archivedAt: null },
+      },
+      include: {
+        subject: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    });
+    expect(prisma.document.findMany).toHaveBeenCalledWith({
+      where: {
+        studentId: 'student-1',
+        courseId: 'course-1',
+        kind: 'COURSE_PDF',
+        archivedAt: null,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        courseId: true,
+        fileName: true,
+        kind: true,
+        status: true,
+        createdAt: true,
+      },
+    });
+    expect(prisma.knowledgeUnit.findMany).toHaveBeenCalledWith({
+      where: {
+        subjectId: 'subject-1',
+        documentId: { in: ['ready-doc'] },
+        subject: { studentId: 'student-1', archivedAt: null },
+        document: {
+          studentId: 'student-1',
+          subjectId: 'subject-1',
+          courseId: 'course-1',
+          kind: 'COURSE_PDF',
+          status: 'READY',
+          archivedAt: null,
+        },
+      },
+      select: {
+        id: true,
+        subjectId: true,
+        documentId: true,
+        title: true,
+        displayOrder: true,
+        createdAt: true,
+        mastery: {
+          where: { studentId: 'student-1' },
+          select: { score: true, lastPracticedAt: true },
+          take: 1,
+        },
+      },
+    });
+  });
+
+  it('returns null learning path data for cross-student or archived courses', async () => {
+    const { prisma, repository } = createRepository();
+    prisma.course.findFirst.mockResolvedValue(null);
+
+    await expect(
+      repository.findCourseLearningPathByIdForStudent({
+        studentId: 'student-2',
+        courseId: 'course-1',
+      }),
+    ).resolves.toBeNull();
+
+    expect(prisma.document.findMany).not.toHaveBeenCalled();
+    expect(prisma.knowledgeUnit.findMany).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       label: 'NO_SOURCE',

@@ -21,6 +21,7 @@ import {
   GetCourseProgressUseCase,
   GetSubjectProgressUseCase,
 } from './application/course-progress.use-case';
+import { GetCourseLearningPathUseCase } from './application/get-course-learning-path.use-case';
 import {
   ArchiveCourseSourceUseCase,
   GetCourseSourceLifecycleUseCase,
@@ -94,6 +95,7 @@ import { CoursesController } from './interfaces/courses.controller';
     ListCourseDeepRevisionHistoryUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,
+    GetCourseLearningPathUseCase,
     {
       provide: COURSES_REPOSITORY,
       useClass: PrismaCoursesRepository,
@@ -134,6 +136,7 @@ import { CoursesController } from './interfaces/courses.controller';
     ListCourseDeepRevisionHistoryUseCase,
     GetCourseProgressUseCase,
     GetSubjectProgressUseCase,
+    GetCourseLearningPathUseCase,
     COURSES_REPOSITORY,
   ],
 })

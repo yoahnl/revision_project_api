@@ -28,6 +28,7 @@ import {
   GetCourseProgressUseCase,
   GetSubjectProgressUseCase,
 } from '../application/course-progress.use-case';
+import { GetCourseLearningPathUseCase } from '../application/get-course-learning-path.use-case';
 import {
   GetCourseQuestionBankReadinessUseCase,
   PrepareCourseQuestionBankUseCase,
@@ -109,6 +110,7 @@ import {
   toCourseProgressResponse,
   toSubjectProgressResponse,
 } from './course-response.dto';
+import { toCourseLearningPathResponse } from './course-learning-path-response.dto';
 
 const MAX_COURSE_TITLE_LENGTH = 140;
 const MAX_COURSE_DESCRIPTION_LENGTH = 1000;
@@ -148,6 +150,7 @@ export class CoursesController {
     private readonly listCourseRichClosedExerciseHistoryUseCase: ListCourseRichClosedExerciseHistoryUseCase,
     private readonly getCourseProgressUseCase: GetCourseProgressUseCase,
     private readonly getSubjectProgressUseCase: GetSubjectProgressUseCase,
+    private readonly getCourseLearningPathUseCase: GetCourseLearningPathUseCase,
     private readonly getCourseSourceLifecycleUseCase: GetCourseSourceLifecycleUseCase,
     private readonly archiveCourseSourceUseCase: ArchiveCourseSourceUseCase,
   ) {}
@@ -270,6 +273,20 @@ export class CoursesController {
         courseId: trimRequiredString(courseId, 'Course id is required'),
       })
       .then(toCourseProgressResponse)
+      .catch(normalizeCourseError);
+  }
+
+  @Get('courses/:courseId/learning-path')
+  getCourseLearningPath(
+    @CurrentStudent() student: AuthenticatedStudent,
+    @Param('courseId') courseId: string,
+  ) {
+    return this.getCourseLearningPathUseCase
+      .execute({
+        studentId: student.id,
+        courseId: trimRequiredString(courseId, 'Course id is required'),
+      })
+      .then(toCourseLearningPathResponse)
       .catch(normalizeCourseError);
   }
 

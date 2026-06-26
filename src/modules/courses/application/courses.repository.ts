@@ -91,6 +91,117 @@ export interface SubjectProgressDto {
   courses: SubjectCourseProgressDto[];
 }
 
+export type CourseLearningPathNodeState =
+  | 'SOLID'
+  | 'IN_PROGRESS'
+  | 'TO_STRENGTHEN'
+  | 'UNDISCOVERED';
+
+export type CourseLearningPathPrimaryActionKind =
+  | 'ADD_SOURCE'
+  | 'WAIT_FOR_ANALYSIS'
+  | 'REVIEW_ACTIVE_NODE'
+  | 'CONTINUE_COURSE'
+  | 'PREPARE_QUESTIONS'
+  | 'UNAVAILABLE';
+
+export interface CourseLearningPathDocumentDto {
+  id: string;
+  courseId: string | null;
+  fileName: string;
+  kind: CourseDocumentKind;
+  status: CourseDocumentStatus;
+  createdAt: Date;
+}
+
+export interface CourseLearningPathKnowledgeUnitDto {
+  id: string;
+  subjectId: string;
+  documentId: string | null;
+  title: string;
+  displayOrder: number | null;
+  createdAt: Date;
+  mastery: Array<{
+    score: number;
+    lastPracticedAt: Date | null;
+  }>;
+}
+
+export interface CourseLearningPathDataDto {
+  course: {
+    id: string;
+    subjectId: string;
+    subjectName: string;
+    title: string;
+    estimatedMinutes: number | null;
+  };
+  documents: CourseLearningPathDocumentDto[];
+  knowledgeUnits: CourseLearningPathKnowledgeUnitDto[];
+}
+
+export interface CourseLearningPathNodeDto {
+  id: string;
+  knowledgeUnitId: string;
+  courseId: string;
+  subjectId: string;
+  documentId: string | null;
+  title: string;
+  order: number;
+  state: CourseLearningPathNodeState;
+  masteryScore: number | null;
+  lastPracticedAt: Date | null;
+  source: {
+    documentId: string;
+    fileName: string;
+  } | null;
+  display: {
+    title: string;
+    statusLabel: string;
+    metaLabel: string | null;
+    actionLabel: string;
+    unavailableReason: string | null;
+  };
+}
+
+export interface CourseLearningPathDto {
+  generatedAt: Date;
+  course: {
+    id: string;
+    subjectId: string;
+    subjectName: string;
+    title: string;
+  };
+  summary: {
+    knowledgeUnitCount: number;
+    solidCount: number;
+    inProgressCount: number;
+    toStrengthenCount: number;
+    undiscoveredCount: number;
+    estimatedGlobalMastery: number;
+    mastery: number | null;
+    coverage: number;
+    readySourceCount: number;
+  };
+  activeNodeId: string | null;
+  primaryAction: {
+    kind: CourseLearningPathPrimaryActionKind;
+    label: string;
+    description: string;
+    estimatedMinutes: number | null;
+    targetKnowledgeUnitId: string | null;
+    targetNodeId: string | null;
+    enabled: boolean;
+    unavailableReason: string | null;
+  };
+  nodes: CourseLearningPathNodeDto[];
+  emptyState: {
+    title: string;
+    message: string;
+    actionLabel: string;
+    actionKind: 'ADD_SOURCE' | 'WAIT_FOR_ANALYSIS' | 'RETRY_SOURCE' | 'NONE';
+  } | null;
+}
+
 export interface CreateCourseRepositoryInput {
   studentId: string;
   subjectId: string;
@@ -168,6 +279,11 @@ export interface CoursesRepository {
     studentId: string;
     subjectId: string;
   }): Promise<SubjectProgressDto | null>;
+
+  findCourseLearningPathByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseLearningPathDataDto | null>;
 
   getLifecycleDecisionForStudent(input: {
     studentId: string;

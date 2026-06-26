@@ -82,6 +82,11 @@ function createRepository(): jest.Mocked<CoursesRepository> {
     findDetailByIdForStudent: jest.fn(),
     findCourseProgressByIdForStudent: jest.fn(),
     findSubjectProgressForStudent: jest.fn(),
+    findCourseLearningPathByIdForStudent: jest.fn(),
+    getLifecycleDecisionForStudent: jest.fn(),
+    updateForStudent: jest.fn(),
+    archiveForStudent: jest.fn(),
+    findReadyQuickRevisionKnowledgeUnitsForCourse: jest.fn(),
   };
 }
 

@@ -6,6 +6,7 @@ import type {
   CourseDetailDto,
   CourseDocumentStatus,
   CourseDto,
+  CourseLearningPathDataDto,
   CourseProgressDto,
   CourseProgressState,
   CourseQuickRevisionKnowledgeUnitDto,
@@ -77,6 +78,35 @@ type ProgressDocumentRecord = {
 type ProgressKnowledgeUnitRecord = {
   id: string;
   documentId: string | null;
+  mastery: Array<{
+    score: number;
+    lastPracticedAt: Date | null;
+  }>;
+};
+
+type CourseLearningPathCourseRecord = CourseRecord & {
+  subject: {
+    id: string;
+    name: string;
+  };
+};
+
+type CourseLearningPathDocumentRecord = {
+  id: string;
+  courseId: string | null;
+  fileName: string;
+  kind: 'COURSE_PDF' | 'EXAM_PDF' | 'EXAM_IMAGE';
+  status: CourseDocumentStatus;
+  createdAt: Date;
+};
+
+type CourseLearningPathKnowledgeUnitRecord = {
+  id: string;
+  subjectId: string;
+  documentId: string | null;
+  title: string;
+  displayOrder: number | null;
+  createdAt: Date;
   mastery: Array<{
     score: number;
     lastPracticedAt: Date | null;
@@ -335,6 +365,97 @@ export class PrismaCoursesRepository implements CoursesRepository {
           })) as ProgressKnowledgeUnitRecord[]);
 
     return buildCourseProgressDto(course, documents, knowledgeUnits);
+  }
+
+  async findCourseLearningPathByIdForStudent(input: {
+    studentId: string;
+    courseId: string;
+  }): Promise<CourseLearningPathDataDto | null> {
+    const course = (await this.prisma.course.findFirst({
+      where: {
+        id: input.courseId,
+        studentId: input.studentId,
+        archivedAt: null,
+        subject: { archivedAt: null },
+      },
+      include: {
+        subject: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
+    })) as CourseLearningPathCourseRecord | null;
+
+    if (!course) {
+      return null;
+    }
+
+    const documents = (await this.prisma.document.findMany({
+      where: {
+        studentId: input.studentId,
+        courseId: input.courseId,
+        kind: DocumentKind.COURSE_PDF,
+        archivedAt: null,
+      },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      select: {
+        id: true,
+        courseId: true,
+        fileName: true,
+        kind: true,
+        status: true,
+        createdAt: true,
+      },
+    })) as CourseLearningPathDocumentRecord[];
+
+    const readyDocumentIds = documents
+      .filter((document) => document.status === 'READY')
+      .map((document) => document.id);
+    const knowledgeUnits =
+      readyDocumentIds.length === 0
+        ? []
+        : ((await this.prisma.knowledgeUnit.findMany({
+            where: {
+              subjectId: course.subjectId,
+              documentId: { in: readyDocumentIds },
+              subject: { studentId: input.studentId, archivedAt: null },
+              document: {
+                studentId: input.studentId,
+                subjectId: course.subjectId,
+                courseId: course.id,
+                kind: DocumentKind.COURSE_PDF,
+                status: 'READY',
+                archivedAt: null,
+              },
+            },
+            select: {
+              id: true,
+              subjectId: true,
+              documentId: true,
+              title: true,
+              displayOrder: true,
+              createdAt: true,
+              mastery: {
+                where: { studentId: input.studentId },
+                select: { score: true, lastPracticedAt: true },
+                take: 1,
+              },
+            },
+          })) as CourseLearningPathKnowledgeUnitRecord[]);
+
+    return {
+      course: {
+        id: course.id,
+        subjectId: course.subjectId,
+        subjectName: course.subject.name,
+        title: course.title,
+        estimatedMinutes: course.estimatedMinutes,
+      },
+      documents,
+      knowledgeUnits,
+    };
   }
 
   async findSubjectProgressForStudent(input: {
