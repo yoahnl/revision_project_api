@@ -13,10 +13,27 @@ import {
   REVISION_REPOSITORY,
   type RevisionRepository,
 } from './revision.repository';
+import {
+  buildTodayEmptyState,
+  buildTodayPlanItemDisplay,
+  buildTodayWeeklyObjective,
+  resolveTodayPlanContinuationItemIds,
+  resolveTodayPlanItemRole,
+  resolveTodayPlanPrimaryItemId,
+  resolveTodayPlanReason,
+  type TodayEmptyStateDto,
+  type TodayPlanItemDisplayDto,
+  type TodayPlanItemRole,
+  type TodayWeeklyObjectiveDto,
+} from './today-plan-display.presenter';
 
 export interface TodayPlanDto {
   generatedAt: Date;
   items: TodayPlanItemDto[];
+  primaryItemId: string | null;
+  continuationItemIds: string[];
+  weeklyObjective: TodayWeeklyObjectiveDto | null;
+  emptyState: TodayEmptyStateDto;
 }
 
 export interface TodayPlanItemDto {
@@ -33,6 +50,8 @@ export interface TodayPlanItemDto {
   reasonCode: TodayPlanReasonCode;
   reason: string;
   startPayload: RevisionPlanStartPayload;
+  role: TodayPlanItemRole;
+  display: TodayPlanItemDisplayDto;
 }
 
 @Injectable()
@@ -53,7 +72,14 @@ export class GetTodayPlanUseCase {
     const goal = await this.revisionRepository.getActiveGoal(input.studentId);
 
     if (!goal) {
-      return { generatedAt: now, items: [] };
+      return {
+        generatedAt: now,
+        items: [],
+        primaryItemId: null,
+        continuationItemIds: [],
+        weeklyObjective: null,
+        emptyState: buildTodayEmptyState(),
+      };
     }
 
     const [subjects, knowledgeUnits, masteryStates] = await Promise.all([
@@ -76,50 +102,52 @@ export class GetTodayPlanUseCase {
       masteryStates,
     });
 
-    return {
-      generatedAt: plan.generatedAt,
-      items: plan.items.map((item) => {
-        const subject = subjectById.get(item.subjectId);
-        const unit = unitById.get(item.knowledgeUnitId);
+    const items = plan.items.map((item, index) => {
+      const subject = subjectById.get(item.subjectId);
+      const unit = unitById.get(item.knowledgeUnitId);
 
-        if (!subject || !unit) {
-          throw new Error('Today plan references missing data');
-        }
+      if (!subject || !unit) {
+        throw new Error('Today plan references missing data');
+      }
 
-        return {
-          id: item.id,
+      const role = resolveTodayPlanItemRole(index);
+      const reason = resolveTodayPlanReason(item.reasonCode);
+
+      return {
+        id: item.id,
+        subjectId: item.subjectId,
+        subjectName: subject.name,
+        documentId: item.documentId,
+        knowledgeUnitId: item.knowledgeUnitId,
+        knowledgeUnitTitle: unit.title,
+        masteryScore: masteryByUnitId.get(item.knowledgeUnitId)?.score ?? null,
+        action: item.action,
+        estimatedMinutes: item.estimatedMinutes,
+        priority: item.priority,
+        reasonCode: item.reasonCode,
+        reason,
+        startPayload: item.startPayload,
+        role,
+        display: buildTodayPlanItemDisplay({
           subjectId: item.subjectId,
           subjectName: subject.name,
-          documentId: item.documentId,
-          knowledgeUnitId: item.knowledgeUnitId,
           knowledgeUnitTitle: unit.title,
-          masteryScore:
-            masteryByUnitId.get(item.knowledgeUnitId)?.score ?? null,
           action: item.action,
           estimatedMinutes: item.estimatedMinutes,
-          priority: item.priority,
           reasonCode: item.reasonCode,
-          reason: toReason(item.reasonCode),
           startPayload: item.startPayload,
-        };
-      }),
+          role,
+        }),
+      };
+    });
+
+    return {
+      generatedAt: plan.generatedAt,
+      items,
+      primaryItemId: resolveTodayPlanPrimaryItemId(items),
+      continuationItemIds: resolveTodayPlanContinuationItemIds(items),
+      weeklyObjective: buildTodayWeeklyObjective(goal.weeklyMinutes),
+      emptyState: buildTodayEmptyState(),
     };
   }
-}
-
-function toReason(reasonCode: TodayPlanReasonCode): string {
-  const reasons: Record<TodayPlanReasonCode, string> = {
-    LOW_MASTERY: 'À revoir en priorité : cette notion est encore fragile.',
-    STALE_PRACTICE:
-      'À entretenir : cette notion n’a pas été pratiquée récemment.',
-    HIGH_PRIORITY_SUBJECT: 'Matière prioritaire dans ton objectif de révision.',
-    MIX_ACTIVITY_TYPE: 'Change de format pour renforcer la mémorisation.',
-    RICH_CLOSED_PRACTICE:
-      'Questions riches recommandées pour consolider la notion.',
-    START_REVISION_SESSION:
-      'Lance une session guidée pour enchaîner plusieurs exercices.',
-    CONTINUE_PROGRESS: 'Continue ta progression sur cette notion.',
-  };
-
-  return reasons[reasonCode];
 }
